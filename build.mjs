@@ -4,7 +4,7 @@ const output = 'dist';
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 
-for (const file of ['index.html', 'styles.css', 'script.js', 'robots.txt', 'sitemap.xml']) {
+for (const file of ['index.html', 'styles.css', 'script.js', 'admin.html', 'admin.css', 'admin.js', 'robots.txt', 'sitemap.xml']) {
   if (existsSync(file)) cpSync(file, `${output}/${file}`);
 }
 
