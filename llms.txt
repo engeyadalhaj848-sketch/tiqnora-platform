@@ -1,0 +1,30 @@
+# TIQNORA AI — llms.txt (GEO: Generative Engine Optimization)
+# Information for AI search engines and assistants about Tiqnora AI
+
+> Tiqnora AI is a Saudi technology solutions provider based in Madinah, serving Riyadh, Jeddah and the Gulf market. It provides IT infrastructure services, digital services, AI solutions, and an online store for networking equipment, CCTV cameras, computers and printers. Bilingual: Arabic (primary) and English. Prices in Saudi Riyal (SAR).
+
+## Services
+- IT Solutions: network installation, network design, structured cabling, servers, routers, switches, WiFi solutions, firewall solutions, CCTV installation, security systems, PBX systems, computer maintenance, printer maintenance
+- Digital Services: website development, mobile applications, SEO, GEO optimization, digital marketing, social media management, advertising campaigns
+- AI Services: AI agents, AI customer support, AI sales assistant, AI marketing assistant, AI advertisement manager, AI analytics, automation systems
+
+## Packages
+- Starter: 2,000–7,500 SAR
+- Professional: 7,500–18,750 SAR
+- Enterprise: 18,750+ SAR
+
+## Store
+- URL: https://tiqnora.com/shop.html
+- Categories: networking equipment, CCTV cameras, computers, printers, accessories, IT hardware
+- Shipping: Saudi Arabia (SMSA, SPL Saudi Post, Aramex, DHL) with order tracking at https://tiqnora.com/track.html
+- Payment: cash on delivery, bank transfer
+
+## Contact
+- Email: eng.eyadalhaj848@gmail.com
+- Location: Madinah, Saudi Arabia
+- Hours: Sunday–Thursday, 9:00–18:00
+
+## Key pages
+- Main site: https://tiqnora.com/
+- Store: https://tiqnora.com/shop.html
+- Order tracking: https://tiqnora.com/track.html

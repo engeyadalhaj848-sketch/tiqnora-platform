@@ -1,0 +1,711 @@
+/* ============================================================
+   TIQNORA AI — Admin Dashboard App v3
+   Auth: Supabase Auth | Data: Supabase (RLS-protected)
+   ============================================================ */
+(() => {
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+const cfg = window.TIQNORA_CONFIG || {};
+const money = n => new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 2 }).format(Number(n) || 0) + ' ر.س';
+let db = null, me = null;
+
+const STATUS_AR = { pending: 'بانتظار', confirmed: 'مؤكد', processing: 'تجهيز', shipped: 'مشحون', delivered: 'مسلّم', cancelled: 'ملغي', refunded: 'مسترجع', unpaid: 'غير مدفوع', paid: 'مدفوع', failed: 'فاشل', draft: 'مسودة', published: 'منشور', archived: 'مؤرشف' };
+const pillCls = s => ['delivered', 'published', 'paid'].includes(s) ? 'ok' : ['pending', 'processing', 'draft', 'unpaid'].includes(s) ? 'warn' : ['cancelled', 'failed', 'refunded'].includes(s) ? 'danger' : 'muted';
+
+function toast(msg, ok = true) {
+  const t = $('#toast'); t.textContent = msg; t.style.borderColor = ok ? 'var(--ok)' : 'var(--danger)';
+  t.classList.add('show'); clearTimeout(t._to); t._to = setTimeout(() => t.classList.remove('show'), 3200);
+}
+async function log(action, entity, entity_id, details = {}) {
+  try { await db.from('activity_logs').insert({ user_id: me?.id, action, entity, entity_id: entity_id ? String(entity_id) : null, details }); } catch {}
+}
+const openModal = html => { $('#modal').innerHTML = html; $('#modal-back').classList.add('show'); };
+const closeModal = () => $('#modal-back').classList.remove('show');
+$('#modal-back')?.addEventListener('click', e => { if (e.target.id === 'modal-back') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* ============================================================
+   LOGIN / BOOT
+   ============================================================ */
+function renderLogin(msg = '') {
+  if (!window.TiqnoraDB?.isConfigured) {
+    $('#app-root').innerHTML = `<div class="login-wrap"><div class="login-card">
+      <img src="assets/tiqnora-logo.png" alt="Tiqnora"><h1>لوحة تحكم Tiqnora AI</h1>
+      <p style="color:var(--muted);font-size:.85rem;line-height:1.8">لوحة التحكم تحتاج ربط Supabase.<br>افتح ملف <bdi dir="ltr"><code>js/config.js</code></bdi> وأضف <bdi dir="ltr"><code>supabaseUrl</code></bdi> و<bdi dir="ltr"><code>supabaseAnonKey</code></bdi> من إعدادات مشروعك في Supabase، ثم نفّذ ملفي <bdi dir="ltr"><code>supabase/schema.sql</code></bdi> و<bdi dir="ltr"><code>supabase/seed.sql</code></bdi> من <bdi dir="ltr"><code>SQL Editor</code></bdi>.</p>
+      <a class="btn-primary" style="display:block;text-align:center;text-decoration:none;padding:10px" href="index.html">العودة للموقع</a></div></div>`;
+    return;
+  }
+  $('#app-root').innerHTML = `<div class="login-wrap"><div class="login-card">
+    <img src="assets/tiqnora-logo.png" alt="Tiqnora"><h1>دخول لوحة التحكم</h1>
+    <form id="login-form">
+      <label>البريد الإكتروني</label><input name="email" type="email" required dir="ltr" autocomplete="username" />
+      <div style="height:12px"></div>
+      <label>كلمة المرور</label><input name="password" type="password" required dir="ltr" autocomplete="current-password" />
+      <div class="form-err">${esc(msg)}</div>
+      <button class="btn-primary" style="width:100%" type="submit">دخول</button>
+      <div style="text-align:center;margin-top:12px">
+        <button type="button" class="btn-ghost btn-sm" id="signup-toggle" style="width:100%">إنشاء حساب مالك جديد (أول مرة فقط)</button>
+      </div>
+    </form>
+    <p class="hint">أول مرة؟ أنشئ حساب المالك بالبريد <bdi dir="ltr"><b>${esc(cfg.ownerEmails?.[0] || '')}</b></bdi> — سيحصل تلقائيًا على صلاحية المالك.</p>
+    <p class="hint" style="text-align:center;margin:10px 0 0"><a href="index.html">← العودة للموقع</a></p>
+  </div></div>`;
+  $('#signup-toggle').onclick = () => {
+    const btn = $('#login-form button[type=submit]');
+    const isSignup = btn.dataset.mode === 'signup';
+    btn.dataset.mode = isSignup ? 'login' : 'signup';
+    btn.textContent = isSignup ? 'دخول' : 'إنشاء الحساب';
+    $('#signup-toggle').textContent = isSignup ? 'إنشاء حساب مالك جديد (أول مرة فقط)' : 'الرجوع لتسجيل الدخول';
+    $('.form-err').textContent = '';
+  };
+  $('#login-form').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const email = f.get('email').trim(), password = f.get('password');
+    const btn = e.target.querySelector('button[type=submit]');
+    if (btn.dataset.mode === 'signup') {
+      if (password.length < 8) { $('.form-err').textContent = 'كلمة المرور يجب أن تكون 8 أحرف على الأقل'; return; }
+      const { error } = await db.auth.signUp({ email, password });
+      if (error) { renderLogin(error.message); return; }
+      const isOwner = (cfg.ownerEmails || []).map(x => x.toLowerCase()).includes(email.toLowerCase());
+      if (isOwner) { boot(); return; }
+      renderLogin('تم إنشاء الحساب — انتظر تفعيل المالك ثم سجّل الدخول');
+      return;
+    }
+    const { error } = await db.auth.signInWithPassword({ email, password });
+    if (error) { renderLogin(error.message === 'Invalid login credentials' ? 'بيانات الدخول غير صحيحة' : error.message); return; }
+    boot();
+  };
+}
+
+async function boot() {
+  const ready = await window.TiqnoraDB.ready();
+  db = window.TiqnoraDB.raw;
+  if (!db) { renderLogin(); return; }
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) { renderLogin(); return; }
+  const { data: { user } } = await db.auth.getUser();
+  let { data: profile } = await db.from('profiles').select('*').eq('id', user.id).single();
+  if (!profile) { await new Promise(r => setTimeout(r, 1200)); ({ data: profile } = await db.from('profiles').select('*').eq('id', user.id).single()); }
+  if (!profile) { renderLogin('تعذر إنشاء الملف الشخصي — تأكد من تنفيذ schema.sql'); return; }
+  if (profile.role === 'customer') {
+    $('#app-root').innerHTML = `<div class="login-wrap"><div class="login-card" style="text-align:center">
+      <h1>حسابك ليس أدمن</h1><p style="color:var(--muted)">هذا الحساب بصلاحية عميل. تواصل مع المالك لترقية صلاحيتك.</p>
+      <button class="btn-ghost" onclick="location.reload()">تحديث</button></div></div>`;
+    return;
+  }
+  me = profile;
+  renderShell();
+  route(location.hash || '#dashboard');
+}
+
+/* ============================================================
+   SHELL + ROUTING
+   ============================================================ */
+const NAV = [
+  { group: 'عام' },
+  { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
+  { id: 'orders', ic: '▤', label: 'الطلبات' },
+  { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
+  { id: 'customers', ic: '◉', label: 'العملاء' },
+  { group: 'الكتالوج' },
+  { id: 'services', ic: '✦', label: 'الخدمات' },
+  { id: 'categories', ic: '▤', label: 'الأقسام' },
+  { id: 'products', ic: '▣', label: 'المنتجات' },
+  { id: 'brands', ic: '⬢', label: 'الماركات' },
+  { id: 'packages', ic: '◈', label: 'الباقات والأسعار' },
+  { id: 'coupons', ic: '%', label: 'كوبونات الخصم' },
+  { group: 'الموقع' },
+  { id: 'cms', ic: '✎', label: 'المحتوى والإعدادات' },
+  { id: 'pages', ic: '☰', label: 'الصفحات' },
+  { id: 'media', ic: '▣', label: 'مكتبة الصور' },
+  { id: 'seo', ic: '⌕', label: 'SEO وGEO' },
+  { group: 'الأنظمة' },
+  { id: 'shipping', ic: '⇄', label: 'الشحن والتتبع' },
+  { id: 'ai', ic: '✺', label: 'وحدات الذكاء الاصطناعي' },
+  { id: 'users', ic: '◉', label: 'المستخدمون والصلاحيات' },
+  { id: 'logs', ic: '≡', label: 'سجل النشاط' },
+];
+
+function renderShell() {
+  $('#app-root').innerHTML = `
+  <div class="admin-layout">
+    <div class="side-backdrop" id="side-bd" style="display:none"></div>
+    <aside class="admin-side" id="admin-side">
+      <div class="side-brand"><img src="assets/tiqnora-logo.png" alt=""> <span>Tiqnora AI</span></div>
+      ${NAV.map(n => n.group ? `<div class="side-group">${n.group}</div>` :
+        `<a class="side-link" href="#${n.id}" data-nav="${n.id}"><span class="ic">${n.ic}</span>${n.label}</a>`).join('')}
+      <div style="margin-top:auto;padding:12px 8px">
+        <button class="btn-ghost btn-sm" id="logout" style="width:100%">تسجيل الخروج</button>
+      </div>
+    </aside>
+    <div class="admin-main">
+      <div class="admin-topbar">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="burger" id="burger">☰</button>
+          <h1 id="page-title">لوحة التحكم</h1>
+        </div>
+        <div class="topbar-user">
+          <span>${esc(me.full_name || me.email)}</span>
+          <span class="pill ${me.role === 'super_admin' ? 'ok' : ''}">${me.role === 'super_admin' ? 'مالك' : 'أدمن'}</span>
+        </div>
+      </div>
+      <div id="view"></div>
+    </div>
+  </div>`;
+  $('#logout').onclick = async () => { await db.auth.signOut(); location.reload(); };
+  $('#burger').onclick = () => { $('#admin-side').classList.toggle('open'); $('#side-bd').style.display = $('#admin-side').classList.contains('open') ? 'block' : 'none'; };
+  $('#side-bd').onclick = () => { $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none'; };
+  window.addEventListener('hashchange', () => route(location.hash));
+}
+function route(hash) {
+  const id = (hash || '#dashboard').slice(1);
+  const item = NAV.find(n => n.id === id) || NAV[1];
+  $$('.side-link').forEach(a => a.classList.toggle('active', a.dataset.nav === item.id));
+  $('#page-title').textContent = item.label;
+  $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none';
+  const fn = VIEWS[item.id] || VIEWS.dashboard;
+  fn($('#view'));
+  $('#view').scrollIntoView?.({ block: 'start' });
+}
+
+/* ============================================================
+   GENERIC CRUD HELPERS (field-def driven)
+   ============================================================ */
+function fieldInput(f, val) {
+  const v = val ?? f.default ?? '';
+  if (f.type === 'textarea') return `<textarea name="${f.k}" rows="3" ${f.req ? 'required' : ''}>${esc(v)}</textarea>`;
+  if (f.type === 'select') return `<select name="${f.k}" ${f.req ? 'required' : ''}>${(f.options || []).map(o => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.t)}</option>`).join('')}</select>`;
+  if (f.type === 'number') return `<input name="${f.k}" type="number" step="${f.step || 'any'}" value="${esc(v)}" ${f.req ? 'required' : ''}>`;
+  if (f.type === 'checkbox') return `<label class="check-row"><input type="checkbox" name="${f.k}" ${v ? 'checked' : ''}> ${f.t}</label>`;
+  if (f.type === 'list') return `<textarea name="${f.k}" rows="3" placeholder="عنصر في كل سطر">${esc(Array.isArray(v) ? v.join('\n') : v)}</textarea>`;
+  return `<input name="${f.k}" type="${f.type === 'email' ? 'email' : 'text'}" value="${esc(v)}" dir="${f.dir || 'auto'}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''}>`;
+}
+function readForm(form, fields) {
+  const out = {};
+  fields.forEach(f => {
+    const el = form.elements[f.k]; if (!el) return;
+    if (f.type === 'checkbox') out[f.k] = el.checked;
+    else if (f.type === 'number') out[f.k] = el.value === '' ? null : Number(el.value);
+    else if (f.type === 'list') out[f.k] = el.value.split('\n').map(x => x.trim()).filter(Boolean);
+    else out[f.k] = el.value.trim() || null;
+  });
+  return out;
+}
+function crudModal({ title, fields, row, onSave }) {
+  openModal(`<h3>${title}</h3><form id="crud-f"><div class="form-grid">
+    ${fields.map(f => `<div class="${f.full ? 'full' : ''}">${f.type === 'checkbox' ? '' : `<label>${f.t}${f.req ? ' *' : ''}</label>`}${fieldInput(f, row ? row[f.k] : undefined)}</div>`).join('')}
+  </div><div class="modal-foot"><button type="button" class="btn-ghost" id="m-cancel">إلغاء</button><button class="btn-primary" type="submit">حفظ</button></div></form>`);
+  $('#m-cancel').onclick = closeModal;
+  $('#crud-f').onsubmit = async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
+    try { await onSave(readForm(e.target, fields)); closeModal(); } catch (err) { toast('خطأ: ' + err.message, false); btn.disabled = false; }
+  };
+}
+function tbl(heads, rowsHtml) {
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rowsHtml || `<tr><td colspan="${heads.length}" class="empty">لا توجد بيانات بعد</td></tr>`}</tbody></table></div>`;
+}
+function dbBanner() {
+  return `<div class="db-banner ok">✓ متصل بقاعدة بيانات Supabase — كل التعديلات تظهر فورًا على الموقع.</div>`;
+}
+
+/* ============================================================
+   VIEWS
+   ============================================================ */
+const VIEWS = {};
+
+/* ---------- Dashboard ---------- */
+VIEWS.dashboard = async v => {
+  v.innerHTML = dbBanner() + '<div class="grid-stats" id="stats"></div><div class="card"><h2>أحدث الطلبات</h2><div id="recent-orders"></div></div><div class="card"><h2>أحدث الاستفسارات</h2><div id="recent-leads"></div></div>';
+  const [orders, leads, products, services, customers] = await Promise.all([
+    db.from('orders').select('*').order('created_at', { ascending: false }).limit(100),
+    db.from('leads').select('*').order('created_at', { ascending: false }).limit(50),
+    db.from('products').select('id, stock_quantity, track_stock, is_active'),
+    db.from('services').select('id, status'),
+    db.from('customers').select('id'),
+  ]);
+  const os = orders.data || [], ls = leads.data || [];
+  const revenue = os.filter(o => o.status !== 'cancelled').reduce((a, o) => a + Number(o.total || 0), 0);
+  const newLeads = ls.filter(l => l.status === 'new').length;
+  const lowStock = (products.data || []).filter(p => p.is_active && p.track_stock && p.stock_quantity <= 3).length;
+  $('#stats').innerHTML = [
+    ['إجمالي الطلبات', os.length, `${os.filter(o => o.status === 'pending').length} بانتظار التأكيد`],
+    ['إيرادات الطلبات', money(revenue), 'بدون الملغاة'],
+    ['استفسارات جديدة', newLeads, `من ${ls.length} إجمالًا`],
+    ['منتجات منشورة', (products.data || []).filter(p => p.is_active).length, `${lowStock} مخزون منخفض`],
+    ['خدمات', (services.data || []).filter(s => s.status === 'published').length, `من ${services.data.length} إجمالًا`],
+    ['عملاء', customers.data?.length || 0, ''],
+  ].map(([l, val, sub]) => `<div class="stat-card"><div class="lbl">${l}</div><div class="val">${val}</div><div class="sub">${sub}</div></div>`).join('');
+  $('#recent-orders').innerHTML = tbl(['رقم الطلب', 'العميل', 'الإجمالي', 'الحالة', 'التاريخ'], (os.slice(0, 8)).map(o =>
+    `<tr><td dir="ltr">${esc(o.order_number)}</td><td>${esc(o.customer_name)}</td><td>${money(o.total)}</td><td><span class="pill ${pillCls(o.status)}">${STATUS_AR[o.status] || o.status}</span></td><td style="color:var(--muted)">${new Date(o.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join(''));
+  $('#recent-leads').innerHTML = tbl(['الاسم', 'البريد', 'الرسالة', 'الحالة'], ls.slice(0, 6).map(l =>
+    `<tr><td>${esc(l.name)}</td><td dir="ltr">${esc(l.email || '—')}</td><td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.message || '')}</td><td><span class="pill ${l.status === 'new' ? 'warn' : 'ok'}">${l.status === 'new' ? 'جديد' : l.status}</span></td></tr>`).join(''));
+};
+
+/* ---------- Services ---------- */
+const SVC_FIELDS = (cats) => [
+  { k: 'slug', t: 'المعرّف (بالإنجليزية)', req: 1, dir: 'ltr', ph: 'network-installation' },
+  { k: 'category_id', t: 'القسم', type: 'select', options: [{ v: '', t: '— بدون قسم —' }, ...cats.map(c => ({ v: c.id, t: c.name_ar }))] },
+  { k: 'icon', t: 'الأيقونة (رمز)', default: '✦' },
+  { k: 'image_url', t: 'رابط صورة', dir: 'ltr' },
+  { k: 'title_ar', t: 'العنوان بالعربية', req: 1 },
+  { k: 'title_en', t: 'Title (English)', req: 1, dir: 'ltr' },
+  { k: 'description_ar', t: 'الوصف بالعربية', type: 'textarea', full: 1 },
+  { k: 'description_en', t: 'Description (English)', type: 'textarea', full: 1, dir: 'ltr' },
+  { k: 'details_ar', t: 'التفاصيل بالعربية', type: 'textarea' },
+  { k: 'details_en', t: 'Details (English)', type: 'textarea', dir: 'ltr' },
+  { k: 'price', t: 'السعر (ر.س)', type: 'number' },
+  { k: 'discount_percent', t: 'خصم %', type: 'number' },
+  { k: 'period', t: 'الفترة', type: 'select', options: [{ v: 'one_time', t: 'مرة واحدة' }, { v: 'monthly', t: 'شهري' }, { v: 'yearly', t: 'سنوي' }] },
+  { k: 'duration_hours', t: 'المدة (ساعات)', type: 'number' },
+  { k: 'status', t: 'الحالة', type: 'select', options: [{ v: 'published', t: 'منشور' }, { v: 'draft', t: 'مسودة' }, { v: 'archived', t: 'مؤرشف' }] },
+  { k: 'featured', t: 'خدمة مميزة', type: 'checkbox' },
+  { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
+  { k: 'seo_title_ar', t: 'SEO عنوان (عربي)' },
+  { k: 'seo_title_en', t: 'SEO Title (EN)', dir: 'ltr' },
+  { k: 'seo_description_ar', t: 'SEO وصف (عربي)', type: 'textarea' },
+  { k: 'seo_description_en', t: 'SEO Description (EN)', type: 'textarea', dir: 'ltr' },
+  { k: 'keywords_ar', t: 'كلمات مفتاحية (عربي)', ph: 'شبكات, تأسيس, الرياض' },
+  { k: 'keywords_en', t: 'Keywords (EN)', dir: 'ltr' },
+];
+VIEWS.services = async v => {
+  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>الخدمات</h2><p class="card-desc">الخدمات المعروضة في الموقع الرئيسي — محتوى ثنائي اللغة مع حقول SEO.</p></div><button class="btn-primary" id="add">+ خدمة جديدة</button></div><div id="tbl"></div></div>`;
+  const { data: cats } = await db.from('categories').select('*').eq('type', 'service').order('sort_order');
+  const { data: rows } = await db.from('services').select('*, categories(name_ar)').order('sort_order');
+  const F = SVC_FIELDS(cats || []);
+  $('#tbl').innerHTML = tbl(['الخدمة', 'القسم', 'السعر', 'الفترة', 'الحالة', 'إجراءات'], (rows || []).map(s =>
+    `<tr><td><b>${esc(s.title_ar)}</b><br><small style="color:var(--muted)" dir="ltr">${esc(s.title_en)}</small></td>
+     <td>${esc(s.categories?.name_ar || '—')}</td><td>${money(s.price)}</td>
+     <td><span class="pill muted">${s.period === 'monthly' ? 'شهري' : s.period === 'yearly' ? 'سنوي' : 'مرة'}</span></td>
+     <td><span class="pill ${pillCls(s.status)}">${STATUS_AR[s.status]}</span></td>
+     <td class="actions"><button class="btn-sm" data-edit="${s.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${s.id}">حذف</button></td></tr>`).join(''));
+  $('#add').onclick = () => crudModal({ title: 'خدمة جديدة', fields: F, row: null, onSave: async d => { await db.from('services').insert(d); log('service.create', 'services', null, { title: d.title_ar }); toast('تمت إضافة الخدمة'); VIEWS.services(v); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل خدمة', fields: F, row, onSave: async d => { await db.from('services').update(d).eq('id', row.id); log('service.update', 'services', row.id); toast('تم التحديث'); VIEWS.services(v); } }); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (!confirm('حذف هذه الخدمة نهائيًا؟')) return; const row = rows.find(r => r.id === b.dataset.del); await db.from('services').delete().eq('id', row.id); log('service.delete', 'services', row.id, { title: row.title_ar }); toast('تم الحذف'); VIEWS.services(v); });
+};
+
+/* ---------- Categories ---------- */
+VIEWS.categories = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><div><h2>الأقسام</h2><p class="card-desc">أقسام الخدمات وأقسام منتجات المتجر.</p></div><button class="btn-primary" id="add">+ قسم جديد</button></div><div id="tbl"></div></div>`;
+  const F = [
+    { k: 'slug', t: 'المعرّف', req: 1, dir: 'ltr' },
+    { k: 'type', t: 'النوع', type: 'select', options: [{ v: 'service', t: 'قسم خدمات' }, { v: 'product', t: 'قسم منتجات' }] },
+    { k: 'name_ar', t: 'الاسم بالعربية', req: 1 }, { k: 'name_en', t: 'Name (EN)', req: 1, dir: 'ltr' },
+    { k: 'icon', t: 'الأيقونة' }, { k: 'image_url', t: 'رابط صورة', dir: 'ltr' },
+    { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
+    { k: 'status', t: 'الحالة', type: 'select', options: [{ v: 'published', t: 'منشور' }, { v: 'draft', t: 'مسودة' }] },
+    { k: 'description_ar', t: 'وصف (عربي)', type: 'textarea', full: 1 }, { k: 'description_en', t: 'Description (EN)', type: 'textarea', full: 1 },
+  ];
+  const { data: rows } = await db.from('categories').select('*').order('type').order('sort_order');
+  const draw = () => $('#tbl').innerHTML = tbl(['القسم', 'النوع', 'الترتيب', 'الحالة', 'إجراءات'], (rows || []).map(c =>
+    `<tr><td>${esc(c.icon || '')} <b>${esc(c.name_ar)}</b></td><td>${c.type === 'service' ? 'خدمات' : 'منتجات'}</td><td>${c.sort_order}</td><td><span class="pill ${pillCls(c.status)}">${STATUS_AR[c.status]}</span></td><td class="actions"><button class="btn-sm" data-edit="${c.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${c.id}">حذف</button></td></tr>`).join(''));
+  draw();
+  const bind = () => {
+    $('#add').onclick = () => crudModal({ title: 'قسم جديد', fields: F, onSave: async d => { await db.from('categories').insert(d); log('category.create', 'categories'); toast('تم الإضافة'); VIEWS.categories(v); } });
+    $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل قسم', fields: F, row, onSave: async d => { await db.from('categories').update(d).eq('id', row.id); toast('تم التحديث'); VIEWS.categories(v); } }); });
+    $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف القسم؟')) { await db.from('categories').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.categories(v); } });
+  }; bind();
+};
+
+/* ---------- Products ---------- */
+VIEWS.products = async v => {
+  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>منتجات المتجر</h2><p class="card-desc">إدارة المخزون والأسعار والمواصفات وصور المنتجات.</p></div><button class="btn-primary" id="add">+ منتج جديد</button></div><div id="tbl"></div></div>`;
+  const [{ data: cats }, { data: brands }] = await Promise.all([
+    db.from('categories').select('*').eq('type', 'product').order('sort_order'),
+    db.from('brands').select('*').order('name')]);
+  const F = [
+    { k: 'name_ar', t: 'اسم المنتج (عربي)', req: 1 }, { k: 'name_en', t: 'Name (EN)', req: 1, dir: 'ltr' },
+    { k: 'slug', t: 'المعرّف', req: 1, dir: 'ltr', ph: 'cisco-switch-24port' },
+    { k: 'sku', t: 'SKU', dir: 'ltr' },
+    { k: 'category_id', t: 'القسم', type: 'select', options: [{ v: '', t: '—' }, ...(cats || []).map(c => ({ v: c.id, t: c.name_ar }))] },
+    { k: 'brand_id', t: 'الماركة', type: 'select', options: [{ v: '', t: '—' }, ...(brands || []).map(b => ({ v: b.id, t: b.name }))] },
+    { k: 'price', t: 'السعر (ر.س)', type: 'number', req: 1 },
+    { k: 'discount_percent', t: 'خصم %', type: 'number' },
+    { k: 'cost_price', t: 'سعر التكلفة (للاستخدام الداخلي)', type: 'number' },
+    { k: 'stock_quantity', t: 'الكمية بالمخزون', type: 'number', default: 0 },
+    { k: 'track_stock', t: 'تتبع المخزون', type: 'checkbox', default: true },
+    { k: 'is_active', t: 'ظاهر في المتجر', type: 'checkbox', default: true },
+    { k: 'featured', t: 'منتج مميز', type: 'checkbox' },
+    { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
+    { k: 'images', t: 'روابط الصور (رابط في كل سطر)', type: 'list', full: 1, dir: 'ltr' },
+    { k: 'description_ar', t: 'الوصف (عربي)', type: 'textarea', full: 1 },
+    { k: 'description_en', t: 'Description (EN)', type: 'textarea', full: 1, dir: 'ltr' },
+    { k: 'seo_title_ar', t: 'SEO عنوان' }, { k: 'seo_description_ar', t: 'SEO وصف', type: 'textarea' },
+  ];
+  const { data: rows } = await db.from('products').select('*, categories(name_ar), brands(name)').order('sort_order');
+  $('#tbl').innerHTML = tbl(['المنتج', 'القسم', 'السعر', 'المخزون', 'الحالة', 'إجراءات'], (rows || []).map(p =>
+    `<tr><td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}</td>
+     <td>${esc(p.categories?.name_ar || '—')}</td><td>${money(p.price)}${p.discount_percent > 0 ? ` <span class="pill warn">-${p.discount_percent}%</span>` : ''}</td>
+     <td>${p.track_stock ? (p.stock_quantity > 3 ? `<span class="pill ok">${p.stock_quantity}</span>` : `<span class="pill danger">${p.stock_quantity}</span>`) : '—'}</td>
+     <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مخفي'}</span></td>
+     <td class="actions"><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
+  const fixImgs = d => { if (Array.isArray(d.images)) return d; return d; };
+  $('#add').onclick = () => crudModal({ title: 'منتج جديد', fields: F, onSave: async d => { await db.from('products').insert(fixImgs(d)); log('product.create', 'products'); toast('تمت إضافة المنتج'); VIEWS.products(v); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\n') }, onSave: async d => { await db.from('products').update(d).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
+};
+
+/* ---------- Brands ---------- */
+VIEWS.brands = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><div><h2>الماركات</h2></div><button class="btn-primary" id="add">+ ماركة</button></div><div id="tbl"></div></div>`;
+  const F = [{ k: 'name', t: 'اسم الماركة', req: 1 }, { k: 'slug', t: 'المعرّف', req: 1, dir: 'ltr' }, { k: 'logo_url', t: 'رابط الشعار', dir: 'ltr' }, { k: 'status', t: 'الحالة', type: 'select', options: [{ v: 'published', t: 'منشور' }, { v: 'draft', t: 'مسودة' }] }];
+  const { data: rows } = await db.from('brands').select('*').order('name');
+  $('#tbl').innerHTML = tbl(['الماركة', 'الحالة', 'إجراءات'], (rows || []).map(b => `<tr><td>${esc(b.name)}</td><td><span class="pill ${pillCls(b.status)}">${STATUS_AR[b.status]}</span></td><td class="actions"><button class="btn-sm" data-edit="${b.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${b.id}">حذف</button></td></tr>`).join(''));
+  $('#add').onclick = () => crudModal({ title: 'ماركة جديدة', fields: F, onSave: async d => { await db.from('brands').insert(d); toast('تمت الإضافة'); VIEWS.brands(v); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل ماركة', fields: F, row, onSave: async d => { await db.from('brands').update(d).eq('id', row.id); toast('تم التحديث'); VIEWS.brands(v); } }); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف الماركة؟')) { await db.from('brands').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.brands(v); } });
+};
+
+/* ---------- Packages ---------- */
+VIEWS.packages = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><div><h2>الباقات والأسعار</h2><p class="card-desc">الباقات المعروضة في قسم الأسعار بالموقع.</p></div><button class="btn-primary" id="add">+ باقة</button></div><div id="tbl"></div></div>`;
+  const F = [
+    { k: 'name_ar', t: 'الاسم (عربي)', req: 1 }, { k: 'name_en', t: 'Name (EN)', req: 1, dir: 'ltr' },
+    { k: 'slug', t: 'المعرّف', req: 1, dir: 'ltr' },
+    { k: 'billing_type', t: 'نوع الفوترة', type: 'select', options: [{ v: 'monthly', t: 'شهري' }, { v: 'yearly', t: 'سنوي' }, { v: 'one_time', t: 'مرة واحدة' }, { v: 'range', t: 'نطاق سعري' }] },
+    { k: 'price_monthly', t: 'السعر الشهري (ر.س)', type: 'number' },
+    { k: 'price_yearly', t: 'السعر السنوي (ر.س)', type: 'number' },
+    { k: 'price_range_min', t: 'أقل سعر بالنطاق', type: 'number' }, { k: 'price_range_max', t: 'أعلى سعر بالنطاق', type: 'number' },
+    { k: 'discount_percent', t: 'خصم %', type: 'number' },
+    { k: 'is_visible', t: 'ظاهرة بالموقع', type: 'checkbox', default: true },
+    { k: 'featured', t: 'الأكثر اختيارًا', type: 'checkbox' },
+    { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
+    { k: 'description_ar', t: 'الوصف (عربي)', type: 'textarea', full: 1 },
+    { k: 'description_en', t: 'Description (EN)', type: 'textarea', full: 1, dir: 'ltr' },
+    { k: 'features_ar', t: 'المزايا (عربي) — سطر لكل ميزة', type: 'list', full: 1 },
+    { k: 'features_en', t: 'Features (EN) — one per line', type: 'list', full: 1, dir: 'ltr' },
+  ];
+  const { data: rows } = await db.from('packages').select('*').order('sort_order');
+  $('#tbl').innerHTML = tbl(['الباقة', 'النوع', 'السعر', 'الظهور', 'إجراءات'], (rows || []).map(p =>
+    `<tr><td><b>${esc(p.name_ar)}</b>${p.featured ? ' <span class="pill ok">مميزة</span>' : ''}</td><td>${{ monthly: 'شهري', yearly: 'سنوي', one_time: 'مرة', range: 'نطاق' }[p.billing_type] || p.billing_type}</td>
+     <td>${p.billing_type === 'range' ? `${p.price_range_min || 0} - ${p.price_range_max || '+ قيمة'}` : money(p.price_monthly)}</td>
+     <td><span class="pill ${p.is_visible ? 'ok' : 'muted'}">${p.is_visible ? 'ظاهرة' : 'مخفية'}</span></td>
+     <td class="actions"><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
+  $('#add').onclick = () => crudModal({ title: 'باقة جديدة', fields: F, onSave: async d => { await db.from('packages').insert(d); toast('تمت الإضافة'); VIEWS.packages(v); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل باقة', fields: F, row: { ...row, features_ar: (row.features_ar || []).join('\n'), features_en: (row.features_en || []).join('\n') }, onSave: async d => { await db.from('packages').update(d).eq('id', row.id); toast('تم التحديث'); VIEWS.packages(v); } }); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف الباقة؟')) { await db.from('packages').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.packages(v); } });
+};
+
+/* ---------- Orders ---------- */
+VIEWS.orders = async v => {
+  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>الطلبات</h2><p class="card-desc">إدارة الطلبات وتحديث حالتها وإنشاء شحنات.</p></div></div><div id="tbl"></div></div>`;
+  const { data: rows } = await db.from('orders').select('*').order('created_at', { ascending: false }).limit(200);
+  $('#tbl').innerHTML = tbl(['رقم الطلب', 'العميل', 'الجوال', 'الإجمالي', 'الدفع', 'الحالة', 'التاريخ', 'إجراءات'], (rows || []).map(o =>
+    `<tr><td dir="ltr"><b>${esc(o.order_number)}</b></td><td>${esc(o.customer_name)}<br><small style="color:var(--muted)">${esc(o.shipping_city || '')}</small></td><td dir="ltr">${esc(o.customer_phone)}</td><td>${money(o.total)}</td>
+     <td><span class="pill ${pillCls(o.payment_status)}">${STATUS_AR[o.payment_status]}</span></td>
+     <td><span class="pill ${pillCls(o.status)}">${STATUS_AR[o.status]}</span></td>
+     <td style="color:var(--muted);white-space:nowrap">${new Date(o.created_at).toLocaleDateString('ar-SA')}</td>
+     <td class="actions"><button class="btn-sm btn-primary" data-view="${o.id}">تفاصيل</button></td></tr>`).join(''));
+  $$('[data-view]').forEach(b => b.onclick = async () => {
+    const o = rows.find(r => r.id === b.dataset.view);
+    const { data: items } = await db.from('order_items').select('*').eq('order_id', o.id);
+    const { data: ship } = await db.from('shipments').select('*').eq('order_id', o.id).maybeSingle();
+    openModal(`<h3>الطلب ${esc(o.order_number)}</h3>
+      <div class="kv" style="margin-bottom:16px">
+        <span class="k">العميل</span><span>${esc(o.customer_name)}</span>
+        <span class="k">الجوال</span><span dir="ltr">${esc(o.customer_phone)}</span>
+        <span class="k">البريد</span><span dir="ltr">${esc(o.customer_email || '—')}</span>
+        <span class="k">المدينة/العنوان</span><span>${esc(o.shipping_city || '')} — ${esc(o.shipping_address || '')}</span>
+        <span class="k">الإجمالي</span><span>${money(o.total)} (شحن ${money(o.shipping_cost)})</span>
+        <span class="k">طريقة الدفع</span><span>${{ cod: 'دفع عند الاستلام', bank_transfer: 'تحويل بنكي', mada: 'مدى', credit_card: 'بطاقة', apple_pay: 'Apple Pay' }[o.payment_method] || o.payment_method}</span>
+        ${o.notes ? `<span class="k">ملاحظات</span><span>${esc(o.notes)}</span>` : ''}
+      </div>
+      ${tbl(['العنصر', 'السعر', 'الكمية', 'المجموع'], (items || []).map(i => `<tr><td>${esc(i.title_ar)}</td><td>${money(i.unit_price)}</td><td>${i.quantity}</td><td>${money(i.line_total)}</td></tr>`).join(''))}
+      <div class="form-grid" style="margin-top:18px">
+        <div><label>حالة الطلب</label><select id="o-status">${['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'].map(s => `<option value="${s}" ${o.status === s ? 'selected' : ''}>${STATUS_AR[s]}</option>`).join('')}</select></div>
+        <div><label>حالة الدفع</label><select id="o-pay">${['unpaid', 'paid', 'failed', 'refunded'].map(s => `<option value="${s}" ${o.payment_status === s ? 'selected' : ''}>${STATUS_AR[s]}</option>`).join('')}</select></div>
+      </div>
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+        <strong>الشحنة</strong>
+        ${ship ? `<div class="kv" style="margin-top:8px"><span class="k">الناقل</span><span>${ship.provider.toUpperCase()}</span><span class="k">رقم البوليصة</span><span dir="ltr">${esc(ship.awb_number || '—')}</span><span class="k">الحالة</span><span>${STATUS_AR[ship.status] || ship.status}</span></div>` : `<div class="form-grid" style="margin-top:10px">
+          <div><label>الناقل</label><select id="sh-provider">${['smsa', 'spl', 'aramex', 'dhl', 'custom'].map(p => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}</select></div>
+          <div><label>رقم البوليصة (AWB)</label><input id="sh-awb" dir="ltr" placeholder="اختياري — بعد إنشاء الشحنة"></div>
+          <div><label>رابط التتبع</label><input id="sh-url" dir="ltr" placeholder="https://..."></div>
+        </div>`}
+      </div>
+      <div class="modal-foot"><button class="btn-ghost" id="m-cancel">إغلاق</button><button class="btn-primary" id="m-save">حفظ التحديثات</button></div>`);
+    $('#m-cancel').onclick = closeModal;
+    $('#m-save').onclick = async () => {
+      await db.from('orders').update({ status: $('#o-status').value, payment_status: $('#o-pay').value }).eq('id', o.id);
+      if (!ship) {
+        const awb = $('#sh-awb')?.value.trim(), url = $('#sh-url')?.value.trim(), prov = $('#sh-provider')?.value;
+        if (prov && (awb || url)) await db.from('shipments').insert({ order_id: o.id, provider: prov, awb_number: awb || null, tracking_url: url || null, status: awb ? 'created' : 'pending' });
+      }
+      log('order.update', 'orders', o.id, { status: $('#o-status').value });
+      toast('تم تحديث الطلب'); closeModal(); VIEWS.orders(v);
+    };
+  });
+};
+
+/* ---------- Leads ---------- */
+VIEWS.leads = async v => {
+  v.innerHTML = `<div class="card"><h2>استفسارات العملاء</h2><p class="card-desc">الرسائل الواردة من نموذج التواصل.</p><div id="tbl"></div></div>`;
+  const { data: rows } = await db.from('leads').select('*').order('created_at', { ascending: false }).limit(300);
+  const LBL = { new: 'جديد', contacted: 'تم التواصل', qualified: 'مؤهل', converted: 'تحوّل لعميل', closed: 'مغلق' };
+  $('#tbl').innerHTML = tbl(['الاسم', 'البريد', 'الرسالة', 'الحالة', 'التاريخ', 'إجراء'], (rows || []).map(l =>
+    `<tr><td>${esc(l.name)}</td><td dir="ltr">${esc(l.email || '—')}</td><td style="max-width:320px">${esc(l.message || '')}</td>
+     <td><span class="pill ${l.status === 'new' ? 'warn' : 'ok'}">${LBL[l.status] || l.status}</span></td>
+     <td style="color:var(--muted);white-space:nowrap">${new Date(l.created_at).toLocaleDateString('ar-SA')}</td>
+     <td><select data-st="${l.id}">${Object.entries(LBL).map(([k, t]) => `<option value="${k}" ${l.status === k ? 'selected' : ''}>${t}</option>`).join('')}</select></td></tr>`).join(''));
+  $$('[data-st]').forEach(s => s.onchange = async () => { await db.from('leads').update({ status: s.value }).eq('id', s.dataset.st); toast('تم التحديث'); });
+};
+
+/* ---------- Customers ---------- */
+VIEWS.customers = async v => {
+  v.innerHTML = `<div class="card"><h2>العملاء</h2><div id="tbl"></div></div>`;
+  const { data: rows } = await db.from('customers').select('*').order('created_at', { ascending: false }).limit(300);
+  $('#tbl').innerHTML = tbl(['الاسم', 'الجوال', 'البريد', 'المدينة', 'الطلبات', 'إجمالي الشراء'], (rows || []).map(c =>
+    `<tr><td>${esc(c.full_name)}</td><td dir="ltr">${esc(c.phone || '—')}</td><td dir="ltr">${esc(c.email || '—')}</td><td>${esc(c.city || '—')}</td><td>${c.total_orders}</td><td>${money(c.total_spent)}</td></tr>`).join(''));
+};
+
+/* ---------- Coupons ---------- */
+VIEWS.coupons = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><div><h2>كوبونات الخصم</h2></div><button class="btn-primary" id="add">+ كوبون</button></div><div id="tbl"></div></div>`;
+  const F = [
+    { k: 'code', t: 'الكود', req: 1, dir: 'ltr', ph: 'TQ10' },
+    { k: 'type', t: 'النوع', type: 'select', options: [{ v: 'percent', t: 'نسبة %' }, { v: 'fixed', t: 'مبلغ ثابت' }, { v: 'free_shipping', t: 'شحن مجاني' }] },
+    { k: 'value', t: 'القيمة', type: 'number' },
+    { k: 'min_order_amount', t: 'أقل مبلغ للطلب', type: 'number' },
+    { k: 'max_uses', t: 'أقصى عدد استخدامات (فارغ = بلا حد)', type: 'number' },
+    { k: 'is_active', t: 'مفعّل', type: 'checkbox', default: true },
+  ];
+  const { data: rows } = await db.from('coupons').select('*').order('created_at', { ascending: false });
+  $('#tbl').innerHTML = tbl(['الكود', 'النوع', 'القيمة', 'استُخدم', 'الحالة', 'إجراءات'], (rows || []).map(c =>
+    `<tr><td dir="ltr"><b>${esc(c.code)}</b></td><td>${{ percent: '%', fixed: 'ر.س', free_shipping: 'شحن مجاني' }[c.type]}</td><td>${c.type === 'free_shipping' ? '—' : c.value}</td><td>${c.used_count}${c.max_uses ? '/' + c.max_uses : ''}</td><td><span class="pill ${c.is_active ? 'ok' : 'muted'}">${c.is_active ? 'مفعّل' : 'موقوف'}</span></td><td class="actions"><button class="btn-sm" data-edit="${c.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${c.id}">حذف</button></td></tr>`).join(''));
+  $('#add').onclick = () => crudModal({ title: 'كوبون جديد', fields: F, onSave: async d => { await db.from('coupons').insert(d); toast('تمت الإضافة'); VIEWS.coupons(v); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل كوبون', fields: F, row, onSave: async d => { await db.from('coupons').update(d).eq('id', row.id); toast('تم التحديث'); VIEWS.coupons(v); } }); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف الكوبون؟')) { await db.from('coupons').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.coupons(v); } });
+};
+
+/* ---------- Shipping ---------- */
+VIEWS.shipping = async v => {
+  v.innerHTML = `<div class="card"><h2>الشحن والتتبع</h2><p class="card-desc">إعدادات شركات الشحن — أضف مفاتيح API لكل ناقل لتفعيل الإنشاء التلقائي للشحنات (البنية جاهزة للربط).</p><div id="rows"></div></div>
+  <div class="card"><h2>إعدادات الشحن العامة</h2><p class="card-desc">تُطبق على صفحة إتمام الطلب.</p><div class="form-grid">
+    <div><label>سعر الشحن الثابت (ر.س)</label><input id="flat" type="number"></div>
+    <div><label>شحن مجاني عند (ر.س)</label><input id="free" type="number"></div>
+    <div><label>الناقل الافتراضي</label><select id="def"><option value="smsa">SMSA</option><option value="spl">SPL</option><option value="aramex">Aramex</option><option value="dhl">DHL</option><option value="custom">مخصص</option></select></div>
+  </div><button class="btn-primary" id="save-gen" style="margin-top:14px">حفظ</button></div>`;
+  const { data: rows } = await db.from('shipping_settings').select('*').order('provider');
+  $('#rows').innerHTML = (rows || []).map(r => `<div class="card" style="background:var(--bg2)">
+    <div class="card-head"><h2 style="margin:0">${esc(r.display_name)} <small style="color:var(--muted)" dir="ltr">(${r.provider})</small></h2>
+    <label class="check-row" style="margin:0"><input type="checkbox" data-en="${r.id}" ${r.is_enabled ? 'checked' : ''}> مفعّل</label></div>
+    <div class="form-grid">
+      <div><label>مفتاح API</label><input dir="ltr" type="password" data-key="${r.id}" value="${esc(r.api_key_encrypted || '')}" placeholder="يُضاف لاحقًا — البنية جاهزة"></div>
+      <div><label>رابط الـAPI</label><input dir="ltr" data-url="${r.id}" value="${esc(r.api_url || '')}"></div>
+      <div><label>تكلفة أساسية (ر.س)</label><input type="number" data-cost="${r.id}" value="${r.base_cost}"></div>
+    </div></div>`).join('') + (rows || []).map(r => `<button class="btn-sm btn-primary" style="margin:4px" data-save="${r.id}">حفظ ${esc(r.display_name)}</button>`).join('');
+  const { data: gen } = await db.from('site_settings').select('value').eq('key', 'shipping').single();
+  if (gen?.value) { $('#flat').value = gen.value.flat_rate ?? 25; $('#free').value = gen.value.free_threshold ?? 500; $('#def').value = gen.value.default_provider || 'smsa'; }
+  $$('[data-save]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.save, r = rows.find(x => x.id === id);
+    await db.from('shipping_settings').update({
+      is_enabled: $(`[data-en="${id}"]`).checked,
+      api_key_encrypted: $(`[data-key="${id}"]`).value || null,
+      api_url: $(`[data-url="${id}"]`).value || null,
+      base_cost: Number($(`[data-cost="${id}"]`).value) || 0,
+    }).eq('id', id);
+    log('shipping.update', 'shipping_settings', id, { provider: r.provider }); toast('تم الحفظ');
+  });
+  $('#save-gen').onclick = async () => {
+    const val = { ...(gen?.value || {}), flat_rate: Number($('#flat').value) || 25, free_threshold: Number($('#free').value) || 500, default_provider: $('#def').value };
+    await db.from('site_settings').upsert({ key: 'shipping', value: val });
+    toast('تم حفظ إعدادات الشحن');
+  };
+};
+
+/* ---------- CMS (site settings) ---------- */
+const SETTINGS_SCHEMAS = {
+  site: { title: 'هوية الموقع', fields: [
+    { k: 'name_ar', t: 'اسم الموقع (عربي)' }, { k: 'name_en', t: 'Name (EN)', dir: 'ltr' },
+    { k: 'logo_url', t: 'رابط الشعار', dir: 'ltr' },
+    { k: 'default_lang', t: 'اللغة الافتراضية', type: 'select', options: [{ v: 'ar', t: 'العربية' }, { v: 'en', t: 'English' }] },
+    { k: 'default_theme', t: 'الثيم الافتراضي', type: 'select', options: ['midnight', 'pearl', 'desert', 'ocean', 'forest', 'royal', 'aurora'].map(x => ({ v: x, t: x })) },
+    { k: 'contact_email', t: 'بريد التواصل', dir: 'ltr' }, { k: 'phone', t: 'الجوال', dir: 'ltr' }, { k: 'whatsapp', t: 'واتساب', dir: 'ltr' },
+    { k: 'city', t: 'المدينة', dir: 'ltr' }, { k: 'country', t: 'الدولة', dir: 'ltr' },
+  ]},
+  hero: { title: 'القسم الرئيسي (Hero)', fields: [
+    { k: 'eyebrow_ar', t: 'العنوان الصغير (عربي)' }, { k: 'eyebrow_en', t: 'Eyebrow (EN)', dir: 'ltr' },
+    { k: 'title_ar', t: 'العنوان الرئيسي (عربي)', full: 1 }, { k: 'title_en', t: 'Main title (EN)', full: 1, dir: 'ltr' },
+    { k: 'subtitle_ar', t: 'الوصف (عربي)', type: 'textarea', full: 1 }, { k: 'subtitle_en', t: 'Subtitle (EN)', type: 'textarea', full: 1, dir: 'ltr' },
+    { k: 'image_url', t: 'صورة Hero', dir: 'ltr' },
+    { k: 'cta_primary_ar', t: 'زر رئيسي — النص' }, { k: 'cta_primary_href', t: 'زر رئيسي — الرابط', dir: 'ltr' },
+    { k: 'cta_secondary_ar', t: 'زر ثانوي — النص' }, { k: 'cta_secondary_href', t: 'زر ثانوي — الرابط', dir: 'ltr' },
+  ]},
+  social: { title: 'حسابات التواصل', fields: [
+    { k: 'linkedin', t: 'LinkedIn', dir: 'ltr' }, { k: 'github', t: 'GitHub', dir: 'ltr' },
+    { k: 'twitter', t: 'X/Twitter', dir: 'ltr' }, { k: 'instagram', t: 'Instagram', dir: 'ltr' },
+  ]},
+  store: { title: 'إعدادات المتجر', fields: [
+    { k: 'enabled', t: 'المتجر مفعّل', type: 'checkbox' },
+    { k: 'allow_guest_checkout', t: 'السماح بالطلب بدون حساب', type: 'checkbox' },
+    { k: 'cod_enabled', t: 'الدفع عند الاستلام مفعّل', type: 'checkbox' },
+    { k: 'bank_transfer_enabled', t: 'التحويل البنكي مفعّل', type: 'checkbox' },
+    { k: 'bank_details_ar', t: 'تفاصيل الحساب البنكي (عربي)', type: 'textarea', full: 1 },
+    { k: 'low_stock_threshold', t: 'حد التنبيه للمخزون المنخفض', type: 'number' },
+  ]},
+  theme: { title: 'الثيمات', fields: [
+    { k: 'active', t: 'الثيم النشط للموقع', type: 'select', options: ['midnight', 'pearl', 'desert', 'ocean', 'forest', 'royal', 'aurora'].map(x => ({ v: x, t: x })) },
+    { k: 'allow_user_switch', t: 'السماح للزوار بتبديل الثيم', type: 'checkbox' },
+  ]},
+};
+VIEWS.cms = async v => {
+  v.innerHTML = dbBanner() + Object.entries(SETTINGS_SCHEMAS).map(([key, s]) => `
+    <div class="card"><div class="card-head"><div><h2>${s.title}</h2></div><button class="btn-primary btn-sm" data-edit-setting="${key}">تعديل</button></div><div id="prev-${key}"></div></div>`).join('');
+  const { data: all } = await db.from('site_settings').select('key, value');
+  const map = {}; (all || []).forEach(r => map[r.key] = r.value || {});
+  Object.entries(SETTINGS_SCHEMAS).forEach(([key, s]) => {
+    const val = map[key] || {};
+    $(`#prev-${key}`).innerHTML = `<div class="kv">${s.fields.filter(f => f.type !== 'checkbox').slice(0, 6).map(f => `<span class="k">${f.t}</span><span>${esc(val[f.k] ?? '—')}</span>`).join('')}</div>`;
+    $(`[data-edit-setting="${key}"]`).onclick = () => crudModal({
+      title: 'تعديل: ' + s.title, fields: s.fields, row: val,
+      onSave: async d => {
+        const next = { ...val, ...d };
+        await db.from('site_settings').upsert({ key, value: next, updated_by: me.id });
+        log('settings.update', 'site_settings', key); toast('تم الحفظ — يظهر على الموقع خلال دقائق'); VIEWS.cms(v);
+      }
+    });
+  });
+};
+
+/* ---------- Pages ---------- */
+VIEWS.pages = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><div><h2>صفحات الموقع</h2></div><button class="btn-primary" id="add">+ صفحة</button></div><div id="tbl"></div></div>`;
+  const F = [
+    { k: 'slug', t: 'المعرّف', req: 1, dir: 'ltr', ph: 'about' },
+    { k: 'title_ar', t: 'العنوان (عربي)', req: 1 }, { k: 'title_en', t: 'Title (EN)', req: 1, dir: 'ltr' },
+    { k: 'status', t: 'الحالة', type: 'select', options: [{ v: 'published', t: 'منشور' }, { v: 'draft', t: 'مسودة' }, { v: 'archived', t: 'مؤرشف' }] },
+    { k: 'is_in_nav', t: 'إظهار في القائمة', type: 'checkbox' },
+    { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
+    { k: 'content', t: 'المحتوى (JSON — أقسام)', type: 'textarea', full: 1, dir: 'ltr', ph: '{"sections":[]}' },
+  ];
+  const { data: rows } = await db.from('pages').select('*').order('sort_order');
+  $('#tbl').innerHTML = tbl(['الصفحة', 'المعرّف', 'في القائمة', 'الحالة', 'إجراءات'], (rows || []).map(p =>
+    `<tr><td>${esc(p.title_ar)}</td><td dir="ltr">${esc(p.slug)}</td><td>${p.is_in_nav ? '✓' : '—'}</td><td><span class="pill ${pillCls(p.status)}">${STATUS_AR[p.status]}</span></td><td class="actions"><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
+  $('#add').onclick = () => crudModal({ title: 'صفحة جديدة', fields: F, onSave: async d => { d.content = typeof d.content === 'string' ? JSON.parse(d.content || '{}') : d.content; await db.from('pages').insert(d); toast('تمت الإضافة'); VIEWS.pages(v); } });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل صفحة', fields: F, row: { ...row, content: JSON.stringify(row.content || {}, null, 2) }, onSave: async d => { d.content = typeof d.content === 'string' ? JSON.parse(d.content || '{}') : d.content; await db.from('pages').update(d).eq('id', row.id); toast('تم التحديث'); VIEWS.pages(v); } }); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف الصفحة؟')) { await db.from('pages').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.pages(v); } });
+};
+
+/* ---------- Media ---------- */
+VIEWS.media = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><div><h2>مكتبة الصور</h2><p class="card-desc">ارفع الصور واستخدم روابطها في الخدمات والمنتجات. (يُرفع إلى Supabase Storage)</p></div>
+  <div><input type="file" id="up" accept="image/*" multiple hidden><button class="btn-primary" id="up-btn">⬆ رفع صور</button></div></div>
+  <div class="media-grid" id="grid"></div></div>`;
+  const load = async () => {
+    const { data: rows } = await db.from('media').select('*').order('created_at', { ascending: false }).limit(60);
+    $('#grid').innerHTML = (rows || []).map(m => `<div class="media-item">
+      <img src="${esc(m.url)}" alt="${esc(m.alt_text || m.file_name)}" loading="lazy">
+      <div class="mi-bar"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.file_name)}</span>
+      <button class="btn-sm" data-copy="${esc(m.url)}" title="نسخ الرابط">⧉</button></div></div>`).join('') || '<p class="empty">لا توجد صور بعد.</p>';
+    $$('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy); toast('تم نسخ الرابط'); });
+  };
+  $('#up-btn').onclick = () => $('#up').click();
+  $('#up').onchange = async e => {
+    for (const file of e.target.files) {
+      const path = `media/${Date.now()}-${file.name.replace(/[^\w.\-]/g, '_')}`;
+      const { error } = await db.storage.from('media').upload(path, file, { upsert: true });
+      if (error) { toast('فشل رفع ' + file.name + ': ' + error.message, false); continue; }
+      const { data: { publicUrl } } = db.storage.from('media').getPublicUrl(path);
+      await db.from('media').insert({ storage_path: path, url: publicUrl, file_name: file.name, mime_type: file.type, size_bytes: file.size, uploaded_by: me.id });
+    }
+    toast('تم الرفع'); load();
+  };
+  load();
+};
+
+/* ---------- SEO ---------- */
+VIEWS.seo = async v => {
+  v.innerHTML = `<div class="card"><h2>SEO وGEO</h2><p class="card-desc">إعدادات محركات البحث ومحركات البحث الذكية (AI Search) — تستهدف السعودية والخليج.</p><div id="prev"></div><button class="btn-primary" id="edit" style="margin-top:14px">تعديل</button></div>
+  <div class="card"><h2>حالة التحسين التقني</h2><div class="kv">
+    <span class="k">Sitemap</span><span><a href="../sitemap.xml" target="_blank">sitemap.xml</a> — يشمل كل الصفحات</span>
+    <span class="k">Robots</span><span><a href="../robots.txt" target="_blank">robots.txt</a></span>
+    <span class="k">llms.txt</span><span>ملف GEO لمحركات الذكاء الاصطناعي <a href="../llms.txt" target="_blank">llms.txt</a></span>
+    <span class="k">Schema</span><span>Organization + LocalBusiness + Services + Products — تلقائي</span>
+    <span class="k">اللغات</span><span>عربي RTL + إنجليزي LTR مع hreflang</span>
+  </div></div>`;
+  const { data: s } = await db.from('site_settings').select('value').eq('key', 'seo').single();
+  const val = s?.value || {};
+  $('#prev').innerHTML = `<div class="kv">
+    <span class="k">العنوان الافتراضي (عربي)</span><span>${esc(val.default_title_ar || '—')}</span>
+    <span class="k">الوصف الافتراضي (عربي)</span><span>${esc(val.default_description_ar || '—')}</span>
+    <span class="k">صورة OG</span><span>${val.og_image_url ? '✓ مضبوطة' : '— غير مضبوطة'}</span>
+    <span class="k">المدن المستهدفة</span><span>${(val.geo_cities || []).join('، ') || '—'}</span>
+    <span class="k">Google Analytics</span><span>${val.ga_measurement_id ? '✓ ' + val.ga_measurement_id : '—'}</span></div>`;
+  const F = [
+    { k: 'default_title_ar', t: 'عنوان افتراضي (عربي)', full: 1 }, { k: 'default_title_en', t: 'Default title (EN)', full: 1, dir: 'ltr' },
+    { k: 'default_description_ar', t: 'وصف افتراضي (عربي)', type: 'textarea', full: 1 }, { k: 'default_description_en', t: 'Default description (EN)', type: 'textarea', full: 1, dir: 'ltr' },
+    { k: 'og_image_url', t: 'صورة Open Graph', dir: 'ltr' },
+    { k: 'twitter_handle', t: 'حساب X/Twitter', dir: 'ltr' },
+    { k: 'gsc_verification', t: 'كود تحقق Google Search Console', dir: 'ltr' },
+    { k: 'ga_measurement_id', t: 'Google Analytics ID', dir: 'ltr', ph: 'G-XXXXXXX' },
+    { k: 'geo_region', t: 'المنطقة الجغرافية', dir: 'ltr', default: 'SA' },
+  ];
+  $('#edit').onclick = () => crudModal({ title: 'إعدادات SEO وGEO', fields: F, row: val, onSave: async d => { await db.from('site_settings').upsert({ key: 'seo', value: { ...val, ...d }, updated_by: me.id }); toast('تم الحفظ'); VIEWS.seo(v); } });
+};
+
+/* ---------- AI Modules ---------- */
+VIEWS.ai = async v => {
+  v.innerHTML = `<div class="card"><h2>وحدات الذكاء الاصطناعي</h2><p class="card-desc">فعّل كل وحدة واضبط موجهاتها — جاهزة للربط بمفاتيح API (OpenAI / Anthropic / أي مزود متوافق).</p><div id="rows"></div></div>
+  <div class="card"><h2>مفاتيح المزود</h2><p class="card-desc">تُحفظ هنا وتُستخدم للربط لاحقًا — لا تظهر للزوار.</p>
+  <div class="form-grid"><div><label>المزود الافتراضي</label><select id="ai-prov"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="custom">مخصص</option></select></div>
+  <div><label>مفتاح API</label><input id="ai-key" dir="ltr" type="password" placeholder="sk-..."></div></div>
+  <button class="btn-primary" id="ai-save" style="margin-top:14px">حفظ المفاتيح</button></div>`;
+  const { data: rows } = await db.from('ai_agents').select('*').order('created_at');
+  $('#rows').innerHTML = (rows || []).map(a => `<div class="card" style="background:var(--bg2)">
+    <div class="card-head"><h2 style="margin:0">${esc(a.name_ar)} <small style="color:var(--muted)" dir="ltr">${esc(a.slug)}</small></h2>
+    <label class="check-row" style="margin:0"><input type="checkbox" data-en="${a.id}" ${a.is_enabled ? 'checked' : ''}> مفعّلة</label></div>
+    <div class="form-grid">
+      <div><label>المزود</label><select data-prov="${a.id}">${['openai', 'anthropic', 'custom'].map(p => `<option ${a.provider === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div><label>الموديل</label><input dir="ltr" data-model="${a.id}" value="${esc(a.model || '')}"></div>
+      <div><label>درجة الإبداع (0-1)</label><input type="number" step="0.1" min="0" max="1" data-temp="${a.id}" value="${a.temperature ?? 0.7}"></div>
+    </div>
+    <label style="margin-top:10px">الوصف</label><p style="color:var(--muted);font-size:.84rem;margin:4px 0 12px">${esc(a.description_ar || '')}</p>
+    <label>System Prompt</label><textarea rows="3" data-prompt="${a.id}" dir="ltr">${esc(a.system_prompt || '')}</textarea>
+    <button class="btn-sm btn-primary" style="margin-top:10px" data-save="${a.id}">حفظ الوحدة</button></div>`).join('');
+  $$('[data-save]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.save;
+    await db.from('ai_agents').update({
+      is_enabled: $(`[data-en="${id}"]`).checked,
+      provider: $(`[data-prov="${id}"]`).value,
+      model: $(`[data-model="${id}"]`).value || null,
+      temperature: Number($(`[data-temp="${id}"]`).value) || 0.7,
+      system_prompt: $(`[data-prompt="${id}"]`).value || null,
+    }).eq('id', id);
+    log('ai_agent.update', 'ai_agents', id); toast('تم حفظ الوحدة');
+  });
+  const { data: aiS } = await db.from('site_settings').select('value').eq('key', 'ai').single();
+  const aiVal = aiS?.value || {};
+  $('#ai-prov').value = aiVal.default_provider || 'openai';
+  $('#ai-save').onclick = async () => {
+    await db.from('site_settings').upsert({ key: 'ai', value: { ...aiVal, default_provider: $('#ai-prov').value, api_keys: { ...aiVal.api_keys, [$('#ai-prov').value]: $('#ai-key').value || undefined } } });
+    toast('تم حفظ المفاتيح (مشفّرة بقاعدة البيانات)');
+  };
+};
+
+/* ---------- Users ---------- */
+VIEWS.users = async v => {
+  v.innerHTML = `<div class="card"><h2>المستخدمون والصلاحيات</h2><p class="card-desc">إدارة أدوار المستخدمين — المالك يملك كل الصلاحيات.</p><div id="tbl"></div></div>`;
+  const { data: rows } = await db.from('profiles').select('*').order('created_at', { ascending: false });
+  $('#tbl').innerHTML = tbl(['المستخدم', 'البريد', 'الدور', 'الحالة', 'التسجيل'], (rows || []).map(u =>
+    `<tr><td>${esc(u.full_name || '—')}</td><td dir="ltr">${esc(u.email)}</td>
+     <td><select data-role="${u.id}" ${u.id === me.id ? 'disabled' : ''}>${[['customer', 'عميل'], ['admin', 'أدمن'], ['super_admin', 'مالك']].map(([k, t]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+     <td><span class="pill ${u.is_active ? 'ok' : 'danger'}">${u.is_active ? 'نشط' : 'موقوف'}</span></td>
+     <td style="color:var(--muted)">${new Date(u.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join(''));
+  $$('[data-role]').forEach(s => s.onchange = async () => { await db.from('profiles').update({ role: s.value }).eq('id', s.dataset.role); log('user.role_change', 'profiles', s.dataset.role, { role: s.value }); toast('تم تحديث الدور'); });
+};
+
+/* ---------- Logs ---------- */
+VIEWS.logs = async v => {
+  v.innerHTML = `<div class="card"><h2>سجل النشاط</h2><p class="card-desc">آخر 200 عملية على المنصة.</p><div id="tbl"></div></div>`;
+  const { data: rows } = await db.from('activity_logs').select('*, profiles(email, full_name)').order('created_at', { ascending: false }).limit(200);
+  $('#tbl').innerHTML = tbl(['العملية', 'المستخدم', 'الجدول', 'التاريخ'], (rows || []).map(l =>
+    `<tr><td dir="ltr">${esc(l.action)}</td><td>${esc(l.profiles?.email || 'نظام')}</td><td dir="ltr">${esc(l.entity || '—')}</td><td style="color:var(--muted);white-space:nowrap">${new Date(l.created_at).toLocaleString('ar-SA')}</td></tr>`).join(''));
+};
+
+/* ============================================================
+   START
+   ============================================================ */
+window.addEventListener('DOMContentLoaded', boot);
+})();

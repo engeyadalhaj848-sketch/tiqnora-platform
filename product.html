@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="midnight">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="تفاصيل المنتج — متجر Tiqnora AI للمعدات التقنية." />
+  <link rel="canonical" href="https://tiqnora.com/product.html" />
+  <title>المنتج | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="store-header">
+    <div class="container store-nav">
+      <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
+      <nav class="store-links" aria-label="المتجر">
+        <a href="index.html">الرئيسية</a>
+        <a href="index.html#services">الخدمات</a>
+        <a href="shop.html">المتجر</a>
+        <a href="track.html">تتبع الطلب</a>
+      </nav>
+      <a class="cart-link" href="checkout.html">🛒 السلة <b id="store-cart-count">0</b></a>
+    </div>
+  </header>
+  <main class="store-main"><div class="container" id="product-wrap"><p style="color:var(--muted)">جارٍ التحميل…</p></div></main>
+  <footer class="store-footer"><div class="container" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px"><span>© <span id="year"></span> Tiqnora AI</span><a href="admin.html" style="color:inherit">إدارة</a></div></footer>
+  <script src="js/config.js" defer></script>
+  <script src="js/db.js" defer></script>
+  <script src="script.js" defer></script>
+  <script defer>
+  window.addEventListener('DOMContentLoaded', () => {
+    const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
+    const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+    const slug = new URLSearchParams(location.search).get('slug');
+    const wrap = document.querySelector('#product-wrap');
+
+    function renderCount(){ const c=(window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
+
+    async function load(){
+      if (!slug) { wrap.innerHTML = '<p style="color:var(--muted)">لم يتم تحديد منتج. <a href="shop.html" style="color:var(--accent)">تصفح المتجر</a></p>'; return; }
+      const ok = await window.TiqnoraDB.ready();
+      if (!ok) { wrap.innerHTML = '<p style="color:var(--muted)">صفحة المنتج تحتاج ربط قاعدة البيانات. <a href="shop.html" style="color:var(--accent)">رجوع للمتجر</a></p>'; return; }
+      const prods = await window.TiqnoraDB.getProducts() || [];
+      const p = prods.find(x => x.slug === slug);
+      if (!p) { wrap.innerHTML = '<p style="color:var(--muted)">المنتج غير موجود. <a href="shop.html" style="color:var(--accent)">تصفح المتجر</a></p>'; return; }
+
+      document.title = `${p.name_ar} | Tiqnora AI`;
+      const meta = document.querySelector('meta[name="description"]'); if (meta) meta.content = (p.description_ar || p.name_ar).slice(0, 155);
+      const hasDisc = Number(p.discount_percent) > 0;
+      const final = hasDisc ? p.price * (1 - p.discount_percent/100) : p.price;
+      const out = p.track_stock && p.stock_quantity <= 0;
+      const specs = Array.isArray(p.specifications) ? p.specifications : [];
+
+      wrap.innerHTML = `
+      <nav style="margin-bottom:20px;font-size:.85rem"><a href="shop.html" style="color:var(--muted);text-decoration:none">المتجر</a> <span style="color:var(--muted)">←</span> <span>${esc(p.categories?.name_ar || '')}</span></nav>
+      <div class="product-detail">
+        <div class="p-gallery">${(p.images||[])[0] ? `<img src="${esc(p.images[0])}" alt="${esc(p.name_ar)}">` : '▣'}</div>
+        <div class="p-info">
+          <span class="p-cat" style="color:var(--muted)">${esc(p.categories?.name_ar || '')} ${p.brands ? '· ' + esc(p.brands.name) : ''} ${p.sku ? '· SKU: ' + esc(p.sku) : ''}</span>
+          <h1>${esc(p.name_ar)}</h1>
+          <p style="color:var(--muted)">${esc(p.description_ar || '')}</p>
+          <div class="p-price"><strong>${money(final)}</strong>${hasDisc ? `<s style="color:var(--muted);font-size:1rem;margin-inline-start:8px">${money(p.price)}</s>` : ''}</div>
+          ${out ? '<span class="status-pill" style="background:transparent;border-color:#888;color:#888">غير متوفر حاليًا</span>' : '<span class="status-pill">متوفر — جاهز للشحن</span>'}
+          <div class="qty-row">
+            <div class="qty"><button type="button" id="q-minus">−</button><span id="q-val">1</span><button type="button" id="q-plus">+</button></div>
+            <button class="button button-primary" id="add-btn" ${out ? 'disabled style="opacity:.5"' : ''}>أضف إلى السلة</button>
+          </div>
+          ${specs.length ? `<table class="spec-table">${specs.map(s => `<tr><td>${esc(s.key_ar || s.key_en || '')}</td><td>${esc(s.value_ar || s.value_en || '')}</td></tr>`).join('')}</table>` : ''}
+        </div>
+      </div>
+      <script type="application/ld+json">${JSON.stringify({"@context":"https://schema.org","@type":"Product","name":p.name_ar,"description":p.description_ar||"","sku":p.sku||"","brand":p.brands?.name||"Tiqnora","offers":{"@type":"Offer","price":final,"priceCurrency":"SAR","availability":out?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}})}<\/script>`;
+
+      let qty = 1;
+      const qv = () => document.querySelector('#q-val');
+      document.querySelector('#q-minus').onclick = () => { if (qty > 1) { qty--; qv().textContent = qty; } };
+      document.querySelector('#q-plus').onclick = () => { qty++; qv().textContent = qty; };
+      document.querySelector('#add-btn').onclick = () => {
+        window.TiqnoraStore.addProduct(p, qty);
+        renderCount();
+        const b = document.querySelector('#add-btn'); b.textContent = '✓ تمت الإضافة'; setTimeout(() => b.textContent = 'أضف إلى السلة', 1600);
+      };
+      renderCount();
+    }
+    load();
+  });
+  </script>
+</body>
+</html>

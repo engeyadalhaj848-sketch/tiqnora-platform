@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="midnight">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="إتمام الطلب — متجر Tiqnora AI. الدفع عند الاستلام أو تحويل بنكي، والشحن لكل مدن المملكة." />
+  <link rel="canonical" href="https://tiqnora.com/checkout.html" />
+  <title>إتمام الطلب | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="store-header">
+    <div class="container store-nav">
+      <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
+      <nav class="store-links" aria-label="المتجر">
+        <a href="shop.html">المتجر</a>
+        <a href="track.html">تتبع الطلب</a>
+      </nav>
+    </div>
+  </header>
+  <main class="store-main"><div class="container">
+    <h1 class="store-title">إتمام الطلب</h1>
+    <p class="store-sub">راجع طلبك واملأ بيانات التوصيل — سنؤكد الطلب برسالة.</p>
+    <div class="checkout-grid">
+      <form class="panel" id="checkout-form" novalidate>
+        <h2>بيانات التوصيل</h2>
+        <div class="field-group" style="margin-bottom:14px">
+          <label>الاسم الكامل <input name="name" required autocomplete="name" /></label>
+          <label>رقم الجوال <input name="phone" required dir="ltr" placeholder="05xxxxxxxx" pattern="[0-9+ ]{9,15}" /></label>
+        </div>
+        <div class="field-group" style="margin-bottom:14px">
+          <label>البريد الإلكتروني (اختياري) <input name="email" type="email" dir="ltr" /></label>
+          <label>المدينة <input name="city" required placeholder="المدينة المنورة" /></label>
+        </div>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:.85rem;color:var(--muted)">العنوان التفصيلي
+          <textarea name="address" rows="3" required placeholder="الحي، الشارع، رقم المبنى..."></textarea></label>
+        <h2 style="margin-top:22px">طريقة الدفع</h2>
+        <div id="pay-options">
+          <label class="pay-opt selected"><input type="radio" name="payment" value="cod" checked><span><strong>الدفع عند الاستلام</strong><br><small style="color:var(--muted)">تدفع نقدًا أو بالشبكة عند وصول الطلب</small></span></label>
+          <label class="pay-opt"><input type="radio" name="payment" value="bank_transfer"><span><strong>تحويل بنكي</strong><br><small style="color:var(--muted)">نرسل لك تفاصيل الحساب بعد الطلب</small></span></label>
+        </div>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:.85rem;color:var(--muted);margin-top:16px">ملاحظات (اختياري)<textarea name="notes" rows="2"></textarea></label>
+      </form>
+      <aside class="panel" id="summary">
+        <h2>ملخص الطلب</h2>
+        <div id="sum-items"></div>
+        <div class="checkout-total"><span>الشحن</span><span id="sum-shipping">—</span></div>
+        <div class="checkout-total" style="border-top:1px solid var(--line)"><span>الإجمالي</span><span id="sum-total">0 ر.س</span></div>
+        <button class="button button-primary" id="place-order" style="width:100%;margin-top:10px">تأكيد الطلب</button>
+        <p style="color:var(--muted);font-size:.8rem;margin-top:12px">بتأكيد الطلب أنت توافق على الشروط وأحكام المتجر.</p>
+      </aside>
+    </div>
+  </div></main>
+  <footer class="store-footer"><div class="container">© <span id="year"></span> Tiqnora AI</div></footer>
+  <script src="js/config.js" defer></script>
+  <script src="js/db.js" defer></script>
+  <script src="script.js" defer></script>
+  <script defer>
+  window.addEventListener('DOMContentLoaded', () => {
+    const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
+    const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+    let cart = window.TiqnoraStore?.getCart() || [];
+    let shippingCost = 25, freeThreshold = 500, flatRate = 25;
+
+    document.querySelectorAll('.pay-opt input').forEach(r => r.onchange = () => {
+      document.querySelectorAll('.pay-opt').forEach(x => x.classList.remove('selected'));
+      r.closest('.pay-opt').classList.add('selected');
+    });
+
+    function subtotal() { return cart.reduce((a, i) => a + i.price * i.qty, 0); }
+
+    function render() {
+      const box = document.querySelector('#sum-items');
+      if (!cart.length) { box.innerHTML = '<p style="color:var(--muted)">السلة فارغة. <a href="shop.html" style="color:var(--accent)">تصفح المتجر</a></p>'; document.querySelector('#place-order').disabled = true; return; }
+      box.innerHTML = cart.map(i => `<div class="checkout-item"><span>${esc(i.titleAr)} × ${i.qty}</span><span>${money(i.price * i.qty)}</span></div>`).join('');
+      const sub = subtotal();
+      shippingCost = sub >= freeThreshold ? 0 : flatRate;
+      document.querySelector('#sum-shipping').textContent = shippingCost === 0 ? 'مجاني' : money(shippingCost);
+      document.querySelector('#sum-total').textContent = money(sub + shippingCost);
+    }
+
+    function orderNumber() {
+      const d = new Date(); const pad = n => String(n).padStart(2, '0');
+      const rnd = Math.floor(Math.random() * 9000 + 1000);
+      return `TQ-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${rnd}`;
+    }
+
+    document.querySelector('#place-order').onclick = async () => {
+      const form = document.querySelector('#checkout-form');
+      if (!form.reportValidity()) { form.querySelector(':invalid')?.focus(); return; }
+      if (!cart.length) return;
+      const btn = document.querySelector('#place-order'); btn.disabled = true; btn.textContent = 'جارٍ الإرسال…';
+      const f = new FormData(form);
+      const sub = subtotal();
+      const order = {
+        order_number: orderNumber(),
+        customer_name: f.get('name').trim(),
+        customer_email: f.get('email')?.trim() || null,
+        customer_phone: f.get('phone').trim(),
+        shipping_city: f.get('city').trim(),
+        shipping_address: f.get('address').trim(),
+        items: cart.map(i => ({ kind: i.kind, refId: i.id, titleAr: i.titleAr, titleEn: i.titleEn, price: i.price, qty: i.qty })),
+        subtotal: sub, discount_amount: 0, shipping_cost: shippingCost, total: sub + shippingCost,
+        payment_method: f.get('payment'), notes: f.get('notes')?.trim() || null
+      };
+      const dbOk = await window.TiqnoraDB.ready();
+      if (dbOk) {
+        const res = await window.TiqnoraDB.placeOrder(order);
+        if (res.ok) {
+          window.TiqnoraStore.saveCart([]);
+          location.href = `track.html?order=${encodeURIComponent(res.order.order_number)}&new=1`;
+          return;
+        }
+        btn.disabled = false; btn.textContent = 'تأكيد الطلب';
+        alert('تعذر حفظ الطلب (' + (res.error || 'خطأ') + '). جرّب مرة أخرى أو تواصل معنا بالبريد.');
+      } else {
+        // fallback: send order by email
+        const lines = cart.map(i => `${i.titleAr} × ${i.qty} = ${money(i.price * i.qty)}`).join('%0D%0A');
+        window.TiqnoraStore.saveCart([]);
+        location.href = `mailto:eng.eyadalhaj848@gmail.com?subject=${encodeURIComponent('طلب جديد ' + order.order_number)}&body=${encodeURIComponent('الاسم: ' + order.customer_name + '\nالجوال: ' + order.customer_phone + '\nالمدينة: ' + order.shipping_city + '\nالعنوان: ' + order.shipping_address + '\n\nالمنتجات:\n' + cart.map(i => `- ${i.titleAr} × ${i.qty}`).join('\n') + '\n\nالإجمالي: ' + money(order.total))}`;
+      }
+    };
+
+    async function init() {
+      const ok = await window.TiqnoraDB.ready();
+      if (ok) {
+        const s = await window.TiqnoraDB.getSettings();
+        if (s?.shipping) { flatRate = Number(s.shipping.flat_rate) || 25; freeThreshold = Number(s.shipping.free_threshold) || 500; }
+      }
+      render();
+    }
+    init();
+  });
+  </script>
+</body>
+</html>

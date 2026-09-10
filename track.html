@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="midnight">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="تتبع طلبك من Tiqnora AI برقم الطلب أو رقم الشحنة." />
+  <link rel="canonical" href="https://tiqnora.com/track.html" />
+  <title>تتبع الطلب | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="store-header">
+    <div class="container store-nav">
+      <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
+      <nav class="store-links" aria-label="المتجر">
+        <a href="shop.html">المتجر</a>
+        <a href="track.html" class="active">تتبع الطلب</a>
+      </nav>
+    </div>
+  </header>
+  <main class="store-main"><div class="container">
+    <div class="track-box">
+      <h1 class="store-title">تتبع طلبك</h1>
+      <p class="store-sub">أدخل رقم الطلب (<bdi dir="ltr">TQ-20260910-1234</bdi> مثال) لمعرفة حالة الطلب والشحنة.</p>
+      <form class="track-input" id="track-form">
+        <input name="order" dir="ltr" placeholder="TQ-XXXXXXXX-XXXX" required />
+        <button class="button button-primary" type="submit">تتبع</button>
+      </form>
+      <div id="track-result"></div>
+    </div>
+  </div></main>
+  <footer class="store-footer"><div class="container">© <span id="year"></span> Tiqnora AI</div></footer>
+  <script src="js/config.js" defer></script>
+  <script src="js/db.js" defer></script>
+  <script src="script.js" defer></script>
+  <script defer>
+  window.addEventListener('DOMContentLoaded', () => {
+    const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
+    const STATUS_AR = {
+      pending: 'بانتظار التأكيد', confirmed: 'تم التأكيد', processing: 'قيد التجهيز', shipped: 'تم الشحن',
+      delivered: 'تم التسليم', cancelled: 'ملغي', refunded: 'مسترجع',
+      created: 'تم إنشاء بوليصة الشحن', in_transit: 'في الطريق', out_for_delivery: 'مع مندوب التوصيل', exception: 'استثناء — يرجى التواصل'
+    };
+    const FLOW = ['pending', 'confirmed', 'processing', 'shipped', 'delivered'];
+
+    async function track(num) {
+      const box = document.querySelector('#track-result');
+      box.innerHTML = '<p style="color:var(--muted)">جارٍ البحث…</p>';
+      const ok = await window.TiqnoraDB.ready();
+      if (!ok) { box.innerHTML = '<p style="color:var(--muted)">التتبع يحتاج ربط قاعدة البيانات — سيُفعّل قريبًا.</p>'; return; }
+      const r = await window.TiqnoraDB.trackOrder(num.trim());
+      if (!r) { box.innerHTML = '<p style="color:var(--muted)">لم نجد طلبًا بهذا الرقم. تأكد من الرقم أو تواصل معنا.</p>'; return; }
+      const idx = FLOW.indexOf(r.status);
+      const isNew = new URLSearchParams(location.search).get('new') === '1';
+      box.innerHTML = `
+        ${isNew ? `<div class="panel" style="border-color:var(--accent);margin-bottom:18px">✅ تم استلام طلبك بنجاح! احفظ رقم الطلب: <strong dir="ltr">${r.order_number}</strong> — سنتواصل معك للتأكيد.</div>` : ''}
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+            <strong dir="ltr">${r.order_number}</strong>
+            <span class="status-pill">${STATUS_AR[r.status] || r.status}</span>
+          </div>
+          <p style="color:var(--muted);margin:10px 0 0">الإجمالي: ${money(r.total)} · تاريخ الطلب: ${new Date(r.created_at).toLocaleDateString('ar-SA')}</p>
+          ${idx >= 0 ? `<ul class="timeline">${FLOW.map((s, i) => `<li class="${i <= idx ? 'done' : ''}"><strong>${STATUS_AR[s]}</strong>${i === idx ? `<small>الحالة الحالية</small>` : ''}</li>`).join('')}</ul>` : ''}
+          ${r.awb_number ? `
+            <div style="border-top:1px solid var(--line);padding-top:14px;margin-top:6px">
+              <strong>الشحنة</strong>
+              <p style="margin:8px 0">رقم البوليصة: <span dir="ltr">${r.awb_number}</span></p>
+              ${r.tracking_url ? `<a class="button button-ghost" href="${r.tracking_url}" target="_blank" rel="noreferrer">تتبع لدى الناقل ↗</a>` : ''}
+              ${(r.events || []).length ? `<ul class="timeline">${r.events.map(e => `<li class="done"><strong>${STATUS_AR[e.status] || e.status || 'تحديث'}</strong><small>${e.description || ''} ${e.timestamp ? '· ' + new Date(e.timestamp).toLocaleString('ar-SA') : ''}</small></li>`).join('')}</ul>` : ''}
+            </div>` : ''}
+        </div>`;
+    }
+
+    document.querySelector('#track-form').onsubmit = e => {
+      e.preventDefault();
+      const v = new FormData(e.target).get('order');
+      if (v) track(v);
+    };
+    const preset = new URLSearchParams(location.search).get('order');
+    if (preset) { document.querySelector('input[name="order"]').value = preset; track(preset); }
+  });
+  </script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="midnight">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07111f" />
+  <meta name="description" content="متجر Tiqnora AI — معدات شبكات، كاميرات مراقبة، أجهزة كمبيوتر وطابعات وملحقات تقنية بأسعار بالريال السعودي." />
+  <link rel="canonical" href="https://tiqnora.com/shop.html" />
+  <meta property="og:type" content="website" /><meta property="og:site_name" content="Tiqnora AI" /><meta property="og:title" content="متجر Tiqnora AI | معدات تقنية وتهمك" /><meta property="og:description" content="معدات الشبكات، كاميرات المراقبة، الأجهزة والملحقات." />
+  <title>المتجر | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"CollectionPage","name":"متجر Tiqnora AI","inLanguage":"ar","url":"https://tiqnora.com/shop.html","isPartOf":{"@type":"WebSite","name":"Tiqnora AI","url":"https://tiqnora.com"}}
+  </script>
+</head>
+<body>
+  <header class="store-header">
+    <div class="container store-nav">
+      <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
+      <nav class="store-links" aria-label="المتجر">
+        <a href="index.html">الرئيسية</a>
+        <a href="index.html#services">الخدمات</a>
+        <a href="shop.html" class="active">المتجر</a>
+        <a href="track.html">تتبع الطلب</a>
+      </nav>
+      <a class="cart-link" href="checkout.html">🛒 <span data-i18n="cart">السلة</span> <b id="store-cart-count">0</b></a>
+    </div>
+  </header>
+  <main class="store-main">
+    <div class="container">
+      <h1 class="store-title">المتجر</h1>
+      <p class="store-sub">معدات وقطع تقنية مختارة — الشحن لكل مدن المملكة.</p>
+      <div class="chip-row" id="cat-chips"></div>
+      <div class="products-grid" id="products-grid">
+        <p style="color:var(--muted)">جارٍ تحميل المنتجات…</p>
+      </div>
+    </div>
+  </main>
+  <footer class="store-footer"><div class="container" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px"><span>© <span id="year"></span> Tiqnora AI</span><a href="admin.html" style="color:inherit">إدارة</a></div></footer>
+  <script src="js/config.js" defer></script>
+  <script src="js/db.js" defer></script>
+  <script src="script.js" defer></script>
+  <script defer>
+  window.addEventListener('DOMContentLoaded', () => {
+    const L = () => localStorage.getItem('tiqnora-lang') || 'ar';
+    const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
+    const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+    const grid = document.querySelector('#products-grid');
+    let all = [];
+
+    function renderCount(){ const c = (window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
+
+    function render(filter){
+      const list = all.filter(p => p.is_active && (!filter || p.categories?.slug === filter));
+      grid.innerHTML = list.length ? list.map(p => {
+        const hasDisc = Number(p.discount_percent) > 0;
+        const final = hasDisc ? p.price * (1 - p.discount_percent/100) : p.price;
+        const out = p.track_stock && p.stock_quantity <= 0;
+        return `<a class="product-card" href="product.html?slug=${encodeURIComponent(p.slug)}">
+          ${out ? '<span class="badge out">غير متوفر</span>' : (hasDisc ? `<span class="badge">-${Math.round(p.discount_percent)}%</span>` : '')}
+          <div class="product-thumb">${(p.images||[])[0] ? `<img src="${esc(p.images[0])}" alt="${esc(p.name_ar)}" loading="lazy">` : '▣'}</div>
+          <div class="product-body">
+            <span class="p-cat">${esc(p.categories?.name_ar || '')} ${p.brands ? '· ' + esc(p.brands.name) : ''}</span>
+            <h3>${esc(p.name_ar)}</h3>
+            <span class="stock-note">${p.track_stock ? (p.stock_quantity > 0 ? `متوفر (${p.stock_quantity})` : 'نفدت الكمية') : 'متوفر'}</span>
+            <div class="product-price"><strong>${money(final)}</strong>${hasDisc ? `<s>${money(p.price)}</s>` : ''}</div>
+          </div></a>`;
+      }).join('') : '<p style="color:var(--muted)">لا توجد منتجات في هذا القسم بعد.</p>';
+    }
+
+    function renderChips(cats){
+      const row = document.querySelector('#cat-chips');
+      row.innerHTML = `<button class="chip active" data-cat="">الكل</button>` + cats.map(c =>
+        `<button class="chip" data-cat="${esc(c.slug)}">${esc(c.name_ar)}</button>`).join('');
+      row.querySelectorAll('.chip').forEach(b => b.onclick = () => {
+        row.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+        b.classList.add('active'); render(b.dataset.cat || null);
+      });
+    }
+
+    async function load(){
+      const dbOk = await window.TiqnoraDB.ready();
+      if (dbOk) {
+        const [prods, cats] = await Promise.all([window.TiqnoraDB.getProducts(), window.TiqnoraDB.getCategories('product')]);
+        all = prods || [];
+        renderChips(cats || []);
+        render(null);
+      } else {
+        grid.innerHTML = '<p style="color:var(--muted)">المتجر سيكون متاحًا فور اكتمال ربط قاعدة البيانات. <a href="index.html#contact" style="color:var(--accent)">تواصل معنا</a> لطلب أي معدة مباشرة.</p>';
+        document.querySelector('#cat-chips').innerHTML = '';
+      }
+      renderCount();
+    }
+    load();
+  });
+  </script>
+</body>
+</html>

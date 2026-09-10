@@ -1,28 +1,28 @@
-# Tiqnora AI — first website version
+# Tiqnora AI Platform
 
-A fast, dependency-free bilingual (Arabic RTL / English LTR) portfolio and technology-solutions site for Eyad Abdullah.
+منصة أعمال تقنية سعودية متكاملة — موقع ثنائي اللغة (عربي RTL / إنجليزي LTR) + متجر إ<arg_value>ي + لوحة تحكم مُدارة بالكامل عبر Supabase.
 
-## Included
+## البنية
 
-- Three switchable visual themes: Midnight, Pearl, and Desert.
-- Arabic/English toggle with saved visitor preference.
-- Responsive layout for mobile, tablet, and desktop.
-- Services, editable project placeholders, approach, and contact sections.
-- SEO basics: canonical URL, language alternates, robots, sitemap, and factual Person JSON-LD.
-- No fabricated metrics, testimonials, phone numbers, addresses, or project results.
+- **موقع ثابت سريع** (بدون إطار عمل) يُنشر على Vercel
+- **Supabase** كخلفية كاملة: قاعدة بيانات + مصادقة + تخزين + RLS
+- **لوحة تحكم** في `admin.html`: 17 قسمًا — خدمات، منتجات، طلبات، شحن، AI، CMS، SEO، مستخدمون، سجلات
+- **متجر**: تصفح، سلة، إتمام طلب، تتبع شحنة
+- **نظام fallback**: الموقع يعمل كاملًا حتى بدون قاعدة بيانات
 
-## Edit content
+## التشغيل السريع
 
-The visible bilingual content is centralized in `script.js` under `translations.ar` and `translations.en`. Update those values to change copy without changing the layout. Theme tokens are at the top of `styles.css` under `html[data-theme]`.
+1. نفّذ `supabase/schema.sql` ثم `supabase/seed.sql` في Supabase SQL Editor
+2. ضع Project URL وanon key في `js/config.js`
+3. أنشئ حساب المالك من `admin.html` (البريد في `ownerEmails` يحصل على صلاحية المالك تلقائيًا)
+4. `npm run build` ثم انشر مجلد `dist/`
 
-## Contact configuration
+التفاصيل الكاملة في `docs/UPGRADE-GUIDE.md`.
 
-The first version uses the verified email address `eng.eyadalhaj848@gmail.com`, LinkedIn, and GitHub. WhatsApp and a server-side form are intentionally not displayed until a real number/provider is configured. The form opens a prefilled email draft and does not pretend to send or store data.
+## المحتوى والتعديل
 
-## Run locally
+كل المحتوى (خدمات، باقات، منتجات، هوية، SEO، ثيمات) يُدار من لوحة التحكم — بدون لمس الكود. الموقع يقرأ من قاعدة البيانات مع كاش 5 دقائق، ويرجع للمحتوى المدمج عند تعطل الاتصال.
 
-Open `index.html` directly, or serve the folder with any static web server. No package installation is required.
+## الثيمات
 
-## Deploy
-
-The project is dependency-free. Vercel runs `npm run build`, which copies the site into `dist/` for static delivery. The included `vercel.json` adds basic security headers. Add `tiqnora.com` in Vercel's Domains settings, then set the DNS records Vercel provides at the domain registrar.
+7 ثيمات: midnight (افتراضي) · pearl · desert · ocean · forest · royal (Luxury Corporate) · aurora (Dark Future AI)

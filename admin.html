@@ -1,1 +1,20 @@
-<!doctype html><html lang="ar" dir="rtl" data-theme="midnight"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tiqnora AI | لوحة التحكم</title><link rel="stylesheet" href="admin.css"></head><body><main class="admin-shell"><header class="admin-header"><div><a href="index.html" class="back">← العودة للموقع</a><h1>لوحة تحكم Tiqnora AI</h1><p>عدّل الخدمات والباقات والأسعار ثم احفظ نسخة JSON للاحتفاظ بها.</p></div><div class="admin-actions"><button id="save" class="primary">حفظ التغييرات</button><button id="reset">استعادة الافتراضي</button><button id="export">تصدير JSON</button><label class="file-button">استيراد JSON<input id="import" type="file" accept="application/json"></label></div></header><div class="notice">هذه لوحة محلية في المتصفح. التعديلات تظهر على هذا الجهاز بعد الحفظ؛ للمزامنة بين جميع الزوار نحتاج ربط قاعدة بيانات وتسجيل دخول في مرحلة لاحقة.</div><section><div class="section-title"><h2>الخدمات والأسعار</h2><button id="add-service" class="primary">+ إضافة خدمة</button></div><div id="services-editor" class="editor-list"></div></section><section><div class="section-title"><h2>الباقات الشهرية</h2><button id="add-plan" class="primary">+ إضافة باقة</button></div><div id="plans-editor" class="editor-list"></div></section><p id="status" class="status" role="status"></p></main><script src="script.js"></script><script src="admin.js"></script></body></html>
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>لوحة التحكم | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div id="app-root"><div class="login-wrap"><div class="login-card" style="text-align:center;color:var(--muted)">جارٍ التحميل…</div></div></div>
+  <div class="modal-back" id="modal-back"><div class="modal" id="modal"></div></div>
+  <div class="toast" id="toast"></div>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/admin-app.js"></script>
+</body>
+</html>
