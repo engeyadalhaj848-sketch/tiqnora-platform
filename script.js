@@ -46,6 +46,20 @@ document.querySelector('[data-lang-toggle]')?.addEventListener('click',()=>apply
 const yearEl=document.querySelector('#year');if(yearEl)yearEl.textContent=new Date().getFullYear();applyTheme(localStorage.getItem('tiqnora-theme')||'midnight');applyLanguage(currentLang);
 
 ensureThemeButtons();applyTheme(localStorage.getItem('tiqnora-theme')||'midnight');
+async function hydrateFromDb(){
+  if(!window.TiqnoraDB) return;
+  const ready=await window.TiqnoraDB.ready();
+  if(!ready) return;
+  const [services,plans]=await Promise.all([window.TiqnoraDB.getServices(),window.TiqnoraDB.getPackages()]);
+  if(Array.isArray(services)&&services.length){
+    content.services=services.map(s=>({id:s.id,icon:s.icon||'✦',active:s.status!=='archived',price:Number(s.price)||0,period:s.period==='monthly'?'monthly':'oneTime',ar:{title:s.title_ar,desc:s.description_ar||'',details:s.details_ar||'',period:s.period==='monthly'?'monthly':'oneTime'},en:{title:s.title_en,desc:s.description_en||'',details:s.details_en||'',period:s.period==='monthly'?'monthly':'oneTime'}}));
+  }
+  if(Array.isArray(plans)&&plans.length){
+    content.plans=plans.map(p=>({id:p.id,active:p.is_visible!==false,featured:Boolean(p.featured),price:Number(p.price_monthly||p.price_range_min)||0,ar:{name:p.name_ar,desc:p.description_ar||'',features:p.features_ar||[]},en:{name:p.name_en,desc:p.description_en||'',features:p.features_en||[]}}));
+  }
+  renderServices();renderPlans();renderCart();
+}
+
 hydrateFromDb();
 if(window.TiqnoraDB) window.TiqnoraDB.logPageView(location.pathname);
 
