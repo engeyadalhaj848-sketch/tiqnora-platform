@@ -4,7 +4,7 @@
    - Reads published content from Supabase when configured.
    - Falls back to the bundled default content otherwise
      (site never breaks).
-   - Caches DB results in localStorage for 5 minutes.
+   - Caches DB results in a versioned localStorage namespace for 5 minutes.
    - Admin writes happen through this same client (auth session).
    ============================================================ */
 (() => {
@@ -39,7 +39,7 @@
     document.head.appendChild(s);
   }
 
-  const CACHE_PREFIX = 'tiqnora-db-';
+  const CACHE_PREFIX = 'tiqnora-db-v2-';
   const CACHE_TTL = 5 * 60 * 1000;
 
   function cacheGet(key) {
@@ -69,17 +69,12 @@
     get isConfigured() { return enabled; },
     get raw() { return client; },
     ready() {
-      if (!enabled) return Promise.resolve(false);
-      if (client) return Promise.resolve(true);
-      return new Promise(res => {
-        const to = setTimeout(() => res(false), 8000);
-        window.addEventListener('tiqnora:db-ready', () => { clearTimeout(to); res(true); }, { once: true });
-      });
+      return Promise.resolve(enabled);
     },
 
     async getServices() {
       const cached = cacheGet('services'); if (cached) return cached;
-      const rows = await fromDb('services', '*, categories(slug, name_ar, name_en)', { col: 'sort_order' });
+      const rows = await fromDb('services', '*,categories(slug,name_ar,name_en )', { col: 'sort_order' });
       if (!rows) return null;
       cacheSet('services', rows); return rows;
     },
@@ -123,7 +118,7 @@
 
     clearCache() {
       Object.keys(localStorage)
-        .filter(k => k.startsWith(CACHE_PREFIX))
+        .filter(k => k.startsWith('tiqnora-db-'))
         .forEach(k => localStorage.removeItem(k));
     },
 
