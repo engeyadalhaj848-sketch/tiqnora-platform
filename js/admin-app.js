@@ -82,6 +82,15 @@ function renderLogin(msg = '') {
 async function boot() {
   const ready = await window.TiqnoraDB.ready();
   db = window.TiqnoraDB.raw;
+  if (ready && !db) {
+    await new Promise(resolve => {
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); };
+      const timer = setTimeout(finish, 10000);
+      window.addEventListener('tiqnora:db-ready', finish, { once: true });
+    });
+    db = window.TiqnoraDB.raw;
+  }
   if (!db) { renderLogin(); return; }
   const { data: { session } } = await db.auth.getSession();
   if (!session) { renderLogin(); return; }
