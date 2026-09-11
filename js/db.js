@@ -11,6 +11,26 @@
   const cfg = window.TIQNORA_CONFIG || {};
   const enabled = Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey);
   let client = null;
+  const restUrl = enabled ? `${cfg.supabaseUrl.replace(/\/$/, '')}/rest/v1` : '';
+
+  async function fromRest(table, select = '*', order = null) {
+    if (!enabled) return null;
+    const params = new URLSearchParams({ select });
+    if (order) params.set('order', `${order.col}.${order.asc === false ? 'desc' : 'asc'}`);
+    try {
+      const res = await fetch(`${restUrl}/${table}?${params.toString()}`, {
+        headers: {
+          apikey: cfg.supabaseAnonKey,
+          Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+        },
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return await res.json();
+    } catch (error) {
+      console.warn('[tiqnora] rest:', table, error.message);
+      return null;
+    }
+  }
 
   if (enabled) {
     const s = document.createElement('script');
@@ -36,7 +56,7 @@
   }
 
   async function fromDb(table, select = '*', order = null) {
-    if (!client) return null;
+    if (!client) return fromRest(table, select, order);
     let q = client.from(table).select(select);
     if (order) q = q.order(order.col, { ascending: order.asc !== false });
     const { data, error } = await q;
