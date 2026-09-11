@@ -122,6 +122,7 @@ const NAV = [
   { id: 'media', ic: '▣', label: 'مكتبة الصور' },
   { id: 'seo', ic: '⌕', label: 'SEO وGEO' },
   { group: 'الأنظمة' },
+  { id: 'workforce', ic: '✣', label: 'فريق الموظفين بالذكاء الاصطناعي' },
   { id: 'shipping', ic: '⇄', label: 'الشحن والتتبع' },
   { id: 'ai', ic: '✺', label: 'وحدات الذكاء الاصطناعي' },
   { id: 'users', ic: '◉', label: 'المستخدمون والصلاحيات' },
@@ -215,6 +216,10 @@ function dbBanner() {
    VIEWS
    ============================================================ */
 const VIEWS = {};
+
+VIEWS.workforce = v => {
+  v.innerHTML = `<div class="card"><h2>Tiqnora AI Workforce</h2><p class="card-desc">مساحة العمل الداخلية لمديري التسويق والمحتوى والتواصل الاجتماعي والتقنية بالذكاء الاصطناعي.</p><a class="btn-primary" style="display:inline-block;text-decoration:none;padding:10px 18px;margin-top:8px" href="/admin/ai-workforce/">فتح فريق العمل الذكي</a></div>`;
+};
 
 /* ---------- Dashboard ---------- */
 VIEWS.dashboard = async v => {
@@ -648,10 +653,10 @@ VIEWS.seo = async v => {
 /* ---------- AI Modules ---------- */
 VIEWS.ai = async v => {
   v.innerHTML = `<div class="card"><h2>وحدات الذكاء الاصطناعي</h2><p class="card-desc">فعّل كل وحدة واضبط موجهاتها — جاهزة للربط بمفاتيح API (OpenAI / Anthropic / أي مزود متوافق).</p><div id="rows"></div></div>
-  <div class="card"><h2>مفاتيح المزود</h2><p class="card-desc">تُحفظ هنا وتُستخدم للربط لاحقًا — لا تظهر للزوار.</p>
+  <div class="card"><h2>إعداد المزود</h2><p class="card-desc">للحماية، تُحفظ مفاتيح OpenAI وAnthropic في Environment Variables داخل Vercel فقط ولا تُرسل إلى المتصفح.</p>
   <div class="form-grid"><div><label>المزود الافتراضي</label><select id="ai-prov"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="custom">مخصص</option></select></div>
-  <div><label>مفتاح API</label><input id="ai-key" dir="ltr" type="password" placeholder="sk-..."></div></div>
-  <button class="btn-primary" id="ai-save" style="margin-top:14px">حفظ المفاتيح</button></div>`;
+  <div><label>متغيرات الخادم المطلوبة</label><input dir="ltr" readonly value="OPENAI_API_KEY / ANTHROPIC_API_KEY"></div></div>
+  <button class="btn-primary" id="ai-save" style="margin-top:14px">حفظ المزود الافتراضي</button></div>`;
   const { data: rows } = await db.from('ai_agents').select('*').order('created_at');
   $('#rows').innerHTML = (rows || []).map(a => `<div class="card" style="background:var(--bg2)">
     <div class="card-head"><h2 style="margin:0">${esc(a.name_ar)} <small style="color:var(--muted)" dir="ltr">${esc(a.slug)}</small></h2>
@@ -679,8 +684,9 @@ VIEWS.ai = async v => {
   const aiVal = aiS?.value || {};
   $('#ai-prov').value = aiVal.default_provider || 'openai';
   $('#ai-save').onclick = async () => {
-    await db.from('site_settings').upsert({ key: 'ai', value: { ...aiVal, default_provider: $('#ai-prov').value, api_keys: { ...aiVal.api_keys, [$('#ai-prov').value]: $('#ai-key').value || undefined } } });
-    toast('تم حفظ المفاتيح (مشفّرة بقاعدة البيانات)');
+    const { api_keys, ...safeAiVal } = aiVal;
+    await db.from('site_settings').upsert({ key: 'ai', value: { ...safeAiVal, default_provider: $('#ai-prov').value } });
+    toast('تم حفظ المزود الافتراضي');
   };
 };
 

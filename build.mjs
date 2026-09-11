@@ -14,7 +14,7 @@ for (const file of files) {
   if (existsSync(file)) cpSync(file, `${output}/${file}`);
 }
 
-for (const dir of ['js', 'supabase', 'docs']) {
+for (const dir of ['js', 'supabase', 'docs', 'admin']) {
   if (existsSync(dir)) cpSync(dir, `${output}/${dir}`, { recursive: true });
 }
 
