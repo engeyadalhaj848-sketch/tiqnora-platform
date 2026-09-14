@@ -69,6 +69,24 @@ async function callAnthropic(agent, messages) {
   return { text: (payload.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n'), model: payload.model || model };
 }
 
+async function callGemini(agent, messages) {
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (!key) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
+  const model = agent.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const system = messages.find(m => m.role === 'system')?.content || '';
+  const contents = messages.filter(m => m.role !== 'system').map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: String(m.content || '') }]
+  }));
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature: Number(agent.temperature ?? 0.7) } })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(payload.error?.message || `Gemini request failed (${response.status})`), { status: 502 });
+  return { text: payload.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '', model: payload.modelVersion || model };
+}
+
 async function saveConversation(token, row) {
   const data = await supabase('/rest/v1/ai_conversations?select=*', token, {
     method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(row)
@@ -109,8 +127,11 @@ export default async function handler(req, res) {
       ...history,
       { role: 'user', content: message }
     ];
-    const provider = agent.provider === 'anthropic' ? 'anthropic' : 'openai';
-    const result = provider === 'anthropic' ? await callAnthropic(agent, messages) : await callOpenAI(agent, messages);
+    const requestedProvider = String(agent.provider || 'openai').toLowerCase();
+    const provider = ['google_ai', 'gemini', 'google'].includes(requestedProvider)
+      ? 'google_ai'
+      : requestedProvider === 'anthropic' ? 'anthropic' : (requestedProvider === 'openai' && !process.env.OPENAI_API_KEY && (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) ? 'google_ai' : 'openai');
+    const result = provider === 'anthropic' ? await callAnthropic(agent, messages) : provider === 'google_ai' ? await callGemini(agent, messages) : await callOpenAI(agent, messages);
     if (!result.text) throw Object.assign(new Error('عاد المزود برد فارغ.'), { status: 502 });
     const conversation = await saveConversation(token, {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,
