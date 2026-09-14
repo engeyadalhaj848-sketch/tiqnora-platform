@@ -85,3 +85,38 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.86rem}
 .db-banner.ok{border-color:rgba(123,227,163,.4);color:var(--ok);background:rgba(123,227,163,.06)}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:8px 14px;font-size:.88rem}
 .kv .k{color:var(--muted)}
+
+
+/* TIQNORA ADMIN — responsive usability refresh */
+.login-screen { padding: 20px 14px; min-height: 100svh; }
+.login-card { width: min(440px, 100%); padding: clamp(22px, 5vw, 34px); }
+.login-card input { min-height: 48px; font-size: 16px; }
+.login-card button { min-height: 46px; }
+.admin-main { min-width: 0; }
+.admin-topbar { position: sticky; top: 0; z-index: 40; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); padding-block: 10px; }
+.card { overflow: hidden; }
+.tbl-wrap { -webkit-overflow-scrolling: touch; }
+input, textarea, select { max-width: 100%; }
+
+@media (max-width: 700px) {
+  .admin-main { padding: 12px; }
+  .admin-topbar { margin-bottom: 14px; }
+  .topbar-user > span { display: none; }
+  .grid-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat-card { padding: 14px; }
+  .stat-card .val { font-size: 1.4rem; }
+  .card { padding: 16px 13px; margin-bottom: 14px; border-radius: 13px; }
+  .form-grid { grid-template-columns: 1fr; gap: 11px; }
+  .kv { grid-template-columns: 1fr; gap: 3px; }
+  .kv .k { margin-top: 10px; font-size: .76rem; }
+  .modal-back { padding: 10px; }
+  .modal { padding: 18px 14px; border-radius: 14px; }
+  .modal-foot { position: sticky; bottom: 0; background: var(--surface); padding-top: 12px; }
+  table.tbl { min-width: 680px; }
+  .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 390px) {
+  .grid-stats { grid-template-columns: 1fr; }
+  .login-card { padding: 20px 16px; }
+}
