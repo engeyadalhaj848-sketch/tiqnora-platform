@@ -2,6 +2,16 @@
 <html lang="ar" dir="rtl" data-theme="midnight">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (() => {
+        const query = new URLSearchParams(location.search);
+        const authHash = /(?:^|[&#])(access_token|refresh_token|type)=(?:[^&]*)/i.test(location.hash);
+        const authQuery = query.has('code') || query.get('type') === 'recovery' || query.get('type') === 'magiclink';
+        if (authHash || authQuery) {
+          location.replace('/admin.html' + location.search + location.hash);
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#07111f" />
     <meta name="description" content="Tiqnora AI — حلول تقنية عملية في البنية التحتية، الأنظمة، المواقع، التسويق والأتمتة." />
