@@ -14,9 +14,9 @@
 - Enterprise: 18,750+ SAR
 
 ## Store
-- URL: https://tiqnora.com/shop.html
+- URL: https://www.tiqnora.com/shop.html
 - Categories: networking equipment, CCTV cameras, computers, printers, accessories, IT hardware
-- Shipping: Saudi Arabia (SMSA, SPL Saudi Post, Aramex, DHL) with order tracking at https://tiqnora.com/track.html
+- Shipping: Saudi Arabia (SMSA, SPL Saudi Post, Aramex, DHL) with order tracking at https://www.tiqnora.com/track.html
 - Payment: cash on delivery, bank transfer
 
 ## Contact
@@ -25,6 +25,6 @@
 - Hours: Sunday–Thursday, 9:00–18:00
 
 ## Key pages
-- Main site: https://tiqnora.com/
-- Store: https://tiqnora.com/shop.html
-- Order tracking: https://tiqnora.com/track.html
+- Main site: https://www.tiqnora.com/
+- Store: https://www.tiqnora.com/shop.html
+- Order tracking: https://www.tiqnora.com/track.html
