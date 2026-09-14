@@ -76,6 +76,20 @@ function normalizeMeta(payload) {
   return events;
 }
 
+function normalizeWhatsApp(payload) {
+  const events = [];
+  for (const entry of payload?.entry || []) for (const change of entry?.changes || []) {
+    const value = change?.value || {};
+    const metadata = value.metadata || {};
+    for (const message of value.messages || []) {
+      const contact = (value.contacts || []).find(c => String(c.wa_id || '') === String(message.from || ''));
+      const content = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`;
+      events.push({ platform: 'whatsapp', event_type: 'message.received', external_event_id: String(message.id), author_external_id: String(message.from || ''), author_name: contact?.profile?.name || null, content, permalink: null, occurred_at: toIso(Number(message.timestamp || 0) * 1000), account_external_id: String(metadata.phone_number_id || ''), raw_payload: { adapter: 'whatsapp', entry_id: entry?.id, value, message } });
+    }
+  }
+  return events;
+}
+
 function normalizeGeneric(platform, payload) {
   const source = Array.isArray(payload?.events) ? payload.events : [payload?.event || payload];
   return source.map((item) => {
@@ -107,7 +121,7 @@ const ADAPTERS = {
   tiktok: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('tiktok', payload) },
   snapchat: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('snapchat', payload) },
   x: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('x', payload) },
-  whatsapp: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('whatsapp', payload) }
+  whatsapp: { verify: validMetaSignature, normalize: normalizeWhatsApp }
 };
 
 function getAdapter(platform) {
@@ -285,7 +299,7 @@ async function processEvent(event, storedEvent, organizationId, rules) {
 export default async function handler(req, res) {
   const platform = String(req.query?.platform || 'meta').toLowerCase();
 
-  if (req.method === 'GET' && platform === 'meta') {
+  if (req.method === 'GET' && ['meta', 'whatsapp'].includes(platform)) {
     const ok = req.query['hub.mode'] === 'subscribe' && safeEqualText(req.query['hub.verify_token'], process.env.META_WEBHOOK_VERIFY_TOKEN);
     return ok ? res.status(200).send(req.query['hub.challenge']) : send(res, 403, { error: 'Verification failed' });
   }
