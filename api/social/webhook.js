@@ -51,6 +51,54 @@ async function rest(path, options = {}) {
   return body;
 }
 
+function matchesRule(rule, content) {
+  const text = String(content || '').trim().toLocaleLowerCase('ar');
+  const words = Array.isArray(rule.keywords) ? rule.keywords.map(x => String(x).trim().toLocaleLowerCase('ar')).filter(Boolean) : [];
+  if (!text || !words.length) return false;
+  if (rule.match_mode === 'exact') return words.some(word => text === word);
+  return words.some(word => rule.match_mode === 'contains' ? text.includes(word) : text.includes(word));
+}
+
+function platformAllowed(rule, platform) {
+  return !Array.isArray(rule.platforms) || rule.platforms.length === 0 || rule.platforms.map(x => String(x).toLowerCase()).includes(platform);
+}
+
+async function processEvent(event, organizationId) {
+  const rules = await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
+  const rule = (rules || []).find(r =>
+    platformAllowed(r, event.platform) &&
+    (!Array.isArray(r.event_types) || r.event_types.length === 0 || r.event_types.includes(event.event_type)) &&
+    matchesRule(r, event.content)
+  );
+  if (!rule) return { matched: false };
+
+  const confidence = rule.match_mode === 'exact' ? 1 : 0.95;
+  const updated = await rest(`social_events?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.${encodeURIComponent(event.platform)}&external_event_id=eq.${encodeURIComponent(event.external_event_id)}`, {
+    method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ intent: rule.intent || null, intent_confidence: confidence, processing_status: 'matched' })
+  });
+  const eventId = updated?.[0]?.id;
+  if (!eventId) return { matched: false };
+
+  const existingActions = await rest(`social_event_actions?event_id=eq.${encodeURIComponent(eventId)}&action_type=eq.rule_match&select=id&limit=1`);
+  if (!existingActions?.length) {
+    await rest('social_event_actions', { method: 'POST', body: JSON.stringify({ organization_id: organizationId, event_id: eventId, rule_id: rule.id, action_type: 'rule_match', status: 'completed', result: { intent: rule.intent, confidence } }) });
+  }
+
+  if (rule.create_lead) {
+    const existingLeads = await rest(`leads?email=eq.${encodeURIComponent(`social:${event.platform}:${event.external_event_id}`)}&select=id&limit=1`);
+    if (!existingLeads?.length) {
+      await rest('leads', { method: 'POST', body: JSON.stringify({ name: event.author_name || 'Social contact', email: `social:${event.platform}:${event.external_event_id}`, message: event.content || '', source: `${event.platform}_comment`, status: 'new' }) });
+    }
+  }
+
+  if (rule.auto_reply && rule.reply_template) {
+    const template = String(rule.reply_template).replaceAll('{{author_name}}', event.author_name || '');
+    const existingReply = await rest(`social_event_actions?event_id=eq.${encodeURIComponent(eventId)}&action_type=eq.auto_reply&select=id&limit=1`);
+    if (!existingReply?.length) await rest('social_event_actions', { method: 'POST', body: JSON.stringify({ organization_id: organizationId, event_id: eventId, rule_id: rule.id, action_type: 'auto_reply', status: 'pending', result: { text: template, platform: event.platform } }) });
+  }
+  return { matched: true, intent: rule.intent || null };
+}
+
 export default async function handler(req, res) {
   const platform = String(req.query?.platform || 'meta').toLowerCase();
   if (req.method === 'GET' && platform === 'meta') {
@@ -69,12 +117,19 @@ export default async function handler(req, res) {
     const organizationId = organizations?.[0]?.id;
     if (!organizationId) throw new Error('Tiqnora organization is missing');
     const normalized = platform === 'meta' ? normalizeMeta(payload) : [];
-    if (normalized.length) await rest('social_events?on_conflict=platform,external_event_id', {
+    let matched = 0;
+    if (normalized.length) {
+      const inserted = await rest('social_events?on_conflict=platform,external_event_id', {
       method: 'POST',
-      headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
       body: JSON.stringify(normalized.map(event => ({ ...event, organization_id: organizationId })))
-    });
-    return send(res, 200, { received: true, events: normalized.length });
+      });
+      for (const event of (inserted || [])) {
+        const result = await processEvent(event, organizationId);
+        if (result.matched) matched += 1;
+      }
+    }
+    return send(res, 200, { received: true, events: normalized.length, matched });
   } catch (error) {
     return send(res, 500, { error: error.message });
   }
