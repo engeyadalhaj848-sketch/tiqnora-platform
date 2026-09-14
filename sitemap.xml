@@ -7,6 +7,9 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://www.tiqnora.com/?lang=en"/>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <lastmod>2026-09-14</lastmod>
   </url>
-  <url><loc>https://www.tiqnora.com/shop.html</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://www.tiqnora.com/shop.html</loc><changefreq>daily</changefreq><priority>0.9</priority><lastmod>2026-09-14</lastmod></url>
+  <url><loc>https://www.tiqnora.com/product.html</loc><changefreq>weekly</changefreq><priority>0.7</priority><lastmod>2026-09-14</lastmod></url>
+  <url><loc>https://www.tiqnora.com/track.html</loc><changefreq>monthly</changefreq><priority>0.4</priority><lastmod>2026-09-14</lastmod></url>
 </urlset>
