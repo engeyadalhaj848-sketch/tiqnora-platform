@@ -132,6 +132,7 @@ const NAV = [
   { id: 'seo', ic: '⌕', label: 'SEO وGEO' },
   { group: 'الأنظمة' },
   { id: 'workforce', ic: '✣', label: 'فريق الموظفين بالذكاء الاصطناعي' },
+  { id: 'social-inbox', ic: '◎', label: 'صندوق التواصل الموحد' },
   { id: 'shipping', ic: '⇄', label: 'الشحن والتتبع' },
   { id: 'ai', ic: '✺', label: 'وحدات الذكاء الاصطناعي' },
   { id: 'users', ic: '◉', label: 'المستخدمون والصلاحيات' },
@@ -225,6 +226,22 @@ function dbBanner() {
    VIEWS
    ============================================================ */
 const VIEWS = {};
+
+VIEWS['social-inbox'] = async v => {
+  v.innerHTML = dbBanner() + '<div class="grid-stats" id="social-stats"></div><div class="card"><h2>أحدث التعليقات والرسائل</h2><p class="card-desc">كل المنصات تدخل إلى مسار موحّد. إضافة منصة جديدة لا تغيّر بنية العملاء أو قواعد الأتمتة.</p><div id="social-events">جارٍ التحميل…</div></div>';
+  const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
+    db.from('social_connections').select('id,platform,status'),
+    db.from('social_events').select('*').order('received_at', { ascending: false }).limit(50)
+  ]);
+  if (error) { $('#social-events').innerHTML = '<div class="empty">نفّذ ملف الترحيل 004_social_inbox.sql في Supabase أولًا.</div>'; return; }
+  const matched = events.filter(x => x.intent === 'business_audit').length;
+  $('#social-stats').innerHTML = [
+    ['المنصات المتصلة', connections.filter(x => x.status === 'active').length],
+    ['الأحداث الجديدة', events.filter(x => x.processing_status === 'new').length],
+    ['طلبات التحليل', matched]
+  ].map(([t,n]) => `<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${t}</div></div>`).join('');
+  $('#social-events').innerHTML = tbl(['المنصة','العميل','المحتوى','النية','الحالة','وقت الاستلام'], events.map(e => `<tr><td>${esc(e.platform)}</td><td>${esc(e.author_name || '—')}</td><td>${esc(e.content || '—')}</td><td>${e.intent === 'business_audit' ? '<span class="pill ok">طلب تحليل</span>' : '—'}</td><td><span class="pill ${pillCls(e.processing_status)}">${esc(e.processing_status)}</span></td><td>${new Date(e.received_at).toLocaleString('ar-SA')}</td></tr>`).join(''));
+};
 
 VIEWS.workforce = v => {
   v.innerHTML = `<div class="card"><h2>Tiqnora AI Workforce</h2><p class="card-desc">مساحة العمل الداخلية لمديري التسويق والمحتوى والتواصل الاجتماعي والتقنية بالذكاء الاصطناعي.</p><a class="btn-primary" style="display:inline-block;text-decoration:none;padding:10px 18px;margin-top:8px" href="/admin/ai-workforce/">فتح فريق العمل الذكي</a></div>`;
