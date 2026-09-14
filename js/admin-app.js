@@ -228,7 +228,7 @@ function dbBanner() {
 const VIEWS = {};
 
 VIEWS['social-inbox'] = async v => {
-  v.innerHTML = dbBanner() + '<div class="grid-stats" id="social-stats"></div><div class="card"><h2>أحدث التعليقات والرسائل</h2><p class="card-desc">كل المنصات تدخل إلى مسار موحّد. إضافة منصة جديدة لا تغيّر بنية العملاء أو قواعد الأتمتة.</p><div id="social-events">جارٍ التحميل…</div></div>';
+  v.innerHTML = dbBanner() + '<div class="grid-stats" id="social-stats"></div><div class="card"><h2>صندوق التواصل الموحد</h2><p class="card-desc">كل المنصات تدخل إلى مسار موحّد. إضافة منصة جديدة لا تغيّر بنية العملاء أو قواعد الأتمتة.</p><div class="social-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0"><select id="social-platform-filter"><option value="">كل المنصات</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="whatsapp">WhatsApp</option></select><select id="social-status-filter"><option value="">كل الحالات</option><option value="new">جديد</option><option value="matched">مطابق</option><option value="processed">تمت المعالجة</option><option value="ignored">متجاهل</option><option value="failed">فشل</option></select><select id="social-intent-filter"><option value="">كل النوايا</option><option value="business_audit">طلب تحليل</option></select></div><div id="social-events">جارٍ التحميل…</div></div>';
   const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
     db.from('social_connections').select('id,platform,status'),
     db.from('social_events').select('*').order('received_at', { ascending: false }).limit(50)
@@ -240,7 +240,8 @@ VIEWS['social-inbox'] = async v => {
     ['الأحداث الجديدة', events.filter(x => x.processing_status === 'new').length],
     ['طلبات التحليل', matched]
   ].map(([t,n]) => `<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${t}</div></div>`).join('');
-  $('#social-events').innerHTML = tbl(['المنصة','العميل','المحتوى','النية','الحالة','وقت الاستلام'], events.map(e => `<tr><td>${esc(e.platform)}</td><td>${esc(e.author_name || '—')}</td><td>${esc(e.content || '—')}</td><td>${e.intent === 'business_audit' ? '<span class="pill ok">طلب تحليل</span>' : '—'}</td><td><span class="pill ${pillCls(e.processing_status)}">${esc(e.processing_status)}</span></td><td>${new Date(e.received_at).toLocaleString('ar-SA')}</td></tr>`).join(''));
+  const renderEvents = () => { const platform = $('#social-platform-filter').value, status = $('#social-status-filter').value, intent = $('#social-intent-filter').value; const filtered = events.filter(e => (!platform || e.platform === platform) && (!status || e.processing_status === status) && (!intent || e.intent === intent)); $('#social-events').innerHTML = tbl(['المنصة','العميل','المحتوى','النية','الحالة','وقت الاستلام'], filtered.map(e => `<tr><td>${esc(e.platform)}</td><td>${esc(e.author_name || '—')}</td><td>${esc(e.content || '—')}</td><td>${e.intent === 'business_audit' ? '<span class="pill ok">طلب تحليل</span>' : '—'}</td><td><span class="pill ${pillCls(e.processing_status)}">${esc(e.processing_status)}</span></td><td>${new Date(e.received_at).toLocaleString('ar-SA')}</td></tr>`).join('')); };
+  ['social-platform-filter','social-status-filter','social-intent-filter'].forEach(id => { $('#' + id).onchange = renderEvents; }); renderEvents();
 };
 
 VIEWS.workforce = v => {
