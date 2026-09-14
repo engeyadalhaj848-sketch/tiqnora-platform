@@ -1,0 +1,26 @@
+name: Validate Tiqnora
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run build
+      - name: Verify required output
+        run: |
+          test -f dist/index.html
+          test -f dist/admin.html
+          test -f dist/shop.html
+          test -f dist/robots.txt
+          test -f dist/sitemap.xml
+          test -f api/ai-workforce/chat.js
+          test -f api/social/webhook.js
