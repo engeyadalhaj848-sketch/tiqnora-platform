@@ -11,6 +11,8 @@
   const cfg = window.TIQNORA_CONFIG || {};
   const enabled = Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey);
   let client = null;
+  let resolveReady;
+  const readyPromise = new Promise(resolve => { resolveReady = resolve; });
   const restUrl = enabled ? `${cfg.supabaseUrl.replace(/\/$/, '')}/rest/v1` : '';
 
   async function fromRest(table, select = '*', order = null) {
@@ -32,12 +34,51 @@
     }
   }
 
-  if (enabled) {
+  function finishClientLoad(ok) {
+    if (ok) window.dispatchEvent(new Event('tiqnora:db-ready'));
+    resolveReady(ok);
+  }
+
+  function loadSupabaseClient(index = 0) {
+    const sources = [
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd.min.js',
+      'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js'
+    ];
+    if (window.supabase?.createClient) {
+      client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+      finishClientLoad(true);
+      return;
+    }
+    if (index >= sources.length) {
+      console.error('[tiqnora] Unable to load the Supabase browser client.');
+      finishClientLoad(false);
+      return;
+    }
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd.min.js';
-    s.onload = () => { client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey); window.dispatchEvent(new Event('tiqnora:db-ready')); };
+    let settled = false;
+    const retry = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      s.remove();
+      loadSupabaseClient(index + 1);
+    };
+    const timer = setTimeout(retry, 6000);
+    s.src = sources[index];
+    s.async = true;
+    s.onload = () => {
+      if (!window.supabase?.createClient) return retry();
+      settled = true;
+      clearTimeout(timer);
+      client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+      finishClientLoad(true);
+    };
+    s.onerror = retry;
     document.head.appendChild(s);
   }
+
+  if (enabled) loadSupabaseClient();
+  else finishClientLoad(false);
 
   const CACHE_PREFIX = 'tiqnora-db-v2-';
   const CACHE_TTL = 5 * 60 * 1000;
@@ -69,7 +110,7 @@
     get isConfigured() { return enabled; },
     get raw() { return client; },
     ready() {
-      return Promise.resolve(enabled);
+      return readyPromise;
     },
 
     async getServices() {
