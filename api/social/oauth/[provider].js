@@ -27,7 +27,9 @@ export default async function handler(req, res) {
     const { clientId, redirect, missing } = credentials(provider);
     const initialMissing = missing.filter(name => !name.endsWith('_SECRET') && name !== 'META_APP_SECRET' && name !== 'LINKEDIN_CLIENT_SECRET');
     if (initialMissing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing: initialMissing });
-    const url = new URL(cfg.auth); url.searchParams.set('client_id', clientId); url.searchParams.set('redirect_uri', redirect); url.searchParams.set('response_type', 'code'); url.searchParams.set('scope', cfg.scopes); url.searchParams.set('state', state);
+    const url = new URL(cfg.auth);
+    url.searchParams.set(provider === 'tiktok' ? 'client_key' : 'client_id', clientId);
+    url.searchParams.set('redirect_uri', redirect); url.searchParams.set('response_type', 'code'); url.searchParams.set('scope', cfg.scopes); url.searchParams.set('state', state);
     return res.redirect(url.toString());
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
