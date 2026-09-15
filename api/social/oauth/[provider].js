@@ -8,9 +8,41 @@ const providers = {
 };
 const secret = () => process.env.OAUTH_STATE_SECRET || process.env.META_APP_SECRET || process.env.SOCIAL_WEBHOOK_SHARED_SECRET;
 function credentials(provider) {
-  if (provider === 'meta' || provider === 'whatsapp') return { clientId: process.env.META_APP_ID, clientSecret: process.env.META_APP_SECRET, redirect: process.env.META_REDIRECT_URI, missing: [!process.env.META_APP_ID && 'META_APP_ID', !process.env.META_APP_SECRET && 'META_APP_SECRET', !process.env.META_REDIRECT_URI && 'META_REDIRECT_URI'].filter(Boolean) };
-  if (provider === 'tiktok') return { clientId: process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY, clientSecret: process.env.TIKTOK_CLIENT_SECRET, redirect: process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL, missing: [!(process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY) && 'TIKTOK_CLIENT_KEY', !process.env.TIKTOK_CLIENT_SECRET && 'TIKTOK_CLIENT_SECRET', !(process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL) && 'TIKTOK_REDIRECT_URI'].filter(Boolean) };
-  return { clientId: process.env.LINKEDIN_CLIENT_ID, clientSecret: process.env.LINKEDIN_CLIENT_SECRET, redirect: process.env.LINKEDIN_REDIRECT_URI, missing: [!process.env.LINKEDIN_CLIENT_ID && 'LINKEDIN_CLIENT_ID', !process.env.LINKEDIN_CLIENT_SECRET && 'LINKEDIN_CLIENT_SECRET', !process.env.LINKEDIN_REDIRECT_URI && 'LINKEDIN_REDIRECT_URI'].filter(Boolean) };
+  if (provider === 'meta' || provider === 'whatsapp') {
+    const redirect = provider === 'whatsapp'
+      ? (process.env.WHATSAPP_REDIRECT_URI || process.env.META_REDIRECT_URI)
+      : process.env.META_REDIRECT_URI;
+    return {
+      clientId: process.env.META_APP_ID,
+      clientSecret: process.env.META_APP_SECRET,
+      redirect,
+      missing: [
+        !process.env.META_APP_ID && 'META_APP_ID',
+        !process.env.META_APP_SECRET && 'META_APP_SECRET',
+        !redirect && (provider === 'whatsapp' ? 'WHATSAPP_REDIRECT_URI' : 'META_REDIRECT_URI')
+      ].filter(Boolean)
+    };
+  }
+  if (provider === 'tiktok') return {
+    clientId: process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY,
+    clientSecret: process.env.TIKTOK_CLIENT_SECRET,
+    redirect: process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL,
+    missing: [
+      !(process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY) && 'TIKTOK_CLIENT_KEY',
+      !process.env.TIKTOK_CLIENT_SECRET && 'TIKTOK_CLIENT_SECRET',
+      !(process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL) && 'TIKTOK_REDIRECT_URI'
+    ].filter(Boolean)
+  };
+  return {
+    clientId: process.env.LINKEDIN_CLIENT_ID,
+    clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
+    redirect: process.env.LINKEDIN_REDIRECT_URI,
+    missing: [
+      !process.env.LINKEDIN_CLIENT_ID && 'LINKEDIN_CLIENT_ID',
+      !process.env.LINKEDIN_CLIENT_SECRET && 'LINKEDIN_CLIENT_SECRET',
+      !process.env.LINKEDIN_REDIRECT_URI && 'LINKEDIN_REDIRECT_URI'
+    ].filter(Boolean)
+  };
 }
 const b64 = x => Buffer.from(x).toString('base64url');
 function sign(value) { return `${b64(value)}.${b64(createHmac('sha256', secret() || 'missing').update(value).digest())}`; }
@@ -28,6 +60,7 @@ export default async function handler(req, res) {
     const initialMissing = missing.filter(name => !name.endsWith('_SECRET') && name !== 'META_APP_SECRET' && name !== 'LINKEDIN_CLIENT_SECRET');
     if (initialMissing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing: initialMissing });
     const url = new URL(cfg.auth);
+    // TikTok's OAuth authorize endpoint requires client_key; other providers use client_id.
     url.searchParams.set(provider === 'tiktok' ? 'client_key' : 'client_id', clientId);
     url.searchParams.set('redirect_uri', redirect); url.searchParams.set('response_type', 'code'); url.searchParams.set('scope', cfg.scopes); url.searchParams.set('state', state);
     return res.redirect(url.toString());
