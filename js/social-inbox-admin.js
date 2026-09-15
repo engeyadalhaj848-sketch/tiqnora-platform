@@ -39,6 +39,43 @@
     return card;
   }
 
+  function addConnectionCard(view) {
+    const card = addCard(view, 'ربط المنصات', 'اربط الحساب الرسمي عبر OAuth الآمن. لا يتم عرض أو حفظ أي Access Token داخل المتصفح.');
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:14px';
+    const platforms = [
+      ['meta', 'Meta / Facebook / Instagram', 'ربط الصفحات وحساب Instagram والرسائل والتعليقات'],
+      ['whatsapp', 'WhatsApp Cloud', 'استقبال الرسائل عبر WhatsApp Cloud API'],
+      ['tiktok', 'TikTok', 'تسجيل الدخول وتجهيز مسودة فيديو للمراجعة'],
+      ['linkedin', 'LinkedIn', 'ربط الحساب الشخصي أو صفحة الشركة حسب الصلاحيات']
+    ];
+    platforms.forEach(([key, title, description]) => {
+      const item = document.createElement('div');
+      item.style.cssText = 'border:1px solid var(--border,rgba(255,255,255,.12));border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px';
+      const h = document.createElement('strong'); h.textContent = title; item.appendChild(h);
+      const p = document.createElement('small'); p.className = 'card-desc'; p.textContent = description; item.appendChild(p);
+      const button = document.createElement('button');
+      button.className = 'btn-sm';
+      button.textContent = 'ربط الحساب';
+      button.type = 'button';
+      button.onclick = () => {
+        button.disabled = true;
+        button.textContent = 'جارٍ فتح OAuth…';
+        const organizationId = window.TiqnoraDB?.organizationId || '';
+        const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : '';
+        window.location.href = `/api/social/oauth/${key}${query}`;
+      };
+      item.appendChild(button);
+      grid.appendChild(item);
+    });
+    card.appendChild(grid);
+    const note = document.createElement('p');
+    note.className = 'card-desc';
+    note.style.marginTop = '12px';
+    note.textContent = 'إذا ظهر خطأ إعداد، أضف بيانات التطبيق المطلوبة في Vercel Environment Variables ثم أعد المحاولة.';
+    card.appendChild(note);
+  }
+
   async function mount() {
     if (loading || location.hash !== '#social-inbox' || document.getElementById('social-admin-extra')) return;
     const view = document.getElementById('view');
@@ -50,6 +87,7 @@
     root.id = 'social-admin-extra';
     view.appendChild(root);
 
+    addConnectionCard(root);
     const webhookCard = addCard(root, 'إعداد Webhook', 'نقطة دخول واحدة لكل المنصات، ويحدد Adapter طريقة تطبيع الحدث.');
     const webhook = document.createElement('code');
     webhook.dir = 'ltr'; webhook.style.wordBreak = 'break-all'; webhook.textContent = `${location.origin}/api/social/webhook?platform=meta`;
