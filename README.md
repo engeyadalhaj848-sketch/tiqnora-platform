@@ -9,18 +9,21 @@
 - **لوحة تحكم** في `admin.html`: 18 قسمًا — خدمات، منتجات، طلبات، شحن، AI، CMS، SEO، مستخدمون، سجلات
 - **Tiqnora AI Workforce** في `/admin/ai-workforce/`: أربعة موظفين داخليين، محادثات، مهام، وذاكرة مؤسسية محمية
 - **متجر**: تصفح، سلة، إتمام طلب، تتبع شحنة
+- **Tiqnora Commerce AI**: طبقة دروبشيبنغ آمنة للموردين والمنتجات المرشحة وطلبات التنفيذ؛ يبدأ كل طلب مورد بـ«بانتظار اعتماد المالك».
 - **نظام fallback**: الموقع يعمل كاملًا حتى بدون قاعدة بيانات
 
 ## التشغيل السريع
 
 1. نفّذ `supabase/schema.sql` ثم `supabase/seed.sql` في Supabase SQL Editor
-2. نفّذ ملفات `supabase/migrations/` بالترتيب، وآخرها `006_social_channels_activation.sql`
+2. نفّذ ملفات `supabase/migrations/` بالترتيب، وآخرها `009_commerce_ai_dropshipping.sql`
 3. ضع Project URL وanon key في `js/config.js`
 4. أنشئ حساب المالك من `admin.html` (البريد في `ownerEmails` يحصل على صلاحية المالك تلقائيًا)
 5. أضف `GEMINI_API_KEY` أو `OPENAI_API_KEY` أو `ANTHROPIC_API_KEY` كمتغير خادم في Vercel لتفعيل ردود الموظفين. عند استخدام Gemini يمكن ضبط `GEMINI_MODEL=gemini-2.5-flash` اختياريًا.
 6. `npm run build` ثم انشر مجلد `dist/`
 
 مفاتيح مزودي الذكاء الاصطناعي لا تُحفظ في المستودع أو المتصفح أو `site_settings`. نقطة الخادم في `api/ai-workforce/chat.js` تتحقق من جلسة Supabase ودور الأدمن قبل إرسال أي طلب للمزود.
+
+تكاملات AliExpress / Alibaba / Amazon / DSers لا تعتمد على مفاتيح داخل المتصفح أو قاعدة البيانات. بعد تفعيل حساب المورد الرسمي، تحفظ مفاتيحه في Vercel Environment Variables وتُنفذ الطلبات عبر endpoint خادمي محمي. لا يحق لوكيل Commerce AI الشراء أو النشر أو تعديل السعر تلقائيًا.
 
 التفاصيل الكاملة في `docs/UPGRADE-GUIDE.md`.
 
