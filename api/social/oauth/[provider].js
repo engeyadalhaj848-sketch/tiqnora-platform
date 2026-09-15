@@ -7,6 +7,11 @@ const providers = {
   linkedin: { auth: 'https://www.linkedin.com/oauth/v2/authorization', token: 'https://www.linkedin.com/oauth/v2/accessToken', scopes: 'openid profile w_member_social r_organization_social w_organization_social' }
 };
 const secret = () => process.env.OAUTH_STATE_SECRET || process.env.META_APP_SECRET || process.env.SOCIAL_WEBHOOK_SHARED_SECRET;
+function credentials(provider) {
+  if (provider === 'meta' || provider === 'whatsapp') return { clientId: process.env.META_APP_ID, clientSecret: process.env.META_APP_SECRET, redirect: process.env.META_REDIRECT_URI, missing: [!process.env.META_APP_ID && 'META_APP_ID', !process.env.META_APP_SECRET && 'META_APP_SECRET', !process.env.META_REDIRECT_URI && 'META_REDIRECT_URI'].filter(Boolean) };
+  if (provider === 'tiktok') return { clientId: process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY, clientSecret: process.env.TIKTOK_CLIENT_SECRET, redirect: process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL, missing: [!(process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY) && 'TIKTOK_CLIENT_KEY', !process.env.TIKTOK_CLIENT_SECRET && 'TIKTOK_CLIENT_SECRET', !(process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL) && 'TIKTOK_REDIRECT_URI'].filter(Boolean) };
+  return { clientId: process.env.LINKEDIN_CLIENT_ID, clientSecret: process.env.LINKEDIN_CLIENT_SECRET, redirect: process.env.LINKEDIN_REDIRECT_URI, missing: [!process.env.LINKEDIN_CLIENT_ID && 'LINKEDIN_CLIENT_ID', !process.env.LINKEDIN_CLIENT_SECRET && 'LINKEDIN_CLIENT_SECRET', !process.env.LINKEDIN_REDIRECT_URI && 'LINKEDIN_REDIRECT_URI'].filter(Boolean) };
+}
 const b64 = x => Buffer.from(x).toString('base64url');
 function sign(value) { return `${b64(value)}.${b64(createHmac('sha256', secret() || 'missing').update(value).digest())}`; }
 function verify(value) { const [a, s] = String(value || '').split('.'); if (!a || !s) return null; const raw = Buffer.from(a, 'base64url').toString(); const expected = sign(raw).split('.')[1]; return s === expected ? JSON.parse(raw) : null; }
@@ -19,9 +24,9 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && !req.query.code) {
     if (!secret()) return send(res, 503, { error: 'OAuth state secret is not configured' });
     const state = sign(JSON.stringify({ provider, organization_id: String(req.query.organization_id || ''), nonce: randomBytes(12).toString('hex'), exp: Date.now() + 600000 }));
-    const clientId = provider === 'meta' || provider === 'whatsapp' ? process.env.META_APP_ID : provider === 'tiktok' ? process.env.TIKTOK_CLIENT_KEY : process.env.LINKEDIN_CLIENT_ID;
-    const redirect = provider === 'meta' || provider === 'whatsapp' ? process.env.META_REDIRECT_URI : provider === 'tiktok' ? process.env.TIKTOK_REDIRECT_URI : process.env.LINKEDIN_REDIRECT_URI;
-    if (!clientId || !redirect) return send(res, 503, { error: 'OAuth credentials are not configured for this provider' });
+    const { clientId, redirect, missing } = credentials(provider);
+    const initialMissing = missing.filter(name => !name.endsWith('_SECRET') && name !== 'META_APP_SECRET' && name !== 'LINKEDIN_CLIENT_SECRET');
+    if (initialMissing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing: initialMissing });
     const url = new URL(cfg.auth); url.searchParams.set('client_id', clientId); url.searchParams.set('redirect_uri', redirect); url.searchParams.set('response_type', 'code'); url.searchParams.set('scope', cfg.scopes); url.searchParams.set('state', state);
     return res.redirect(url.toString());
   }
@@ -29,9 +34,8 @@ export default async function handler(req, res) {
   const state = verify(req.query.state); if (!state || state.exp < Date.now() || state.provider !== provider) return send(res, 400, { error: 'Invalid or expired OAuth state' });
   if (req.query.error) return send(res, 400, { error: String(req.query.error_description || req.query.error) });
   try {
-    const clientId = provider === 'meta' || provider === 'whatsapp' ? process.env.META_APP_ID : provider === 'tiktok' ? process.env.TIKTOK_CLIENT_KEY : process.env.LINKEDIN_CLIENT_ID;
-    const clientSecret = provider === 'meta' || provider === 'whatsapp' ? process.env.META_APP_SECRET : provider === 'tiktok' ? process.env.TIKTOK_CLIENT_SECRET : process.env.LINKEDIN_CLIENT_SECRET;
-    const redirect = provider === 'meta' || provider === 'whatsapp' ? process.env.META_REDIRECT_URI : provider === 'tiktok' ? process.env.TIKTOK_REDIRECT_URI : process.env.LINKEDIN_REDIRECT_URI;
+    const { clientId, clientSecret, redirect, missing } = credentials(provider);
+    if (missing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing });
     const body = provider === 'tiktok' ? new URLSearchParams({ client_key: clientId, client_secret: clientSecret, code: req.query.code, grant_type: 'authorization_code', redirect_uri: redirect }) : new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code: req.query.code, redirect_uri: redirect, grant_type: 'authorization_code' });
     const tokenRes = await fetch(cfg.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }); const token = await tokenRes.json(); if (!tokenRes.ok || !(token.access_token || token.data?.access_token)) throw new Error(token.error_description || token.error?.message || 'Token exchange failed');
     const access = token.access_token || token.data.access_token; const encrypted = encrypt(access); const org = state.organization_id || (await supa('organizations?slug=eq.tiqnora&select=id&limit=1'))?.[0]?.id; if (!org) throw new Error('Organization is missing');
