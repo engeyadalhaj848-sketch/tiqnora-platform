@@ -8,7 +8,8 @@
   const state = { counts: {}, conversations: [], tasks: [], memory: [] };
   const labels = {
     marketing: ['تسويق', 'MA', '#6de8dc'], content: ['محتوى', 'CO', '#efc875'],
-    'social-media': ['تواصل اجتماعي', 'SM', '#b399ff'], developer: ['تقنية', 'CT', '#76e6a1']
+    'social-media': ['تواصل اجتماعي', 'SM', '#b399ff'], developer: ['تقنية', 'CT', '#76e6a1'],
+    commerce: ['تجارة', 'CM', '#7aa7ff']
   };
   const statusAr = { todo:'جديدة', in_progress:'قيد التنفيذ', blocked:'متوقفة', done:'مكتملة', cancelled:'ملغاة' };
   const priorityAr = { low:'منخفضة', medium:'متوسطة', high:'عالية', urgent:'عاجلة' };
@@ -39,7 +40,7 @@
     await loadData(); renderShell(); renderOverview();
   }
   async function loadData() {
-    const { data, error } = await db.from('ai_agents').select('*').eq('organization_id', org.id).in('slug', ['marketing','content','social-media','developer']).order('created_at');
+    const { data, error } = await db.from('ai_agents').select('*').eq('organization_id', org.id).in('slug', ['marketing','content','social-media','developer','commerce']).order('created_at');
     if (error) throw error;
     agents = data || []; selectedAgent = selectedAgent || agents[0] || null;
     const [tasks, memory, conversations] = await Promise.all([
