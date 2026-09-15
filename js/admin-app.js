@@ -681,15 +681,15 @@ VIEWS.seo = async v => {
 VIEWS.ai = async v => {
   v.innerHTML = `<div class="card"><h2>وحدات الذكاء الاصطناعي</h2><p class="card-desc">فعّل كل وحدة واضبط موجهاتها — جاهزة للربط بمفاتيح API (OpenAI / Anthropic / أي مزود متوافق).</p><div id="rows"></div></div>
   <div class="card"><h2>إعداد المزود</h2><p class="card-desc">للحماية، تُحفظ مفاتيح OpenAI وAnthropic في Environment Variables داخل Vercel فقط ولا تُرسل إلى المتصفح.</p>
-  <div class="form-grid"><div><label>المزود الافتراضي</label><select id="ai-prov"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google_ai">Google AI / Gemini</option><option value="custom">مخصص</option></select></div>
-  <div><label>متغيرات الخادم المطلوبة</label><input dir="ltr" readonly value="OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY"></div></div>
+  <div class="form-grid"><div><label>المزود الافتراضي</label><select id="ai-prov"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="custom">مخصص</option></select></div>
+  <div><label>متغيرات الخادم المطلوبة</label><input dir="ltr" readonly value="GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY"></div></div>
   <button class="btn-primary" id="ai-save" style="margin-top:14px">حفظ المزود الافتراضي</button></div>`;
   const { data: rows } = await db.from('ai_agents').select('*').order('created_at');
   $('#rows').innerHTML = (rows || []).map(a => `<div class="card" style="background:var(--bg2)">
     <div class="card-head"><h2 style="margin:0">${esc(a.name_ar)} <small style="color:var(--muted)" dir="ltr">${esc(a.slug)}</small></h2>
     <label class="check-row" style="margin:0"><input type="checkbox" data-en="${a.id}" ${a.is_enabled ? 'checked' : ''}> مفعّلة</label></div>
     <div class="form-grid">
-      <div><label>المزود</label><select data-prov="${a.id}">${['openai', 'anthropic', 'google_ai', 'custom'].map(p => `<option ${a.provider === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div><label>المزود</label><select data-prov="${a.id}">${['google_ai', 'openai', 'anthropic', 'custom'].map(p => `<option ${a.provider === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
       <div><label>الموديل</label><input dir="ltr" data-model="${a.id}" value="${esc(a.model || '')}"></div>
       <div><label>درجة الإبداع (0-1)</label><input type="number" step="0.1" min="0" max="1" data-temp="${a.id}" value="${a.temperature ?? 0.7}"></div>
     </div>

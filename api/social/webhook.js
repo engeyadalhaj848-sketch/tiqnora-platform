@@ -76,15 +76,40 @@ function normalizeMeta(payload) {
   return events;
 }
 
+// WhatsApp Cloud API is delivered by Meta to the same endpoint, but its
+// payload shape is different from Facebook/Instagram comments.  Keep it in
+// the same event stream so the inbox, lead rules and future AI replies do not
+// need a separate WhatsApp data model.
 function normalizeWhatsApp(payload) {
   const events = [];
-  for (const entry of payload?.entry || []) for (const change of entry?.changes || []) {
-    const value = change?.value || {};
-    const metadata = value.metadata || {};
-    for (const message of value.messages || []) {
-      const contact = (value.contacts || []).find(c => String(c.wa_id || '') === String(message.from || ''));
-      const content = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`;
-      events.push({ platform: 'whatsapp', event_type: 'message.received', external_event_id: String(message.id), author_external_id: String(message.from || ''), author_name: contact?.profile?.name || null, content, permalink: null, occurred_at: toIso(Number(message.timestamp || 0) * 1000), account_external_id: String(metadata.phone_number_id || ''), raw_payload: { adapter: 'whatsapp', entry_id: entry?.id, value, message } });
+  for (const entry of payload?.entry || []) {
+    for (const change of entry?.changes || []) {
+      const value = change?.value || {};
+      const metadata = value?.metadata || {};
+      const contacts = new Map((value?.contacts || []).map(contact => [String(contact?.wa_id || ''), contact]));
+
+      for (const message of value?.messages || []) {
+        const authorId = String(message?.from || '');
+        const contact = contacts.get(authorId) || {};
+        const type = String(message?.type || 'text');
+        const text = message?.text?.body || message?.button?.text || message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title || `[${type}]`;
+        if (!message?.id) continue;
+        events.push({
+          platform: 'whatsapp',
+          event_type: 'message.received',
+          external_event_id: String(message.id),
+          external_parent_id: message?.context?.id ? String(message.context.id) : null,
+          author_external_id: authorId || null,
+          author_name: contact?.profile?.name || authorId || null,
+          content: text,
+          permalink: null,
+          occurred_at: toIso(message?.timestamp),
+          account_external_id: String(metadata?.phone_number_id || ''),
+          detected_intent: null,
+          detected_intent_confidence: null,
+          raw_payload: { adapter: 'whatsapp_cloud', entry_id: entry?.id, field: change?.field, value: { metadata, message, contact } }
+        });
+      }
     }
   }
   return events;
@@ -121,7 +146,7 @@ const ADAPTERS = {
   tiktok: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('tiktok', payload) },
   snapchat: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('snapchat', payload) },
   x: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('x', payload) },
-  whatsapp: { verify: validMetaSignature, normalize: normalizeWhatsApp }
+  whatsapp: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('whatsapp', payload) }
 };
 
 function getAdapter(platform) {
@@ -226,6 +251,25 @@ async function findConnectionId(organizationId, event) {
   return rows?.[0]?.id || null;
 }
 
+async function ensureConnectionId(organizationId, event) {
+  const existing = await findConnectionId(organizationId, event);
+  if (existing || !event.account_external_id) return existing;
+  const rows = await rest('social_connections?on_conflict=organization_id,platform,external_account_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+    body: JSON.stringify({
+      organization_id: organizationId,
+      platform: event.platform,
+      external_account_id: event.account_external_id,
+      account_name: event.raw_payload?.value?.metadata?.display_phone_number || null,
+      status: 'active',
+      capabilities: { inbox: true, webhooks: true },
+      connected_at: new Date().toISOString()
+    })
+  });
+  return rows?.[0]?.id || await findConnectionId(organizationId, event);
+}
+
 async function createActionOnce({ organizationId, eventId, ruleId = null, actionType, status = 'completed', result = {} }) {
   const existing = await rest(`social_event_actions?event_id=eq.${encodeURIComponent(eventId)}&action_type=eq.${encodeURIComponent(actionType)}&select=id&limit=1`);
   if (existing?.length) return false;
@@ -309,7 +353,7 @@ export default async function handler(req, res) {
   for await (const chunk of req) chunks.push(chunk);
   const rawBody = Buffer.concat(chunks);
   const adapter = getAdapter(platform);
-  const verified = platform === 'meta' ? adapter.verify(req, rawBody) : adapter.verify(req);
+  const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody) : adapter.verify(req);
   if (!verified) return send(res, 401, { error: 'Invalid webhook signature' });
 
   try {
@@ -319,7 +363,7 @@ export default async function handler(req, res) {
     if (!organizationId) throw new Error('Tiqnora organization is missing');
 
     const rules = await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
-    const normalized = adapter.normalize(payload);
+    const normalized = platform === 'whatsapp' ? normalizeWhatsApp(payload) : adapter.normalize(payload);
     let matched = 0;
     let insertedCount = 0;
     let duplicateCount = 0;
@@ -327,7 +371,7 @@ export default async function handler(req, res) {
 
     for (const event of normalized) {
       if (!event.platform || !event.external_event_id) continue;
-      const connectionId = await findConnectionId(organizationId, event);
+      const connectionId = await ensureConnectionId(organizationId, event);
       const inserted = await rest('social_events?on_conflict=platform,external_event_id', {
         method: 'POST',
         headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },

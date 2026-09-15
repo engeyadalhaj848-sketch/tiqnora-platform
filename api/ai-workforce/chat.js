@@ -70,21 +70,38 @@ async function callAnthropic(agent, messages) {
 }
 
 async function callGemini(agent, messages) {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-  if (!key) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
-  const model = agent.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  const system = messages.find(m => m.role === 'system')?.content || '';
-  const contents = messages.filter(m => m.role !== 'system').map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: String(m.content || '') }]
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
+  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-2.5-flash');
+  const systemInstruction = messages.find(message => message.role === 'system')?.content || '';
+  const contents = messages.filter(message => message.role !== 'system').map(message => ({
+    role: message.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: message.content }]
   }));
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature: Number(agent.temperature ?? 0.7) } })
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...(systemInstruction ? { systemInstruction: { parts: [{ text: systemInstruction }] } } : {}),
+      contents,
+      generationConfig: { temperature: Number(agent.temperature ?? 0.7), maxOutputTokens: 2048 }
+    })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(payload.error?.message || `Gemini request failed (${response.status})`), { status: 502 });
-  return { text: payload.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '', model: payload.modelVersion || model };
+  const text = (payload.candidates?.[0]?.content?.parts || []).map(part => part.text || '').join('\n');
+  return { text, model };
+}
+
+function resolveProvider(agent) {
+  const configured = String(agent.provider || '').toLowerCase();
+  if (['google_ai', 'gemini', 'google'].includes(configured)) return 'google_ai';
+  if (configured === 'anthropic') return 'anthropic';
+  if (process.env.OPENAI_API_KEY) return 'openai';
+  // Existing agents were seeded as OpenAI. This fallback lets an owner who has
+  // configured only Gemini start using the workforce without editing every row.
+  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) return 'google_ai';
+  return 'openai';
 }
 
 async function saveConversation(token, row) {
@@ -127,11 +144,12 @@ export default async function handler(req, res) {
       ...history,
       { role: 'user', content: message }
     ];
-    const requestedProvider = String(agent.provider || 'openai').toLowerCase();
-    const provider = ['google_ai', 'gemini', 'google'].includes(requestedProvider)
-      ? 'google_ai'
-      : requestedProvider === 'anthropic' ? 'anthropic' : (requestedProvider === 'openai' && !process.env.OPENAI_API_KEY && (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) ? 'google_ai' : 'openai');
-    const result = provider === 'anthropic' ? await callAnthropic(agent, messages) : provider === 'google_ai' ? await callGemini(agent, messages) : await callOpenAI(agent, messages);
+    const provider = resolveProvider(agent);
+    const result = provider === 'anthropic'
+      ? await callAnthropic(agent, messages)
+      : provider === 'google_ai'
+        ? await callGemini(agent, messages)
+        : await callOpenAI(agent, messages);
     if (!result.text) throw Object.assign(new Error('عاد المزود برد فارغ.'), { status: 502 });
     const conversation = await saveConversation(token, {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,

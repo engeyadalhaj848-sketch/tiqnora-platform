@@ -16,10 +16,18 @@ Add values from `.env.example` in Vercel. Never put service-role keys or provide
 
 1. Run `supabase/schema.sql`, `supabase/seed.sql`, then migrations in filename order.
 2. Create the owner account and verify the owner email in the admin application.
-3. Configure one AI provider key and test `/api/ai-workforce/chat` while authenticated.
+3. Configure one AI provider key and test `/api/ai-workforce/chat` while authenticated. Gemini uses `GEMINI_API_KEY` (or `GOOGLE_AI_API_KEY`) and optional `GEMINI_MODEL`; the default is `gemini-2.5-flash`.
 4. Configure the selected payment gateway and webhook secret before enabling checkout.
 5. Add SMSA or Saudi Post credentials only after merchant approval; keep rates and tracking server-side.
-6. Connect Meta, LinkedIn and TikTok through official OAuth flows; never paste tokens into content records.
+6. Connect Meta, WhatsApp Cloud and TikTok through official OAuth flows; never paste tokens into content records.
+7. For WhatsApp Cloud, subscribe the Meta app to `messages` and set its callback URL to
+   `https://tiqnora.com/api/social/webhook?platform=whatsapp`. Set
+   `META_WEBHOOK_VERIFY_TOKEN` and `META_APP_SECRET` in Vercel. The first verified
+   inbound message creates its active connection in the Tiqnora Social Inbox.
+8. For TikTok, create an official TikTok developer app and OAuth connection, then point
+   its trusted relay to `https://tiqnora.com/api/social/webhook?platform=tiktok` with
+   header `x-tiqnora-webhook-secret` matching `SOCIAL_WEBHOOK_SHARED_SECRET` in Vercel.
+   This keeps TikTok secrets server-side and normalizes its events into the same inbox.
 
 ## Safety
 
