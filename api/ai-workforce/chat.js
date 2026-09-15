@@ -72,7 +72,7 @@ async function callAnthropic(agent, messages) {
 async function callGemini(agent, messages) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
-  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-2.5-flash');
+  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
   const systemInstruction = messages.find(message => message.role === 'system')?.content || '';
   const contents = messages.filter(message => message.role !== 'system').map(message => ({
     role: message.role === 'assistant' ? 'model' : 'user',
