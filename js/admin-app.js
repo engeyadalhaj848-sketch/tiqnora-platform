@@ -122,6 +122,7 @@ const NAV = [
   { id: 'services', ic: '✦', label: 'الخدمات' },
   { id: 'categories', ic: '▤', label: 'الأقسام' },
   { id: 'products', ic: '▣', label: 'المنتجات' },
+  { id: 'commerce', ic: '◫', label: 'Tiqnora Commerce AI' },
   { id: 'brands', ic: '⬢', label: 'الماركات' },
   { id: 'packages', ic: '◈', label: 'الباقات والأسعار' },
   { id: 'coupons', ic: '%', label: 'كوبونات الخصم' },
@@ -356,6 +357,8 @@ VIEWS.products = async v => {
     { k: 'price', t: 'السعر (ر.س)', type: 'number', req: 1 },
     { k: 'discount_percent', t: 'خصم %', type: 'number' },
     { k: 'cost_price', t: 'سعر التكلفة (للاستخدام الداخلي)', type: 'number' },
+    { k: 'fulfillment_type', t: 'طريقة التنفيذ', type: 'select', options: [{ v: 'own_stock', t: 'مخزون Tiqnora' }, { v: 'dropship', t: 'دروبشيبنغ — مورد خارجي' }] },
+    { k: 'delivery_note_ar', t: 'ملاحظة الشحن للعميل', ph: 'يصل خلال 7–14 يوم عمل' },
     { k: 'stock_quantity', t: 'الكمية بالمخزون', type: 'number', default: 0 },
     { k: 'track_stock', t: 'تتبع المخزون', type: 'checkbox', default: true },
     { k: 'is_active', t: 'ظاهر في المتجر', type: 'checkbox', default: true },
@@ -377,6 +380,28 @@ VIEWS.products = async v => {
   $('#add').onclick = () => crudModal({ title: 'منتج جديد', fields: F, onSave: async d => { await db.from('products').insert(fixImgs(d)); log('product.create', 'products'); toast('تمت إضافة المنتج'); VIEWS.products(v); } });
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\n') }, onSave: async d => { await db.from('products').update(d).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
+};
+
+/* ---------- Tiqnora Commerce AI ---------- */
+VIEWS.commerce = async v => {
+  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>Tiqnora Commerce AI</h2><p class="card-desc">إدارة البيع بدون مخزون. الوكلاء يقترحون ويجهزون؛ اعتماد المنتج وتنفيذ طلب المورد يتطلبان موافقة المالك.</p></div><button class="btn-primary" id="add-source">+ إضافة منتج مرشح</button></div><div id="commerce-summary" class="grid-stats"></div></div><div class="card"><h2>الموردون والتكاملات</h2><div id="supplier-list">جارٍ التحميل…</div></div><div class="card"><h2>مرشحات المنتجات</h2><div id="candidate-list">جارٍ التحميل…</div></div><div class="card"><h2>طلبات التنفيذ</h2><div id="fulfillment-list">جارٍ التحميل…</div></div>`;
+  const [suppliersRes, candidatesRes, requestsRes] = await Promise.all([
+    db.from('commerce_suppliers').select('*').order('display_name'),
+    db.from('supplier_products').select('*, commerce_suppliers(display_name,provider), products(name_ar)').order('created_at',{ascending:false}).limit(100),
+    db.from('fulfillment_requests').select('*, orders(order_number,customer_name), commerce_suppliers(display_name)').order('created_at',{ascending:false}).limit(50)
+  ]);
+  if (suppliersRes.error || candidatesRes.error || requestsRes.error) {
+    v.innerHTML = `<div class="card"><h2>Tiqnora Commerce AI</h2><p class="card-desc">يلزم تنفيذ ملف <code dir="ltr">009_commerce_ai_dropshipping.sql</code> في Supabase SQL Editor أولًا، ثم أعد تحميل اللوحة.</p></div>`; return;
+  }
+  const suppliers = suppliersRes.data || [], candidates = candidatesRes.data || [], requests = requestsRes.data || [];
+  $('#commerce-summary').innerHTML = [['الموردون المتصلون', suppliers.filter(x=>x.status==='connected').length],['منتجات بانتظار المراجعة',candidates.filter(x=>x.approval_status==='candidate').length],['طلبات بانتظار الاعتماد',requests.filter(x=>x.status==='awaiting_approval').length]].map(([t,n])=>`<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${t}</div></div>`).join('');
+  $('#supplier-list').innerHTML = tbl(['المورد','الحالة','تنفيذ الطلب','الدول','إجراء'], suppliers.map(s=>`<tr><td><b>${esc(s.display_name)}</b><br><small dir="ltr">${esc(s.provider)}</small></td><td><span class="pill ${s.status==='connected'?'ok':s.status==='error'?'danger':'warn'}">${esc(s.status)}</span></td><td>${s.fulfillment_mode==='approval_required'?'موافقة إلزامية':esc(s.fulfillment_mode)}</td><td dir="ltr">${esc((s.shipping_countries||[]).join(', '))}</td><td><button class="btn-sm" data-supplier="${s.id}">تحديث الإعداد</button></td></tr>`).join(''));
+  $('#candidate-list').innerHTML = tbl(['المنتج المصدر','المورد','التكلفة','التوصيل','الحالة','إجراء'], candidates.map(c=>`<tr><td><b>${esc(c.source_title||'—')}</b><br><small dir="ltr">${esc(c.external_product_id)}</small></td><td>${esc(c.commerce_suppliers?.display_name||'—')}</td><td>${c.source_price == null ? '—' : `${c.source_price} ${esc(c.source_currency)}`}</td><td>${c.estimated_delivery_min_days||'?'}–${c.estimated_delivery_max_days||'?'} يوم</td><td><span class="pill ${c.approval_status==='approved'?'ok':c.approval_status==='rejected'?'danger':'warn'}">${esc(c.approval_status)}</span></td><td><button class="btn-sm" data-candidate="${c.id}">مراجعة</button></td></tr>`).join(''));
+  $('#fulfillment-list').innerHTML = tbl(['الطلب','المورد','الحالة','المرجع','إجراء'], requests.map(r=>`<tr><td dir="ltr">${esc(r.orders?.order_number||'—')}</td><td>${esc(r.commerce_suppliers?.display_name||'—')}</td><td><span class="pill ${r.status==='fulfilled'?'ok':r.status==='failed'?'danger':'warn'}">${esc(r.status)}</span></td><td dir="ltr">${esc(r.supplier_order_reference||'—')}</td><td>${r.status==='awaiting_approval'?`<button class="btn-sm btn-primary" data-approve="${r.id}">اعتماد للتنفيذ</button>`:'—'}</td></tr>`).join(''));
+  $$('[data-supplier]').forEach(b=>b.onclick=()=>{ const s=suppliers.find(x=>x.id===b.dataset.supplier); crudModal({title:`إعداد ${s.display_name}`,fields:[{k:'status',t:'حالة الاتصال',type:'select',options:[{v:'not_configured',t:'غير مهيأ'},{v:'pending',t:'بانتظار الربط'},{v:'connected',t:'متصل'},{v:'paused',t:'موقوف'}]},{k:'fulfillment_mode',t:'طريقة التنفيذ',type:'select',options:[{v:'approval_required',t:'موافقة إلزامية'},{v:'semi_automatic',t:'شبه تلقائي'}]}],row:s,onSave:async d=>{await db.from('commerce_suppliers').update(d).eq('id',s.id);log('commerce.supplier.update','commerce_suppliers',s.id,d);toast('تم حفظ إعداد المورد');VIEWS.commerce(v);}});});
+  $$('[data-candidate]').forEach(b=>b.onclick=()=>{ const c=candidates.find(x=>x.id===b.dataset.candidate); crudModal({title:'مراجعة منتج مرشح',fields:[{k:'approval_status',t:'القرار',type:'select',options:[{v:'candidate',t:'قيد المراجعة'},{v:'approved',t:'معتمد'},{v:'rejected',t:'مرفوض'},{v:'paused',t:'موقوف'}]},{k:'review_notes',t:'ملاحظات',type:'textarea',full:1}],row:c,onSave:async d=>{await db.from('supplier_products').update(d).eq('id',c.id);log('commerce.candidate.review','supplier_products',c.id,d);toast('تم حفظ القرار');VIEWS.commerce(v);}});});
+  $$('[data-approve]').forEach(b=>b.onclick=async()=>{if(!confirm('اعتماد هذا الطلب لإرساله للمورد؟ لن يتم الإرسال تلقائيًا من Tiqnora في هذه المرحلة.'))return; await db.from('fulfillment_requests').update({status:'approved',approved_by:me.id,approved_at:new Date().toISOString()}).eq('id',b.dataset.approve);log('commerce.fulfillment.approve','fulfillment_requests',b.dataset.approve);toast('تم الاعتماد — جاهز للإرسال عبر التكامل الرسمي');VIEWS.commerce(v);});
+  $('#add-source').onclick=()=>crudModal({title:'إضافة منتج مرشح من مورد',fields:[{k:'supplier_id',t:'المورد',type:'select',req:1,options:suppliers.map(s=>({v:s.id,t:s.display_name}))},{k:'external_product_id',t:'رقم/معرف المنتج عند المورد',req:1,dir:'ltr'},{k:'source_url',t:'رابط المنتج عند المورد',req:1,dir:'ltr'},{k:'source_title',t:'اسم المنتج عند المورد',full:1},{k:'source_price',t:'سعر المورد',type:'number'},{k:'source_currency',t:'العملة',default:'USD',dir:'ltr'},{k:'shipping_cost',t:'تكلفة الشحن',type:'number',default:0},{k:'estimated_delivery_min_days',t:'أقل مدة توصيل (يوم)',type:'number'},{k:'estimated_delivery_max_days',t:'أعلى مدة توصيل (يوم)',type:'number'}],onSave:async d=>{await db.from('supplier_products').insert(d);log('commerce.candidate.create','supplier_products',null,{supplier_id:d.supplier_id});toast('تمت إضافة المنتج للمراجعة');VIEWS.commerce(v);}});
 };
 
 /* ---------- Brands ---------- */
