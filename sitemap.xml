@@ -142,4 +142,10 @@
     <priority>0.75</priority>
     <lastmod>2026-09-16</lastmod>
   </url>
+  <url>
+    <loc>https://www.tiqnora.com/sales</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <lastmod>2026-09-16</lastmod>
+  </url>
 </urlset>

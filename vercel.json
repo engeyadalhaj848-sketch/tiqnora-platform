@@ -71,6 +71,10 @@
     {
       "source": "/services/:slug",
       "destination": "/services/:slug.html"
+    },
+    {
+      "source": "/sales",
+      "destination": "/sales.html"
     }
   ]
 }

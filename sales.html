@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>مساعد المبيعات | Tiqnora AI</title>
+  <meta name="description" content="اسأل مساعد مبيعات Tiqnora عن الخدمات والباقات واحصل على توجيه لخطة مناسبة." />
+  <link rel="canonical" href="https://www.tiqnora.com/sales" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" />
+  <link rel="stylesheet" href="/marketing.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav"><b>Tiqnora AI</b><a href="/">الرئيسية</a><a href="/compare">الباقات</a><a href="/customer">بوابة العملاء</a><a href="/#contact">تواصل</a></nav>
+    <header class="hero">
+      <h1>مساعد المبيعات الذكي</h1>
+      <p class="lead">اسأل عن الخدمات أو الباقات. إن رغبت بالمتابعة، اترك اسمك وبريدك لنحوّلك إلى عميل محتمل.</p>
+    </header>
+    <div class="card">
+      <div id="log" style="min-height:180px;max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:10px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="msg" style="flex:1;min-width:200px;padding:12px;border-radius:12px;border:1px solid var(--line);background:#0e1524;color:#fff" placeholder="مثال: ما الفرق بين الخطة الأساسية والاحترافية؟" />
+        <button class="btn btn-primary" id="send" type="button">إرسال</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>تحويل إلى Lead</h2>
+      <p class="lead">بعد المحادثة، أرسل بياناتك ليتواصل فريق Tiqnora.</p>
+      <input id="name" placeholder="الاسم" style="width:100%;margin:6px 0;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1524;color:#fff" />
+      <input id="email" placeholder="البريد" dir="ltr" style="width:100%;margin:6px 0;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1524;color:#fff" />
+      <input id="phone" placeholder="الجوال (اختياري)" dir="ltr" style="width:100%;margin:6px 0;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1524;color:#fff" />
+      <textarea id="interest" placeholder="اهتمامك / ملخص المحادثة" rows="3" style="width:100%;margin:6px 0;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1524;color:#fff"></textarea>
+      <button class="btn btn-primary" id="lead" type="button">إرسال كعميل محتمل</button>
+      <p id="ok" class="lead"></p>
+    </div>
+  </div>
+  <script src="/js/config.js"></script>
+  <script src="/js/db.js"></script>
+  <script src="/js/supabase-client-browser.js"></script>
+  <script src="/js/analytics.js"></script>
+  <script>
+  (async () => {
+    await window.TiqnoraDB.ready();
+    const db = window.TiqnoraDB.raw;
+    const log = document.getElementById('log');
+    const add = (who, text) => {
+      const d = document.createElement('div');
+      d.style.cssText = 'padding:10px 12px;border-radius:12px;background:' + (who==='user'?'rgba(91,140,255,.2)':'#0e1524') + ';align-self:' + (who==='user'?'flex-end':'flex-start') + ';max-width:90%;white-space:pre-wrap';
+      d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight;
+    };
+    add('ai', 'مرحباً، أنا مساعد مبيعات Tiqnora. كيف أقدر أساعدك؟');
+    document.getElementById('send').onclick = async () => {
+      const message = document.getElementById('msg').value.trim();
+      if (!message || !db) return;
+      document.getElementById('msg').value = '';
+      add('user', message);
+      add('ai', '…');
+      window.TiqnoraAnalytics?.aiDemo?.('sales');
+      try {
+        const { data: agents } = await db.from('ai_agents').select('id,slug,system_prompt_ar,model').eq('slug','sales').maybeSingle();
+        // Use public workforce if authenticated admin; for anonymous use customer API only when logged in.
+        // Fallback local structured reply + optional workforce path via fetch with no auth limited
+        const res = await fetch('/api/sales/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        const payload = await res.json().catch(() => ({}));
+        log.lastChild.remove();
+        if (res.ok && payload.reply) add('ai', payload.reply);
+        else add('ai', payload.error || 'يمكنك الاطلاع على /compare للباقات أو التسجيل في /customer. للدعم اترك بياناتك بالأسفل.');
+      } catch (e) {
+        log.lastChild.textContent = 'تعذر الرد حالياً. استخدم نموذج Lead بالأسفل أو /customer';
+      }
+    };
+    document.getElementById('lead').onclick = async () => {
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      if (!name) { document.getElementById('ok').textContent = 'الاسم مطلوب'; return; }
+      const { error } = await db.from('leads').insert({
+        name, email: email || null,
+        phone: document.getElementById('phone').value.trim() || null,
+        message: document.getElementById('interest').value.trim() || 'من مساعد المبيعات',
+        source: 'sales_assistant',
+        interest: document.getElementById('interest').value.trim() || null,
+        page_path: '/sales',
+        status: 'new'
+      });
+      if (error) { document.getElementById('ok').textContent = error.message; return; }
+      window.TiqnoraAnalytics?.leadSubmit?.('sales_assistant');
+      document.getElementById('ok').textContent = 'تم التسجيل — سنتواصل معك قريباً.';
+    };
+  })();
+  </script>
+</body>
+</html>

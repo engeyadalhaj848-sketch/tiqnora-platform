@@ -6,7 +6,7 @@ mkdirSync(output, { recursive: true });
 
 const files = [
   'index.html', 'shop.html', 'product.html', 'checkout.html', 'track.html',
-  'admin.html', 'customer.html', 'customer.css', 'blog.html', 'blog-post.html', 'compare.html', 'marketing.css', 'styles.css', 'script.js', 'admin.css',
+  'admin.html', 'customer.html', 'customer.css', 'blog.html', 'blog-post.html', 'compare.html', 'sales.html', 'marketing.css', 'styles.css', 'script.js', 'admin.css',
   'robots.txt', 'sitemap.xml', 'llms.txt',
 ];
 

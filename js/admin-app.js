@@ -504,15 +504,38 @@ VIEWS.orders = async v => {
 
 /* ---------- Leads ---------- */
 VIEWS.leads = async v => {
-  v.innerHTML = `<div class="card"><h2>استفسارات العملاء</h2><p class="card-desc">الرسائل الواردة من نموذج التواصل.</p><div id="tbl"></div></div>`;
-  const { data: rows } = await db.from('leads').select('*').order('created_at', { ascending: false }).limit(300);
+  v.innerHTML = `<div class="card"><h2>إدارة العملاء المحتملين (Leads)</h2>
+    <p class="card-desc">مصدر، اهتمام، ملاحظات، وحالة — مع أتمتة ترحيب داخلية.</p>
+    <div id="tbl"></div></div>
+    <div class="card"><h2>أحداث Analytics (أحدث)</h2><div id="ev"></div></div>
+    <div class="card"><h2>أتمتة تسويق</h2><div id="auto"></div></div>`;
   const LBL = { new: 'جديد', contacted: 'تم التواصل', qualified: 'مؤهل', converted: 'تحوّل لعميل', closed: 'مغلق' };
-  $('#tbl').innerHTML = tbl(['الاسم', 'البريد', 'الرسالة', 'الحالة', 'التاريخ', 'إجراء'], (rows || []).map(l =>
-    `<tr><td>${esc(l.name)}</td><td dir="ltr">${esc(l.email || '—')}</td><td style="max-width:320px">${esc(l.message || '')}</td>
-     <td><span class="pill ${l.status === 'new' ? 'warn' : 'ok'}">${LBL[l.status] || l.status}</span></td>
-     <td style="color:var(--muted);white-space:nowrap">${new Date(l.created_at).toLocaleDateString('ar-SA')}</td>
-     <td><select data-st="${l.id}">${Object.entries(LBL).map(([k, t]) => `<option value="${k}" ${l.status === k ? 'selected' : ''}>${t}</option>`).join('')}</select></td></tr>`).join(''));
-  $$('[data-st]').forEach(s => s.onchange = async () => { await db.from('leads').update({ status: s.value }).eq('id', s.dataset.st); toast('تم التحديث'); });
+  const { data: rows } = await db.from('leads').select('*').order('created_at', { ascending: false }).limit(300);
+  $('#tbl').innerHTML = tbl(['الاسم','المصدر','الاهتمام','البريد','الحالة','ملاحظات','تاريخ'], (rows || []).map(l =>
+    `<tr>
+      <td>${esc(l.name)}${l.company?`<br><small>${esc(l.company)}</small>`:''}</td>
+      <td>${esc(l.source||'—')}</td>
+      <td style="max-width:160px">${esc(l.interest||l.message||'')}</td>
+      <td dir="ltr">${esc(l.email||'—')}<br>${esc(l.phone||'')}</td>
+      <td><select data-st="${l.id}">${Object.entries(LBL).map(([k,t])=>`<option value="${k}" ${l.status===k?'selected':''}>${t}</option>`).join('')}</select></td>
+      <td><input data-notes="${l.id}" value="${esc(l.notes||'')}" style="width:140px" placeholder="ملاحظة" /></td>
+      <td style="white-space:nowrap;color:var(--muted)">${new Date(l.created_at).toLocaleDateString('ar-SA')}</td>
+    </tr>`).join('') || '<tr><td colspan="7" style="color:var(--muted)">لا عملاء محتملين بعد</td></tr>');
+  $$('[data-st]').forEach(s => s.onchange = async () => {
+    await db.from('leads').update({ status: s.value, updated_at: new Date().toISOString() }).eq('id', s.dataset.st);
+    if (s.value === 'converted') {
+      await db.from('marketing_automations').insert({ lead_id: s.dataset.st, kind: 'upgrade_reminder', channel: 'internal', status: 'pending', payload: { reason: 'converted' } }).catch(()=>{});
+    }
+    toast('تم تحديث الحالة');
+  });
+  $$('[data-notes]').forEach(inp => inp.onchange = async () => {
+    await db.from('leads').update({ notes: inp.value, updated_at: new Date().toISOString() }).eq('id', inp.dataset.notes);
+    toast('حُفظت الملاحظة');
+  });
+  const { data: ev } = await db.from('analytics_events').select('event_name,path,created_at,properties').order('created_at',{ascending:false}).limit(40);
+  $('#ev').innerHTML = ev ? tbl(['الحدث','المسار','وقت'], (ev||[]).map(e=>`<tr><td>${esc(e.event_name)}</td><td dir="ltr">${esc(e.path||'')}</td><td>${new Date(e.created_at).toLocaleString('ar-SA')}</td></tr>`).join('')) : '<p style="color:var(--muted)">نفّذ migration 016</p>';
+  const { data: auto } = await db.from('marketing_automations').select('*').order('created_at',{ascending:false}).limit(40);
+  $('#auto').innerHTML = auto ? tbl(['النوع','القناة','الحالة','موعد'], (auto||[]).map(a=>`<tr><td>${esc(a.kind)}</td><td>${esc(a.channel)}</td><td><span class="pill">${esc(a.status)}</span></td><td>${new Date(a.scheduled_for).toLocaleString('ar-SA')}</td></tr>`).join('') || '<tr><td colspan="4">لا مهام</td></tr>') : '<p style="color:var(--muted)">نفّذ migration 016</p>';
 };
 
 /* ---------- Customers ---------- */

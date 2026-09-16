@@ -79,6 +79,7 @@ function renderAuth(msg = '') {
         const { error } = await db.auth.signUp({ email, password, options: { data: { full_name: email.split('@')[0] } } });
         if (error) return renderAuth(error.message);
         toast('تم إنشاء الحساب');
+        window.TiqnoraAnalytics?.signup?.();
         mode = 'login';
       }
       const { error } = await db.auth.signInWithPassword({ email, password });
@@ -209,7 +210,8 @@ async function viewAi(v) {
     const message = $('#msg').value.trim();
     if (!message) return;
     if (used >= limit) { toast('وصلت لحد خطتك — رقِّ الاشتراك', false); location.hash = 'plans'; return; }
-    $('#msg').value = ''; append('user', message); append('ai', '…');
+    $('#msg').value = ''; window.TiqnoraAnalytics?.aiDemo?.($('#agent').value);
+    append('user', message); append('ai', '…');
     try {
       const { data: { session } } = await db.auth.getSession();
       const res = await fetch('/api/customer/ai-chat', {
@@ -295,6 +297,7 @@ async function viewServices(v) {
       organization_id: orgId, user_id: me.id, category: $('#cat').value,
       title, details: $('#sd').value.trim()||null, contact_phone: $('#sp').value.trim()||null, contact_email: me.email
     });
+    window.TiqnoraAnalytics?.serviceRequest?.();
     toast('تم إرسال الطلب'); viewServices(v);
   };
 }
@@ -325,6 +328,7 @@ async function viewPlans(v) {
   $$('[data-upgrade]').forEach(b => b.onclick = async () => {
     const { data, error } = await db.rpc('request_plan_change', { p_plan_slug: b.dataset.upgrade, p_billing_cycle: 'monthly' });
     if (error) return toast(error.message, false);
+    window.TiqnoraAnalytics?.planClick?.(b.dataset.upgrade);
     toast(data?.message || 'تم');
     await loadPlanUsage(); viewPlans(v);
   });

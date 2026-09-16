@@ -1,0 +1,49 @@
+/* Tiqnora first-party + GA4 event bridge */
+(function () {
+  const KEY = 'tiqnora_sid';
+  function sid() {
+    try {
+      let s = localStorage.getItem(KEY);
+      if (!s) { s = 's_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem(KEY, s); }
+      return s;
+    } catch { return 'anon'; }
+  }
+  function utm() {
+    const q = new URLSearchParams(location.search);
+    return {
+      utm_source: q.get('utm_source') || undefined,
+      utm_medium: q.get('utm_medium') || undefined,
+      utm_campaign: q.get('utm_campaign') || undefined
+    };
+  }
+  async function send(event_name, properties = {}) {
+    try {
+      if (typeof gtag === 'function' && window.TIQNORA_CONFIG?.googleAnalyticsId) {
+        gtag('event', event_name, properties);
+      }
+    } catch (_) {}
+    try {
+      await window.TiqnoraDB?.ready?.();
+      const db = window.TiqnoraDB?.raw;
+      if (!db) return;
+      await db.from('analytics_events').insert({
+        event_name,
+        path: location.pathname + location.search,
+        session_id: sid(),
+        properties: { ...utm(), ...properties, referrer: document.referrer || null }
+      });
+    } catch (_) {}
+  }
+  window.TiqnoraAnalytics = {
+    track: send,
+    pageView() { return send('page_view', { title: document.title }); },
+    signup() { return send('sign_up'); },
+    serviceRequest() { return send('service_request'); },
+    aiDemo(agent) { return send('ai_demo', { agent }); },
+    planClick(plan) { return send('plan_click', { plan }); },
+    leadSubmit(source) { return send('generate_lead', { source }); }
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    window.TiqnoraAnalytics.pageView();
+  });
+})();

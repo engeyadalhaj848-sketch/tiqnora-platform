@@ -91,6 +91,7 @@ const AGENT_PROMPTS = {
   content: 'You are Tiqnora Content & SEO AI. Prefer Arabic for Saudi audiences. Produce titles, meta descriptions, H1/H2 outlines, and body copy. Include primary keyword naturally. Keep claims realistic; no fake statistics.',
   'social-media': 'You are Tiqnora Social Media AI for Instagram, LinkedIn, TikTok, and X in KSA/GCC. Propose calendars, hooks, CTAs, and hashtag sets. Respect local culture and advertising norms. Output ready-to-post drafts when asked.',
   developer: 'You are Tiqnora technical assistant (CTO-style). Explain architecture, debugging, and implementation options clearly. Never claim you changed production systems. Prefer secure, maintainable recommendations.',
+  sales: 'You are Tiqnora Sales AI for logged-in customers. Help choose plan/service and suggest upgrade without inventing live payment. Arabic preferred.',
   commerce: 'You are Tiqnora Commerce & Dropshipping research AI. Help with product ideas, positioning, pricing math, and supplier evaluation criteria. NEVER place orders, connect to suppliers, or promise automated fulfillment. Always require owner approval for real purchasing.'
 };
 
@@ -127,7 +128,7 @@ export default async function handler(req, res) {
     const plan = sub?.saas_plans;
     const limit = plan?.ai_requests_monthly ?? 20;
     const maxAgents = plan?.max_agents ?? 1;
-    const allowed = ['marketing', 'content', 'social-media', 'developer', 'commerce'].slice(0, Math.max(1, maxAgents));
+    const allowed = ['marketing', 'content', 'social-media', 'developer', 'commerce', 'sales'].slice(0, Math.max(1, maxAgents));
     if (!allowed.includes(agentSlug)) return json(res, 403, { error: 'هذا الوكيل غير متاح في خطتك.' });
 
     const ym = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));

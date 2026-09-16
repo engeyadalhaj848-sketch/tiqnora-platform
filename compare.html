@@ -36,11 +36,13 @@
         <a class="btn btn-primary" href="/customer">إنشاء حساب</a>
         <a class="btn btn-ghost" href="/services/ai-solutions">حلول AI</a>
         <a class="btn btn-ghost" href="/blog">المدونة</a>
+        <a class="btn btn-ghost" href="/sales">مساعد المبيعات</a>
       </div>
     </div>
     <div class="footer">© Tiqnora AI — الدفع الإلكتروني يُفعَّل لاحقاً؛ الترقية حالياً عبر الإدارة عند الحاجة.</div>
   </div>
   <script src="/js/config.js"></script>
+  <script src="/js/analytics.js"></script>
   <script src="/js/db.js"></script>
   <script src="/js/supabase-client-fix.js"></script>
   <script>
@@ -59,7 +61,7 @@
           <li>${p.max_projects} مشاريع</li>
           <li>${p.max_agents} وكلاء</li>
         </ul>
-        <a class="btn btn-primary" href="/customer#plans">ابدأ</a>
+        <a class="btn btn-primary" href="/customer#plans" onclick="window.TiqnoraAnalytics&&window.TiqnoraAnalytics.planClick(this.dataset.plan)" data-plan="${p.slug}">ابدأ</a>
       </div>`).join('')}</div>`;
   })();
   </script>
