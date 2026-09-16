@@ -116,6 +116,7 @@ const NAV = [
   { group: 'عام' },
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
   { id: 'analytics', ic: '▦', label: 'التحليلات' },
+  { id: 'growth', ic: '↗', label: 'النمو والسوق' },
   { id: 'notifications', ic: '◉', label: 'الإشعارات' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
   { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
@@ -885,7 +886,39 @@ VIEWS.notifications = async v => {
   };
 };
 
+
+VIEWS.growth = async v => {
+  v.innerHTML = `<div class="card"><h2>معمارية النمو (Phase 4)</h2>
+    <p class="card-desc">Marketplace + Dropshipping research — بدون شراء تلقائي أو دفع حي.</p>
+    <div id="g-stats"></div></div>
+    <div class="card"><h2>موردو الدروبشيبينغ</h2><div id="g-sup"></div></div>
+    <div class="card"><h2>بحث منتجات (Dropship Research)</h2><div id="g-res"></div></div>
+    <div class="card"><h2>Marketplace Listings</h2><div id="g-list"></div></div>
+    <div class="card"><h2>Demo Workflows</h2><div id="g-demo"></div></div>`;
+  const safe = async (fn) => { try { return await fn(); } catch (e) { return { data: null, error: e }; } };
+  const sup = await safe(() => db.from('commerce_suppliers').select('*').order('provider'));
+  const res = await safe(() => db.from('dropship_research').select('*').order('created_at',{ascending:false}).limit(30));
+  const list = await safe(() => db.from('marketplace_listings').select('*').order('created_at',{ascending:false}).limit(30));
+  const demos = await safe(() => db.from('demo_workflows').select('*').order('sort_order'));
+  const vendors = await safe(() => db.from('marketplace_vendors').select('*').limit(20));
+  $('#g-stats').innerHTML = `<div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+    <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">موردون</div><div style="font-weight:700">${sup.data?.length||0}</div></div>
+    <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">أبحاث منتجات</div><div style="font-weight:700">${res.data?.length||0}</div></div>
+    <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">Vendors</div><div style="font-weight:700">${vendors.data?.length||0}</div></div>
+    <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">Listings</div><div style="font-weight:700">${list.data?.length||0}</div></div>
+    <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">Demos</div><div style="font-weight:700">${demos.data?.length||0}</div></div>
+  </div>`;
+  $('#g-sup').innerHTML = (sup.data||[]).length ? tbl(['المورد','الحالة','الوضع'], (sup.data||[]).map(s=>`<tr><td>${esc(s.display_name||s.provider)}</td><td>${esc(s.status)}</td><td>${esc(s.fulfillment_mode)}</td></tr>`).join('')) : '<p style="color:var(--muted)">لا موردين أو الجدول غير متاح</p>';
+  $('#g-res').innerHTML = (res.error) ? '<p style="color:var(--muted)">نفّذ migration 014 لجدول dropship_research</p>' :
+    tbl(['العنوان','الحالة','تكلفة تقديرية'], (res.data||[]).map(r=>`<tr><td>${esc(r.title)}</td><td>${esc(r.status)}</td><td>${r.estimated_cost??'—'}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--muted)">لا أبحاث بعد</td></tr>');
+  $('#g-list').innerHTML = (list.error) ? '<p style="color:var(--muted)">نفّذ migration 014</p>' :
+    tbl(['العنوان','السعر','الحالة','التنفيذ'], (list.data||[]).map(l=>`<tr><td>${esc(l.title_ar)}</td><td>${money(l.price)}</td><td>${esc(l.status)}</td><td>${esc(l.fulfillment)}</td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا قوائم — المعمارية جاهزة</td></tr>');
+  $('#g-demo').innerHTML = (demos.error) ? '<p style="color:var(--muted)">نفّذ migration 014</p>' :
+    tbl(['التجربة','التصنيف','الوكيل'], (demos.data||[]).map(d=>`<tr><td>${esc(d.title_ar)}</td><td>${esc(d.category)}</td><td dir="ltr">${esc(d.agent_slug)}</td></tr>`).join(''));
+};
+
 /* ---------- SaaS plans & service requests ---------- */
+
 
 VIEWS.saas = async v => {
   v.innerHTML = `

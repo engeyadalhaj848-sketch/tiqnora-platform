@@ -8,6 +8,7 @@ let db = null, me = null, orgId = null, plan = null, usage = null, subRow = null
 const NAV = [
   { id: 'home', label: 'الرئيسية', ic: '◈' },
   { id: 'ai', label: 'الذكاء الاصطناعي', ic: '✺' },
+  { id: 'demos', label: 'تجارب جاهزة', ic: '▷' },
   { id: 'projects', label: 'المشاريع', ic: '▣' },
   { id: 'services', label: 'الخدمات', ic: '✦' },
   { id: 'plans', label: 'الاشتراك', ic: '◈' },
@@ -175,6 +176,10 @@ async function viewHome(v) {
 
 async function viewAi(v) {
   await loadPlanUsage();
+  const demoAgent = sessionStorage.getItem('tiqnora_demo_agent');
+  const demoPrompt = sessionStorage.getItem('tiqnora_demo_prompt');
+  if (demoAgent) sessionStorage.removeItem('tiqnora_demo_agent');
+  if (demoPrompt) sessionStorage.removeItem('tiqnora_demo_prompt');
   const limit = plan?.ai_requests_monthly ?? 20;
   const used = usage?.ai_requests ?? 0;
   const maxAgents = plan?.max_agents ?? 1;
@@ -196,6 +201,8 @@ async function viewAi(v) {
       <button class="btn btn-primary btn-sm" id="send">إرسال</button>
     </div>
   </div>`;
+  if (demoAgent) { const sel = $('#agent'); if (sel) sel.value = demoAgent; }
+  if (demoPrompt) { const inp = $('#msg'); if (inp) inp.value = demoPrompt; }
   const log = $('#log');
   const append = (role, text) => { const d = document.createElement('div'); d.className = `bubble ${role}`; d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight; };
   $('#send').onclick = async () => {
@@ -216,6 +223,30 @@ async function viewAi(v) {
       await loadPlanUsage();
     } catch (e) { log.lastChild.textContent = e.message; }
   };
+}
+
+async function viewDemos(v) {
+  const { data: rows } = await db.from('demo_workflows').select('*').eq('is_public', true).order('sort_order');
+  if (!rows?.length) {
+    v.innerHTML = `<div class="card"><div class="empty"><b>التجارب غير مفعّلة بعد</b>شغّل migration 014 في Supabase</div></div>`;
+    return;
+  }
+  v.innerHTML = `<div class="hero"><h2>تجارب جاهزة (Demo Workflows)</h2>
+    <p>مسارات قصيرة لاستخدام الوكلاء بدون تعقيد — مثالية للتعرّف على المنصة.</p></div>
+    <div class="cards">${rows.map(d => `
+      <div class="card">
+        <h2>${esc(d.title_ar)}</h2>
+        <p class="sub">${esc(d.description_ar || '')}</p>
+        <ol style="margin:10px 0;padding-inline-start:18px;color:var(--muted);font-size:.9rem;line-height:1.6">
+          ${(d.steps||[]).map(s=>`<li>${esc(s.ar||s)}</li>`).join('')}
+        </ol>
+        <button class="btn btn-primary btn-sm" data-demo="${esc(d.agent_slug||'marketing')}" data-prompt="${esc((d.title_ar||'') + ': ' + (d.description_ar||''))}">ابدأ مع الوكيل</button>
+      </div>`).join('')}</div>`;
+  $$('[data-demo]').forEach(b => b.onclick = () => {
+    sessionStorage.setItem('tiqnora_demo_agent', b.dataset.demo);
+    sessionStorage.setItem('tiqnora_demo_prompt', b.dataset.prompt);
+    location.hash = 'ai';
+  });
 }
 
 async function viewProjects(v) {
@@ -333,7 +364,7 @@ async function viewAccount(v) {
   $('#out').onclick = async () => { await db.auth.signOut(); location.reload(); };
 }
 
-const VIEWS = { home: viewHome, ai: viewAi, projects: viewProjects, services: viewServices, plans: viewPlans, billing: viewBilling, notifications: viewNotifications, account: viewAccount };
+const VIEWS = { home: viewHome, ai: viewAi, demos: viewDemos, projects: viewProjects, services: viewServices, plans: viewPlans, billing: viewBilling, notifications: viewNotifications, account: viewAccount };
 
 async function route() {
   const id = (location.hash || '#home').slice(1);
