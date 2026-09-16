@@ -497,10 +497,32 @@ VIEWS.leads = async v => {
 
 /* ---------- Customers ---------- */
 VIEWS.customers = async v => {
-  v.innerHTML = `<div class="card"><h2>العملاء</h2><div id="tbl"></div></div>`;
-  const { data: rows } = await db.from('customers').select('*').order('created_at', { ascending: false }).limit(300);
-  $('#tbl').innerHTML = tbl(['الاسم', 'الجوال', 'البريد', 'المدينة', 'الطلبات', 'إجمالي الشراء'], (rows || []).map(c =>
-    `<tr><td>${esc(c.full_name)}</td><td dir="ltr">${esc(c.phone || '—')}</td><td dir="ltr">${esc(c.email || '—')}</td><td>${esc(c.city || '—')}</td><td>${c.total_orders}</td><td>${money(c.total_spent)}</td></tr>`).join(''));
+  v.innerHTML = `<div class="card"><h2>حسابات بوابة العملاء (SaaS)</h2>
+    <p class="card-desc">المستخدمون المسجّلون في /customer مع المنظمة والخطة</p><div id="portal"></div></div>
+    <div class="card"><h2>عملاء المتجر</h2><div id="shop"></div></div>`;
+  const [{ data: portal }, { data: shop }] = await Promise.all([
+    db.from('profiles').select('id,email,full_name,role,is_active,default_organization_id,created_at').eq('role','customer').order('created_at',{ascending:false}).limit(200),
+    db.from('customers').select('*').order('created_at',{ascending:false}).limit(300),
+  ]);
+  const orgs = {};
+  const orgIds = [...new Set((portal||[]).map(p => p.default_organization_id).filter(Boolean))];
+  if (orgIds.length) {
+    const { data: orows } = await db.from('organizations').select('id,slug,name').in('id', orgIds);
+    (orows||[]).forEach(o => orgs[o.id] = o);
+  }
+  const subs = {};
+  if (orgIds.length) {
+    const { data: srows } = await db.from('subscriptions').select('organization_id,status,saas_plans(name_ar,slug)').in('organization_id', orgIds);
+    (srows||[]).forEach(s => subs[s.organization_id] = s);
+  }
+  $('#portal').innerHTML = tbl(['الاسم','البريد','المنظمة','الخطة','الحالة'], (portal||[]).map(p => {
+    const o = orgs[p.default_organization_id];
+    const s = subs[p.default_organization_id];
+    return `<tr><td>${esc(p.full_name||'—')}</td><td dir="ltr">${esc(p.email)}</td><td>${esc(o?.name||o?.slug||'—')}</td><td>${esc(s?.saas_plans?.name_ar||'—')}</td><td><span class="pill ${p.is_active?'ok':''}">${p.is_active?'نشط':'موقوف'}</span></td></tr>`;
+  }).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا حسابات عملاء بعد</td></tr>');
+  $('#shop').innerHTML = tbl(['الاسم','الجوال','البريد','المدينة','الطلبات','إجمالي الشراء'], (shop||[]).map(c =>
+    `<tr><td>${esc(c.full_name)}</td><td dir="ltr">${esc(c.phone||'—')}</td><td dir="ltr">${esc(c.email||'—')}</td><td>${esc(c.city||'—')}</td><td>${c.total_orders||0}</td><td>${money(c.total_spent)}</td></tr>`
+  ).join('') || '<tr><td colspan="6" style="color:var(--muted)">لا عملاء متجر بعد</td></tr>');
 };
 
 /* ---------- Coupons ---------- */
