@@ -21,7 +21,12 @@
   <script src="/js/supabase-client-fix.js"></script>
   <script>
   (async () => {
-    const slug = location.pathname.split('/').filter(Boolean).pop() || new URLSearchParams(location.search).get('slug');
+    const qs = new URLSearchParams(location.search);
+    const parts = location.pathname.split('/').filter(Boolean);
+    let slug = qs.get('slug');
+    if (!slug && parts[0] === 'blog' && parts[1]) slug = parts[1];
+    if (!slug) slug = parts.pop();
+    if (slug === 'blog-post' || slug === 'blog') slug = qs.get('slug');
     await window.TiqnoraDB.ready();
     const db = window.TiqnoraDB.raw;
     const el = document.getElementById('post');
