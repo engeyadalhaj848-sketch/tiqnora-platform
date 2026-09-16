@@ -768,7 +768,7 @@ VIEWS.ai = async v => {
       <label class="switch"><input type="checkbox" data-en="${a.id}" ${a.is_enabled ? 'checked' : ''}><span>مفعّل</span></label></div>
       <div class="form-grid">
         <div><label>المزود</label><select data-prov="${a.id}">${providerOptions.map(([k,t]) => `<option value="${k}" ${(a.provider===k || (k==='google_ai' && ['gemini','google'].includes(a.provider)))?'selected':''}>${t}</option>`).join('')}</select></div>
-        <div><label>النموذج</label><input dir="ltr" data-model="${a.id}" value="${esc(a.model || '')}" placeholder="gemini-2.5-flash"></div>
+        <div><label>النموذج</label><input dir="ltr" data-model="${a.id}" value="${esc(a.model || '')}" placeholder="gemini-3.6-flash"></div>
         <div><label>Temperature</label><input type="number" step="0.05" min="0" max="1.5" data-temp="${a.id}" value="${a.temperature ?? 0.7}"></div>
         <div style="grid-column:1/-1"><label>System Prompt</label><textarea data-prompt="${a.id}" rows="4">${esc(a.system_prompt || '')}</textarea></div>
       </div>

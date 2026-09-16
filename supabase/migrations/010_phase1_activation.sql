@@ -39,7 +39,7 @@ insert into public.ai_agents (
 )
 select o.id, v.slug, v.name, v.name_ar, v.name_en, v.department,
        v.description, v.description_ar, v.description_en, v.system_prompt,
-       'google_ai', 'gemini-2.5-flash', v.temperature, 'active', true, true, v.config
+       'google_ai', 'gemini-3.6-flash', v.temperature, 'active', true, true, v.config
 from public.organizations o
 cross join (values
   ('marketing', 'Marketing AI Manager', 'مدير التسويق بالذكاء الاصطناعي', 'Marketing AI Manager', 'marketing',
@@ -78,7 +78,7 @@ on conflict (organization_id, slug) do update set
   description_en = excluded.description_en,
   system_prompt = excluded.system_prompt,
   provider = 'google_ai',
-  model = 'gemini-2.5-flash',
+  model = 'gemini-3.6-flash',
   temperature = excluded.temperature,
   status = 'active',
   is_enabled = true,
@@ -86,10 +86,10 @@ on conflict (organization_id, slug) do update set
   config = excluded.config,
   updated_at = now();
 
--- Fix any agents still on the non-existent gemini-3.6-flash model
+-- Prefer current Gemini model id used by Tiqnora production
 update public.ai_agents
-set model = 'gemini-2.5-flash', provider = 'google_ai', updated_at = now()
-where model in ('gemini-3.6-flash', 'gemini-3-flash') or (provider in ('google_ai','gemini') and model is null);
+set model = 'gemini-3.6-flash', provider = 'google_ai', updated_at = now()
+where provider in ('google_ai','gemini') and model in ('gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3-flash');
 
 -- 5) Social OAuth token vault (008) if missing
 create table if not exists public.social_provider_tokens (
@@ -147,7 +147,7 @@ on conflict (provider) do nothing;
 insert into public.site_settings (key, value)
 values ('ai', jsonb_build_object(
   'default_provider', 'google_ai',
-  'default_model', 'gemini-2.5-flash',
+  'default_model', 'gemini-3.6-flash',
   'providers', jsonb_build_array('google_ai','openai','anthropic','xai')
 ))
 on conflict (key) do update set value = public.site_settings.value || excluded.value;

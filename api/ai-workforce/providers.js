@@ -40,7 +40,7 @@ export default async function handler(req, res) {
       id: 'google_ai',
       name: 'Google Gemini',
       configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
-      defaultModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      defaultModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
       envVars: ['GEMINI_API_KEY', 'GEMINI_MODEL']
     },
     {
