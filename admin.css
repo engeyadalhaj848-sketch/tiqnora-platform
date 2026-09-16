@@ -136,3 +136,11 @@ input, textarea, select { max-width: 100%; }
 @media (display-mode: standalone) {
   body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* Phase 2 mobile owner dashboard */
+@media (max-width: 900px) {
+  .stats .card { min-height: 88px; }
+  .admin-topbar h1 { font-size: 1.05rem; }
+  .side-brand span { font-size: .95rem; }
+  #view .card { margin-bottom: 12px; }
+}

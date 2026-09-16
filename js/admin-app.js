@@ -118,6 +118,8 @@ const NAV = [
   { id: 'orders', ic: '▤', label: 'الطلبات' },
   { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
   { id: 'customers', ic: '◉', label: 'العملاء' },
+  { id: 'saas', ic: '◈', label: 'اشتراكات SaaS' },
+  { id: 'service-requests', ic: '✉', label: 'طلبات الخدمات' },
   { group: 'الكتالوج' },
   { id: 'services', ic: '✦', label: 'الخدمات' },
   { id: 'categories', ic: '▤', label: 'الأقسام' },
@@ -251,58 +253,42 @@ VIEWS.workforce = v => {
 
 /* ---------- Dashboard ---------- */
 VIEWS.dashboard = async v => {
-  v.innerHTML = dbBanner() + '<div class="grid-stats" id="stats"></div><div class="card"><h2>أحدث الطلبات</h2><div id="recent-orders"></div></div><div class="card"><h2>أحدث الاستفسارات</h2><div id="recent-leads"></div></div>';
-  const [orders, leads, products, services, customers] = await Promise.all([
-    db.from('orders').select('*').order('created_at', { ascending: false }).limit(100),
-    db.from('leads').select('*').order('created_at', { ascending: false }).limit(50),
-    db.from('products').select('id, stock_quantity, track_stock, is_active'),
-    db.from('services').select('id, status'),
+  const ym = new Date().toISOString().slice(0, 7);
+  const [orders, leads, products, services, customers, agents, usageRows, reqs] = await Promise.all([
+    db.from('orders').select('id,order_number,customer_name,total,status,created_at').order('created_at',{ascending:false}).limit(8),
+    db.from('leads').select('id').limit(500),
+    db.from('products').select('id'),
+    db.from('services').select('id'),
     db.from('customers').select('id'),
+    db.from('ai_agents').select('slug,is_enabled,status,model').eq('is_enabled', true),
+    db.from('usage_meters').select('ai_requests,organization_id,period_ym').eq('period_ym', ym).limit(200),
+    db.from('service_requests').select('id,status').limit(200),
   ]);
-  const os = orders.data || [], ls = leads.data || [];
-  const revenue = os.filter(o => o.status !== 'cancelled').reduce((a, o) => a + Number(o.total || 0), 0);
-  const newLeads = ls.filter(l => l.status === 'new').length;
-  const lowStock = (products.data || []).filter(p => p.is_active && p.track_stock && p.stock_quantity <= 3).length;
-  $('#stats').innerHTML = [
-    ['إجمالي الطلبات', os.length, `${os.filter(o => o.status === 'pending').length} بانتظار التأكيد`],
-    ['إيرادات الطلبات', money(revenue), 'بدون الملغاة'],
-    ['استفسارات جديدة', newLeads, `من ${ls.length} إجمالًا`],
-    ['منتجات منشورة', (products.data || []).filter(p => p.is_active).length, `${lowStock} مخزون منخفض`],
-    ['خدمات', (services.data || []).filter(s => s.status === 'published').length, `من ${services.data.length} إجمالًا`],
-    ['عملاء', customers.data?.length || 0, ''],
-  ].map(([l, val, sub]) => `<div class="stat-card"><div class="lbl">${l}</div><div class="val">${val}</div><div class="sub">${sub}</div></div>`).join('');
-  $('#recent-orders').innerHTML = tbl(['رقم الطلب', 'العميل', 'الإجمالي', 'الحالة', 'التاريخ'], (os.slice(0, 8)).map(o =>
-    `<tr><td dir="ltr">${esc(o.order_number)}</td><td>${esc(o.customer_name)}</td><td>${money(o.total)}</td><td><span class="pill ${pillCls(o.status)}">${STATUS_AR[o.status] || o.status}</span></td><td style="color:var(--muted)">${new Date(o.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join(''));
-  $('#recent-leads').innerHTML = tbl(['الاسم', 'البريد', 'الرسالة', 'الحالة'], ls.slice(0, 6).map(l =>
-    `<tr><td>${esc(l.name)}</td><td dir="ltr">${esc(l.email || '—')}</td><td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.message || '')}</td><td><span class="pill ${l.status === 'new' ? 'warn' : 'ok'}">${l.status === 'new' ? 'جديد' : l.status}</span></td></tr>`).join(''));
+  const aiUsed = (usageRows.data || []).reduce((s, r) => s + (r.ai_requests || 0), 0);
+  const newReqs = (reqs.data || []).filter(r => r.status === 'new').length;
+  v.innerHTML = `
+  <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">حالة المنصة</div><div style="font-weight:700;margin-top:4px"><span class="pill ok">تشغيل</span></div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">وكلاء AI نشطون</div><div style="font-size:1.4rem;font-weight:700">${agents.data?.length || 0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">استخدام AI (${ym})</div><div style="font-size:1.4rem;font-weight:700">${aiUsed}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">طلبات خدمات جديدة</div><div style="font-size:1.4rem;font-weight:700">${newReqs}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">طلبات المتجر</div><div style="font-size:1.4rem;font-weight:700">${orders.data?.length || 0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">خدمات / منتجات</div><div style="font-size:1.4rem;font-weight:700">${services.data?.length || 0} / ${products.data?.length || 0}</div></div>
+  </div>
+  <div class="card"><div class="card-head"><h2 style="margin:0">آخر الطلبات</h2><a class="btn-sm" href="#orders">الكل</a></div>
+  <div style="overflow:auto">${tbl(['رقم','عميل','الإجمالي','حالة'], (orders.data||[]).map(o=>`<tr><td dir="ltr">${esc(o.order_number)}</td><td>${esc(o.customer_name)}</td><td>${money(o.total)}</td><td><span class="pill ${pillCls(o.status)}">${STATUS_AR[o.status]||o.status}</span></td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا طلبات</td></tr>')}</div></div>
+  <div class="card" style="margin-top:12px"><h2 style="margin-top:0">اختصارات الجوال</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <a class="btn-sm btn-primary" href="#workforce">فريق AI</a>
+      <a class="btn-sm" href="#saas">الاشتراكات</a>
+      <a class="btn-sm" href="#service-requests">طلبات الخدمات</a>
+      <a class="btn-sm" href="#services">الخدمات</a>
+      <a class="btn-sm" href="#packages">الباقات</a>
+      <a class="btn-sm" href="/customer.html" target="_blank">بوابة العملاء</a>
+    </div>
+  </div>`;
 };
 
-/* ---------- Services ---------- */
-const SVC_FIELDS = (cats) => [
-  { k: 'slug', t: 'المعرّف (بالإنجليزية)', req: 1, dir: 'ltr', ph: 'network-installation' },
-  { k: 'category_id', t: 'القسم', type: 'select', options: [{ v: '', t: '— بدون قسم —' }, ...cats.map(c => ({ v: c.id, t: c.name_ar }))] },
-  { k: 'icon', t: 'الأيقونة (رمز)', default: '✦' },
-  { k: 'image_url', t: 'رابط صورة', dir: 'ltr' },
-  { k: 'title_ar', t: 'العنوان بالعربية', req: 1 },
-  { k: 'title_en', t: 'Title (English)', req: 1, dir: 'ltr' },
-  { k: 'description_ar', t: 'الوصف بالعربية', type: 'textarea', full: 1 },
-  { k: 'description_en', t: 'Description (English)', type: 'textarea', full: 1, dir: 'ltr' },
-  { k: 'details_ar', t: 'التفاصيل بالعربية', type: 'textarea' },
-  { k: 'details_en', t: 'Details (English)', type: 'textarea', dir: 'ltr' },
-  { k: 'price', t: 'السعر (ر.س)', type: 'number' },
-  { k: 'discount_percent', t: 'خصم %', type: 'number' },
-  { k: 'period', t: 'الفترة', type: 'select', options: [{ v: 'one_time', t: 'مرة واحدة' }, { v: 'monthly', t: 'شهري' }, { v: 'yearly', t: 'سنوي' }] },
-  { k: 'duration_hours', t: 'المدة (ساعات)', type: 'number' },
-  { k: 'status', t: 'الحالة', type: 'select', options: [{ v: 'published', t: 'منشور' }, { v: 'draft', t: 'مسودة' }, { v: 'archived', t: 'مؤرشف' }] },
-  { k: 'featured', t: 'خدمة مميزة', type: 'checkbox' },
-  { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
-  { k: 'seo_title_ar', t: 'SEO عنوان (عربي)' },
-  { k: 'seo_title_en', t: 'SEO Title (EN)', dir: 'ltr' },
-  { k: 'seo_description_ar', t: 'SEO وصف (عربي)', type: 'textarea' },
-  { k: 'seo_description_en', t: 'SEO Description (EN)', type: 'textarea', dir: 'ltr' },
-  { k: 'keywords_ar', t: 'كلمات مفتاحية (عربي)', ph: 'شبكات, تأسيس, الرياض' },
-  { k: 'keywords_en', t: 'Keywords (EN)', dir: 'ltr' },
-];
 VIEWS.services = async v => {
   v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>الخدمات</h2><p class="card-desc">الخدمات المعروضة في الموقع الرئيسي — محتوى ثنائي اللغة مع حقول SEO.</p></div><button class="btn-primary" id="add">+ خدمة جديدة</button></div><div id="tbl"></div></div>`;
   const { data: cats } = await db.from('categories').select('*').eq('type', 'service').order('sort_order');
@@ -805,7 +791,36 @@ VIEWS.ai = async v => {
   ).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا محادثات بعد</td></tr>');
 };
 
+
+/* ---------- SaaS plans & service requests ---------- */
+VIEWS.saas = async v => {
+  v.innerHTML = `<div class="card"><h2>خطط SaaS</h2><p class="card-desc">Free / Basic / Professional / Enterprise — الترقية اليدوية من جدول الاشتراكات. بوابة الدفع لاحقاً.</p><div id="plans"></div></div>
+  <div class="card"><h2>اشتراكات المنظمات</h2><div id="subs"></div></div>`;
+  const { data: plans } = await db.from('saas_plans').select('*').order('sort_order');
+  $('#plans').innerHTML = tbl(['الخطة','شهري','AI/شهر','مشاريع','وكلاء','عام'], (plans||[]).map(p =>
+    `<tr><td><b>${esc(p.name_ar)}</b><br><small dir="ltr">${esc(p.slug)}</small></td><td>${money(p.price_monthly)}</td><td>${p.ai_requests_monthly}</td><td>${p.max_projects}</td><td>${p.max_agents}</td><td>${p.is_public?'نعم':'لا'}</td></tr>`).join(''));
+  const { data: subs } = await db.from('subscriptions').select('*, saas_plans(name_ar,slug), organizations(name,slug)').order('created_at',{ascending:false}).limit(50);
+  $('#subs').innerHTML = tbl(['منظمة','خطة','حالة','نهاية الفترة'], (subs||[]).map(s =>
+    `<tr><td>${esc(s.organizations?.name||s.organization_id)}<br><small dir="ltr">${esc(s.organizations?.slug||'')}</small></td><td>${esc(s.saas_plans?.name_ar||'')}</td><td><span class="pill">${esc(s.status)}</span></td><td>${s.current_period_end?new Date(s.current_period_end).toLocaleDateString('ar-SA'):'—'}</td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا اشتراكات — نفّذ migration 011</td></tr>');
+};
+
+VIEWS['service-requests'] = async v => {
+  v.innerHTML = `<div class="card"><h2>طلبات خدمات العملاء</h2><p class="card-desc">AI / تسويق / SEO / مواقع / أتمتة / تواصل / IT</p><div id="tbl"></div></div>`;
+  const { data: rows } = await db.from('service_requests').select('*').order('created_at',{ascending:false}).limit(100);
+  const st = ['new','reviewing','quoted','in_progress','done','canceled'];
+  $('#tbl').innerHTML = tbl(['العنوان','التصنيف','الحالة','تواصل','تاريخ'], (rows||[]).map(r =>
+    `<tr><td>${esc(r.title)}</td><td>${esc(r.category)}</td>
+     <td><select data-id="${r.id}">${st.map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
+     <td dir="ltr">${esc(r.contact_phone||r.contact_email||'—')}</td>
+     <td>${new Date(r.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا طلبات</td></tr>');
+  $$('[data-id]').forEach(s => s.onchange = async () => {
+    await db.from('service_requests').update({ status: s.value, updated_at: new Date().toISOString() }).eq('id', s.dataset.id);
+    toast('تم تحديث الحالة');
+  });
+};
+
 /* ---------- Users ---------- */
+
 VIEWS.users = async v => {
   v.innerHTML = `<div class="card"><h2>المستخدمون والصلاحيات</h2><p class="card-desc">إدارة أدوار المستخدمين — المالك يملك كل الصلاحيات.</p><div id="tbl"></div></div>`;
   const { data: rows } = await db.from('profiles').select('*').order('created_at', { ascending: false });

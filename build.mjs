@@ -6,7 +6,7 @@ mkdirSync(output, { recursive: true });
 
 const files = [
   'index.html', 'shop.html', 'product.html', 'checkout.html', 'track.html',
-  'admin.html', 'styles.css', 'script.js', 'admin.css',
+  'admin.html', 'customer.html', 'customer.css', 'styles.css', 'script.js', 'admin.css',
   'robots.txt', 'sitemap.xml', 'llms.txt',
 ];
 
@@ -28,6 +28,12 @@ if (existsSync('public/admin-manifest.json')) {
 }
 if (existsSync('public/admin-sw.js')) {
   cpSync('public/admin-sw.js', `${output}/admin-sw.js`);
+}
+if (existsSync('public/customer-manifest.json')) {
+  cpSync('public/customer-manifest.json', `${output}/customer-manifest.json`);
+}
+if (existsSync('public/customer-sw.js')) {
+  cpSync('public/customer-sw.js', `${output}/customer-sw.js`);
 }
 
 console.log('Build complete → dist/');

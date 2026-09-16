@@ -1,0 +1,14 @@
+{
+  "name": "Tiqnora Customer",
+  "short_name": "Tiqnora",
+  "start_url": "/customer.html",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    { "src": "/assets/tiqnora-logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/assets/tiqnora-logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
