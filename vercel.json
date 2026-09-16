@@ -54,5 +54,23 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/blog/:slug",
+      "destination": "/blog-post.html"
+    },
+    {
+      "source": "/blog",
+      "destination": "/blog.html"
+    },
+    {
+      "source": "/compare",
+      "destination": "/compare.html"
+    },
+    {
+      "source": "/services/:slug",
+      "destination": "/services/:slug.html"
+    }
   ]
 }

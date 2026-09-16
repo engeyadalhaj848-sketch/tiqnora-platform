@@ -117,6 +117,7 @@ const NAV = [
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
   { id: 'analytics', ic: '▦', label: 'التحليلات' },
   { id: 'growth', ic: '↗', label: 'النمو والسوق' },
+  { id: 'blog', ic: '✎', label: 'المدونة SEO' },
   { id: 'notifications', ic: '◉', label: 'الإشعارات' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
   { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
@@ -916,6 +917,42 @@ VIEWS.growth = async v => {
   $('#g-demo').innerHTML = (demos.error) ? '<p style="color:var(--muted)">نفّذ migration 014</p>' :
     tbl(['التجربة','التصنيف','الوكيل'], (demos.data||[]).map(d=>`<tr><td>${esc(d.title_ar)}</td><td>${esc(d.category)}</td><td dir="ltr">${esc(d.agent_slug)}</td></tr>`).join(''));
 };
+
+
+VIEWS.blog = async v => {
+  v.innerHTML = `<div class="card"><h2>مقالات المدونة</h2>
+    <p class="card-desc">المحتوى المنشور يظهر في /blog — أضف مقالات من هنا أو من SQL.</p>
+    <button class="btn-sm btn-primary" id="add-post">مقال جديد</button>
+    <div id="posts" style="margin-top:12px"></div></div>`;
+  const load = async () => {
+    const { data, error } = await db.from('blog_posts').select('*').order('published_at',{ascending:false}).limit(50);
+    if (error) { $('#posts').innerHTML = '<p style="color:var(--muted)">نفّذ migration 015</p>'; return; }
+    $('#posts').innerHTML = tbl(['العنوان','الحالة','تاريخ'], (data||[]).map(p=>`
+      <tr><td><a href="/blog/${esc(p.slug)}" target="_blank">${esc(p.title_ar)}</a><br><small dir="ltr">${esc(p.slug)}</small></td>
+      <td><span class="pill">${esc(p.status)}</span></td>
+      <td>${p.published_at?new Date(p.published_at).toLocaleDateString('ar-SA'):'—'}</td></tr>`).join('')||'<tr><td colspan="3">لا مقالات</td></tr>');
+  };
+  $('#add-post').onclick = () => crudModal({
+    title: 'مقال جديد',
+    fields: [
+      {key:'slug',label:'Slug',dir:'ltr'},
+      {key:'title_ar',label:'العنوان'},
+      {key:'excerpt_ar',label:'مقتطف'},
+      {key:'body_ar',label:'المحتوى'},
+      {key:'seo_title',label:'SEO Title'},
+      {key:'seo_description',label:'SEO Description'},
+      {key:'status',label:'الحالة'},
+    ],
+    onSave: async d => {
+      d.status = d.status || 'published';
+      d.published_at = d.status === 'published' ? new Date().toISOString() : null;
+      await db.from('blog_posts').insert(d);
+      toast('تمت الإضافة'); load();
+    }
+  });
+  await load();
+};
+
 
 /* ---------- SaaS plans & service requests ---------- */
 

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>مدونة Tiqnora AI | مقالات تقنية وتسويق وSEO</title>
+  <meta name="description" content="مقالات عملية عن التقنية، التسويق، والذكاء الاصطناعي للشركات في السعودية." />
+  <link rel="canonical" href="https://www.tiqnora.com/blog" />
+  <meta name="robots" content="index, follow" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" />
+  <link rel="stylesheet" href="/marketing.css" />
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Blog","name":"مدونة Tiqnora AI","url":"https://www.tiqnora.com/blog","publisher":{"@type":"Organization","name":"Tiqnora AI"}}
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav"><b>Tiqnora AI</b>
+      <a href="/">الرئيسية</a><a href="/#services">الخدمات</a><a href="/compare">مقارنة</a>
+      <a href="/blog">المدونة</a><a href="/customer">بوابة العملاء</a>
+    </nav>
+    <header class="hero">
+      <h1>المدونة</h1>
+      <p class="lead">محتوى SEO عملي يربط بين خدمات المنصة واحتياج العميل.</p>
+    </header>
+    <div id="list"><p class="lead">جارٍ التحميل…</p></div>
+    <div class="footer">© Tiqnora AI</div>
+  </div>
+  <script src="/js/config.js"></script>
+  <script src="/js/db.js"></script>
+  <script src="/js/supabase-client-fix.js"></script>
+  <script>
+  (async () => {
+    await window.TiqnoraDB.ready();
+    const db = window.TiqnoraDB.raw;
+    const el = document.getElementById('list');
+    if (!db) { el.innerHTML = '<p>تعذر الاتصال</p>'; return; }
+    const { data, error } = await db.from('blog_posts').select('slug,title_ar,excerpt_ar,published_at,tags').eq('status','published').order('published_at',{ascending:false});
+    if (error) { el.innerHTML = '<p class="lead">شغّل migration 015 لعرض المقالات، أو راجع لاحقاً.</p>'; return; }
+    el.innerHTML = (data||[]).map(p => `
+      <article class="card">
+        <h2 style="margin:0 0 8px;font-size:1.2rem"><a href="/blog/${p.slug}">${p.title_ar}</a></h2>
+        <p class="lead" style="margin:0">${p.excerpt_ar||''}</p>
+        <p style="margin:10px 0 0;font-size:.85rem;color:var(--muted)">${p.published_at?new Date(p.published_at).toLocaleDateString('ar-SA'):''}
+          ${(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('')}</p>
+      </article>`).join('') || '<p class="lead">لا مقالات منشورة بعد</p>';
+  })();
+  </script>
+</body>
+</html>

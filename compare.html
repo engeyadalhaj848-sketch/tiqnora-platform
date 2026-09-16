@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>مقارنة باقات وخدمات Tiqnora AI</title>
+  <meta name="description" content="قارن خطط SaaS وباقات الخدمات في Tiqnora AI واختر نقطة البداية المناسبة." />
+  <link rel="canonical" href="https://www.tiqnora.com/compare" />
+  <meta name="robots" content="index, follow" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" />
+  <link rel="stylesheet" href="/marketing.css" />
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebPage","name":"مقارنة الباقات والخدمات","url":"https://www.tiqnora.com/compare"}
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav"><b>Tiqnora AI</b><a href="/">الرئيسية</a><a href="/#pricing">الأسعار</a><a href="/customer">بوابة العملاء</a></nav>
+    <header class="hero">
+      <h1>مقارنة الباقات والخدمات</h1>
+      <p class="lead">اختر بين تجربة المنصة ذاتياً أو طلب خدمة منفّذة بواسطة الفريق.</p>
+    </header>
+    <div class="card">
+      <h2>خطط المنصة (SaaS)</h2>
+      <div id="plans"><p class="lead">…</p></div>
+    </div>
+    <div class="card">
+      <h2>مسار التحويل المقترح</h2>
+      <ol class="clean">
+        <li><b>تعرّف:</b> اقرأ صفحة خدمة أو مقالاً من المدونة</li>
+        <li><b>جرّب:</b> سجّل في بوابة العملاء (مجاني)</li>
+        <li><b>اختبر:</b> Demo Workflow أو محادثة AI</li>
+        <li><b>اطلب:</b> طلب خدمة أو ترقية خطة من داخل البوابة</li>
+      </ol>
+      <div class="cta">
+        <a class="btn btn-primary" href="/customer">إنشاء حساب</a>
+        <a class="btn btn-ghost" href="/services/ai-solutions">حلول AI</a>
+        <a class="btn btn-ghost" href="/blog">المدونة</a>
+      </div>
+    </div>
+    <div class="footer">© Tiqnora AI — الدفع الإلكتروني يُفعَّل لاحقاً؛ الترقية حالياً عبر الإدارة عند الحاجة.</div>
+  </div>
+  <script src="/js/config.js"></script>
+  <script src="/js/db.js"></script>
+  <script src="/js/supabase-client-fix.js"></script>
+  <script>
+  (async () => {
+    await window.TiqnoraDB.ready();
+    const db = window.TiqnoraDB.raw;
+    const el = document.getElementById('plans');
+    if (!db) return;
+    const { data } = await db.from('saas_plans').select('*').eq('is_public',true).order('sort_order');
+    el.innerHTML = `<div class="grid">${(data||[]).map(p => `
+      <div class="card" style="margin:0">
+        <h3>${p.name_ar}</h3>
+        <p><b>${Number(p.price_monthly)===0?'مجاناً':Number(p.price_monthly).toLocaleString('ar-SA')+' ر.س / شهر'}</b></p>
+        <ul class="clean">
+          <li>${p.ai_requests_monthly} طلب AI شهرياً</li>
+          <li>${p.max_projects} مشاريع</li>
+          <li>${p.max_agents} وكلاء</li>
+        </ul>
+        <a class="btn btn-primary" href="/customer#plans">ابدأ</a>
+      </div>`).join('')}</div>`;
+  })();
+  </script>
+</body>
+</html>

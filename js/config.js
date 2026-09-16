@@ -8,6 +8,8 @@
    even while these are empty.
    ============================================================ */
 window.TIQNORA_CONFIG = {
+  googleAnalyticsId: '',
+  googleSearchConsoleMeta: '',
   supabaseUrl: 'https://mndyabvlhvrhdbgmepkg.supabase.co',
 supabaseAnonKey: 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao',
 

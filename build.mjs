@@ -6,7 +6,7 @@ mkdirSync(output, { recursive: true });
 
 const files = [
   'index.html', 'shop.html', 'product.html', 'checkout.html', 'track.html',
-  'admin.html', 'customer.html', 'customer.css', 'styles.css', 'script.js', 'admin.css',
+  'admin.html', 'customer.html', 'customer.css', 'blog.html', 'blog-post.html', 'compare.html', 'marketing.css', 'styles.css', 'script.js', 'admin.css',
   'robots.txt', 'sitemap.xml', 'llms.txt',
 ];
 
@@ -14,6 +14,7 @@ for (const file of files) {
   if (existsSync(file)) cpSync(file, `${output}/${file}`);
 }
 
+if (existsSync('services')) cpSync('services', `${output}/services`, { recursive: true });
 for (const dir of ['js', 'supabase', 'docs', 'admin', 'api']) {
   if (existsSync(dir)) cpSync(dir, `${output}/${dir}`, { recursive: true });
 }
