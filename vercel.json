@@ -57,38 +57,28 @@
   ],
   "rewrites": [
     {
-      "source": "/blog/:slug",
-      "destination": "/blog-post.html?slug=:slug"
+      "source": "/blog/:slug/",
+      "destination": "/blog-post.html"
     },
     {
-      "source": "/blog",
-      "destination": "/blog.html"
+      "source": "/blog/:slug",
+      "destination": "/blog-post.html"
+    },
+    {
+      "source": "/compare/",
+      "destination": "/compare.html"
     },
     {
       "source": "/compare",
       "destination": "/compare.html"
     },
     {
+      "source": "/services/:slug/",
+      "destination": "/services/:slug.html"
+    },
+    {
       "source": "/services/:slug",
       "destination": "/services/:slug.html"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/blog/([^/]+)",
-      "dest": "/blog-post.html?slug=$1"
-    },
-    {
-      "src": "/blog",
-      "dest": "/blog.html"
-    },
-    {
-      "src": "/compare",
-      "dest": "/compare.html"
-    },
-    {
-      "src": "/services/([^/]+)",
-      "dest": "/services/$1.html"
     }
   ]
 }
