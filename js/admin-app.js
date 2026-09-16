@@ -115,6 +115,8 @@ async function boot() {
 const NAV = [
   { group: 'عام' },
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
+  { id: 'analytics', ic: '▦', label: 'التحليلات' },
+  { id: 'notifications', ic: '◉', label: 'الإشعارات' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
   { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
   { id: 'customers', ic: '◉', label: 'العملاء' },
@@ -254,36 +256,52 @@ VIEWS.workforce = v => {
 /* ---------- Dashboard ---------- */
 VIEWS.dashboard = async v => {
   const ym = new Date().toISOString().slice(0, 7);
-  const [orders, leads, products, services, customers, agents, usageRows, reqs] = await Promise.all([
+  const [
+    orders, leads, products, services, shopCustomers, portalCustomers,
+    agents, usageRows, reqs, subs, plans, invoices, notifs
+  ] = await Promise.all([
     db.from('orders').select('id,order_number,customer_name,total,status,created_at').order('created_at',{ascending:false}).limit(8),
     db.from('leads').select('id').limit(500),
     db.from('products').select('id'),
     db.from('services').select('id'),
     db.from('customers').select('id'),
+    db.from('profiles').select('id').eq('role','customer'),
     db.from('ai_agents').select('slug,is_enabled,status,model').eq('is_enabled', true),
-    db.from('usage_meters').select('ai_requests,organization_id,period_ym').eq('period_ym', ym).limit(200),
-    db.from('service_requests').select('id,status').limit(200),
+    db.from('usage_meters').select('ai_requests,organization_id,period_ym').eq('period_ym', ym).limit(500),
+    db.from('service_requests').select('id,status,title,created_at').order('created_at',{ascending:false}).limit(200),
+    db.from('subscriptions').select('id,status,saas_plans(slug,name_ar,price_monthly)'),
+    db.from('saas_plans').select('id,slug,is_public'),
+    db.from('billing_invoices').select('amount,status').eq('status','pending'),
+    db.from('notifications').select('id').eq('audience','admin').is('read_at', null).limit(100),
   ]);
   const aiUsed = (usageRows.data || []).reduce((s, r) => s + (r.ai_requests || 0), 0);
   const newReqs = (reqs.data || []).filter(r => r.status === 'new').length;
+  const activeSubs = (subs.data || []).filter(s => s.status === 'active').length;
+  const mrr = (subs.data || []).filter(s => s.status === 'active').reduce((s, x) => s + Number(x.saas_plans?.price_monthly || 0), 0);
+  const pendingRev = (invoices.data || []).reduce((s, x) => s + Number(x.amount || 0), 0);
   v.innerHTML = `
   <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
-    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">حالة المنصة</div><div style="font-weight:700;margin-top:4px"><span class="pill ok">تشغيل</span></div></div>
-    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">وكلاء AI نشطون</div><div style="font-size:1.4rem;font-weight:700">${agents.data?.length || 0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">عملاء البوابة</div><div style="font-size:1.4rem;font-weight:700">${portalCustomers.data?.length||0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">اشتراكات نشطة</div><div style="font-size:1.4rem;font-weight:700">${activeSubs}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">إيراد متوقع شهري</div><div style="font-size:1.25rem;font-weight:700">${money(mrr)}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">فواتير معلّقة</div><div style="font-size:1.25rem;font-weight:700">${money(pendingRev)}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">استخدام AI (${ym})</div><div style="font-size:1.4rem;font-weight:700">${aiUsed}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">طلبات خدمات جديدة</div><div style="font-size:1.4rem;font-weight:700">${newReqs}</div></div>
-    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">طلبات المتجر</div><div style="font-size:1.4rem;font-weight:700">${orders.data?.length || 0}</div></div>
-    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">خدمات / منتجات</div><div style="font-size:1.4rem;font-weight:700">${services.data?.length || 0} / ${products.data?.length || 0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">وكلاء نشطون</div><div style="font-size:1.4rem;font-weight:700">${agents.data?.length||0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">إشعارات غير مقروءة</div><div style="font-size:1.4rem;font-weight:700">${notifs.data?.length||0}</div></div>
   </div>
-  <div class="card"><div class="card-head"><h2 style="margin:0">آخر الطلبات</h2><a class="btn-sm" href="#orders">الكل</a></div>
+  <div class="card"><div class="card-head"><h2 style="margin:0">آخر طلبات المتجر</h2><a class="btn-sm" href="#orders">الكل</a></div>
   <div style="overflow:auto">${tbl(['رقم','عميل','الإجمالي','حالة'], (orders.data||[]).map(o=>`<tr><td dir="ltr">${esc(o.order_number)}</td><td>${esc(o.customer_name)}</td><td>${money(o.total)}</td><td><span class="pill ${pillCls(o.status)}">${STATUS_AR[o.status]||o.status}</span></td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا طلبات</td></tr>')}</div></div>
-  <div class="card" style="margin-top:12px"><h2 style="margin-top:0">اختصارات الجوال</h2>
+  <div class="card" style="margin-top:12px"><h2 style="margin-top:0">آخر طلبات الخدمات</h2>
+    ${tbl(['العنوان','الحالة','تاريخ'], (reqs.data||[]).slice(0,6).map(r=>`<tr><td>${esc(r.title)}</td><td><span class="pill">${esc(r.status)}</span></td><td>${new Date(r.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--muted)">لا طلبات</td></tr>')}
+  </div>
+  <div class="card" style="margin-top:12px"><h2 style="margin-top:0">اختصارات</h2>
     <div style="display:flex;flex-wrap:wrap;gap:8px">
-      <a class="btn-sm btn-primary" href="#workforce">فريق AI</a>
+      <a class="btn-sm btn-primary" href="#analytics">التحليلات</a>
       <a class="btn-sm" href="#saas">الاشتراكات</a>
       <a class="btn-sm" href="#service-requests">طلبات الخدمات</a>
-      <a class="btn-sm" href="#services">الخدمات</a>
-      <a class="btn-sm" href="#packages">الباقات</a>
+      <a class="btn-sm" href="#workforce">فريق AI</a>
+      <a class="btn-sm" href="#notifications">الإشعارات</a>
       <a class="btn-sm" href="/customer.html" target="_blank">بوابة العملاء</a>
     </div>
   </div>`;
@@ -814,7 +832,61 @@ VIEWS.ai = async v => {
 };
 
 
+
+/* ---------- Analytics & Notifications ---------- */
+VIEWS.analytics = async v => {
+  const ym = new Date().toISOString().slice(0, 7);
+  const [profiles, usage, convos, reqs, subs] = await Promise.all([
+    db.from('profiles').select('id,role,created_at'),
+    db.from('usage_meters').select('ai_requests,period_ym').eq('period_ym', ym),
+    db.from('ai_conversations').select('id,agent_id,provider,created_at').order('created_at',{ascending:false}).limit(500),
+    db.from('service_requests').select('id,category,status,created_at'),
+    db.from('subscriptions').select('id,status,saas_plans(slug,name_ar)'),
+  ]);
+  const customers = (profiles.data||[]).filter(p => p.role === 'customer').length;
+  const aiTotal = (usage.data||[]).reduce((s,r)=>s+(r.ai_requests||0),0);
+  const byCat = {};
+  (reqs.data||[]).forEach(r => { byCat[r.category] = (byCat[r.category]||0)+1; });
+  const byPlan = {};
+  (subs.data||[]).forEach(s => { const k = s.saas_plans?.slug||'?'; byPlan[k]=(byPlan[k]||0)+1; });
+  v.innerHTML = `<div class="card"><h2>تحليلات المنصة</h2>
+    <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0">
+      <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">المستخدمون (عملاء)</div><div style="font-size:1.3rem;font-weight:700">${customers}</div></div>
+      <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">AI Usage (${ym})</div><div style="font-size:1.3rem;font-weight:700">${aiTotal}</div></div>
+      <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">محادثات AI (عينة)</div><div style="font-size:1.3rem;font-weight:700">${convos.data?.length||0}</div></div>
+      <div class="card" style="padding:12px"><div style="color:var(--muted);font-size:.8rem">طلبات خدمات</div><div style="font-size:1.3rem;font-weight:700">${reqs.data?.length||0}</div></div>
+    </div>
+    <h3>توزيع طلبات الخدمات</h3>
+    ${tbl(['التصنيف','العدد'], Object.entries(byCat).map(([k,n])=>`<tr><td>${esc(k)}</td><td>${n}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--muted)">لا بيانات</td></tr>')}
+    <h3 style="margin-top:16px">توزيع الخطط</h3>
+    ${tbl(['الخطة','مشتركون'], Object.entries(byPlan).map(([k,n])=>`<tr><td>${esc(k)}</td><td>${n}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--muted)">لا بيانات</td></tr>')}
+    <p style="color:var(--muted);margin-top:12px;font-size:.85rem">Conversion: بوابة العملاء → طلب خدمة / ترقية — راقب الفواتير المعلّقة في اشتراكات SaaS.</p>
+  </div>`;
+};
+
+VIEWS.notifications = async v => {
+  v.innerHTML = `<div class="card"><div class="card-head"><h2 style="margin:0">إشعارات الإدارة</h2>
+    <button class="btn-sm" id="mark-all">تعليم الكل كمقروء</button></div><div id="nlist"></div></div>`;
+  const { data } = await db.from('notifications').select('*').or('audience.eq.admin,audience.eq.both').order('created_at',{ascending:false}).limit(80);
+  $('#nlist').innerHTML = (data||[]).map(n => `<div style="padding:12px 0;border-bottom:1px solid var(--line);opacity:${n.read_at?.5:1}">
+    <b>${esc(n.title_ar)}</b> <span class="pill">${esc(n.type)}</span>
+    <div style="color:var(--muted);font-size:.9rem">${esc(n.body_ar||'')}</div>
+    <small style="color:var(--muted)">${new Date(n.created_at).toLocaleString('ar-SA')}</small>
+    ${n.read_at?'':`<button class="btn-sm" data-nr="${n.id}">مقروء</button>`}
+  </div>`).join('') || '<p style="color:var(--muted)">لا إشعارات — نفّذ migration 013</p>';
+  $$('[data-nr]').forEach(b => b.onclick = async () => {
+    await db.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', b.dataset.nr);
+    VIEWS.notifications(v);
+  });
+  $('#mark-all').onclick = async () => {
+    const ids = (data||[]).filter(n=>!n.read_at).map(n=>n.id);
+    for (const id of ids) await db.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
+    toast('تم'); VIEWS.notifications(v);
+  };
+};
+
 /* ---------- SaaS plans & service requests ---------- */
+
 VIEWS.saas = async v => {
   v.innerHTML = `
   <div class="card"><div class="card-head"><h2 style="margin:0">خطط SaaS</h2>

@@ -144,3 +144,9 @@ input, textarea, select { max-width: 100%; }
   .side-brand span { font-size: .95rem; }
   #view .card { margin-bottom: 12px; }
 }
+
+/* Phase 3 production polish */
+@media (max-width: 900px) {
+  .stats { gap: 8px !important; }
+  .card { border-radius: 14px; }
+}
