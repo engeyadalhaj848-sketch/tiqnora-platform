@@ -816,14 +816,103 @@ VIEWS.ai = async v => {
 
 /* ---------- SaaS plans & service requests ---------- */
 VIEWS.saas = async v => {
-  v.innerHTML = `<div class="card"><h2>خطط SaaS</h2><p class="card-desc">Free / Basic / Professional / Enterprise — الترقية اليدوية من جدول الاشتراكات. بوابة الدفع لاحقاً.</p><div id="plans"></div></div>
-  <div class="card"><h2>اشتراكات المنظمات</h2><div id="subs"></div></div>`;
-  const { data: plans } = await db.from('saas_plans').select('*').order('sort_order');
-  $('#plans').innerHTML = tbl(['الخطة','شهري','AI/شهر','مشاريع','وكلاء','عام'], (plans||[]).map(p =>
-    `<tr><td><b>${esc(p.name_ar)}</b><br><small dir="ltr">${esc(p.slug)}</small></td><td>${money(p.price_monthly)}</td><td>${p.ai_requests_monthly}</td><td>${p.max_projects}</td><td>${p.max_agents}</td><td>${p.is_public?'نعم':'لا'}</td></tr>`).join(''));
-  const { data: subs } = await db.from('subscriptions').select('*, saas_plans(name_ar,slug), organizations(name,slug)').order('created_at',{ascending:false}).limit(50);
-  $('#subs').innerHTML = tbl(['منظمة','خطة','حالة','نهاية الفترة'], (subs||[]).map(s =>
-    `<tr><td>${esc(s.organizations?.name||s.organization_id)}<br><small dir="ltr">${esc(s.organizations?.slug||'')}</small></td><td>${esc(s.saas_plans?.name_ar||'')}</td><td><span class="pill">${esc(s.status)}</span></td><td>${s.current_period_end?new Date(s.current_period_end).toLocaleDateString('ar-SA'):'—'}</td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا اشتراكات — نفّذ migration 011</td></tr>');
+  v.innerHTML = `
+  <div class="card"><div class="card-head"><h2 style="margin:0">خطط SaaS</h2>
+    <button class="btn-sm btn-primary" id="add-plan">خطة جديدة</button></div>
+    <p class="card-desc">تعديل الأسعار والحدود من هنا. الدفع الحقيقي غير مفعّل — التغيير يدوي أو عبر طلب ترقية.</p>
+    <div id="plans"></div></div>
+  <div class="card"><h2>المشتركون</h2><div id="subs"></div></div>
+  <div class="card"><h2>سجل الاشتراكات</h2><div id="events"></div></div>
+  <div class="card"><h2>الفواتير / Billing</h2><div id="inv"></div></div>
+  <div class="card"><h2>بوابات الدفع (جاهزية فقط)</h2><div id="pay"></div></div>`;
+
+  const planFields = [
+    { key: 'slug', label: 'Slug', dir: 'ltr' },
+    { key: 'name_ar', label: 'الاسم عربي' },
+    { key: 'name_en', label: 'الاسم EN', dir: 'ltr' },
+    { key: 'description_ar', label: 'الوصف' },
+    { key: 'price_monthly', label: 'سعر شهري', type: 'number' },
+    { key: 'price_yearly', label: 'سعر سنوي', type: 'number' },
+    { key: 'ai_requests_monthly', label: 'حد AI شهري', type: 'number' },
+    { key: 'max_projects', label: 'حد المشاريع', type: 'number' },
+    { key: 'max_agents', label: 'حد الوكلاء', type: 'number' },
+    { key: 'max_team_members', label: 'حد الأعضاء', type: 'number' },
+    { key: 'sort_order', label: 'الترتيب', type: 'number' },
+    { key: 'is_public', label: 'ظاهرة للعملاء', type: 'checkbox' },
+  ];
+
+  const load = async () => {
+    const { data: plans } = await db.from('saas_plans').select('*').order('sort_order');
+    $('#plans').innerHTML = tbl(['خطة','شهري','AI','مشاريع','وكلاء','عامة','إجراء'], (plans||[]).map(p =>
+      `<tr><td><b>${esc(p.name_ar)}</b><br><small dir="ltr">${esc(p.slug)}</small></td>
+       <td>${money(p.price_monthly)}</td><td>${p.ai_requests_monthly}</td><td>${p.max_projects}</td><td>${p.max_agents}</td>
+       <td>${p.is_public?'نعم':'لا'}</td>
+       <td><button class="btn-sm" data-edit-plan="${p.id}">تعديل</button></td></tr>`).join(''));
+    $$('[data-edit-plan]').forEach(b => b.onclick = () => {
+      const row = (plans||[]).find(x => x.id === b.dataset.editPlan);
+      crudModal({ title: 'تعديل خطة', fields: planFields, row, onSave: async d => {
+        d.price_monthly = Number(d.price_monthly)||0; d.price_yearly = Number(d.price_yearly)||0;
+        d.ai_requests_monthly = Number(d.ai_requests_monthly)||0;
+        d.max_projects = Number(d.max_projects)||1; d.max_agents = Number(d.max_agents)||1;
+        d.max_team_members = Number(d.max_team_members)||1; d.sort_order = Number(d.sort_order)||0;
+        d.is_public = !!d.is_public; d.updated_at = new Date().toISOString();
+        await db.from('saas_plans').update(d).eq('id', row.id);
+        toast('تم تحديث الخطة'); load();
+      }});
+    });
+
+    const { data: subs } = await db.from('subscriptions').select('*, saas_plans(name_ar,slug), organizations(name,slug)').order('created_at',{ascending:false}).limit(100);
+    $('#subs').innerHTML = tbl(['منظمة','خطة','حالة','تجديد','تغيير الخطة'], (subs||[]).map(s =>
+      `<tr><td>${esc(s.organizations?.name||'')}<br><small dir="ltr">${esc(s.organizations?.slug||s.organization_id)}</small></td>
+       <td>${esc(s.saas_plans?.name_ar||'')}</td><td><span class="pill">${esc(s.status)}</span></td>
+       <td>${s.current_period_end?new Date(s.current_period_end).toLocaleDateString('ar-SA'):'—'}</td>
+       <td><select data-chg="${s.organization_id}">${(plans||[]).map(p=>`<option value="${p.slug}" ${s.saas_plans?.slug===p.slug?'selected':''}>${esc(p.name_ar)}</option>`).join('')}</select>
+       <button class="btn-sm" data-apply="${s.organization_id}">تطبيق</button></td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا مشتركين</td></tr>');
+    $$('[data-apply]').forEach(b => b.onclick = async () => {
+      const sel = $(`select[data-chg="${b.dataset.apply}"]`);
+      const { error } = await db.rpc('admin_change_subscription_plan', { p_organization_id: b.dataset.apply, p_plan_slug: sel.value, p_note: 'Changed from Admin SaaS panel' });
+      if (error) return toast(error.message, false);
+      toast('تم تغيير الخطة'); load();
+    });
+
+    const { data: events } = await db.from('subscription_events').select('*, saas_plans!subscription_events_to_plan_id_fkey(name_ar)').order('created_at',{ascending:false}).limit(40);
+    // fallback simple select if join name fails
+    let ev = events;
+    if (!ev) {
+      const r = await db.from('subscription_events').select('*').order('created_at',{ascending:false}).limit(40);
+      ev = r.data;
+    }
+    $('#events').innerHTML = tbl(['نوع','منظمة','ملاحظة','تاريخ'], (ev||[]).map(e =>
+      `<tr><td><span class="pill">${esc(e.event_type)}</span></td><td dir="ltr">${esc(String(e.organization_id||'').slice(0,8))}…</td><td>${esc(e.note||'')}</td><td>${new Date(e.created_at).toLocaleString('ar-SA')}</td></tr>`
+    ).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا أحداث بعد — نفّذ migration 012</td></tr>');
+
+    const { data: inv } = await db.from('billing_invoices').select('*').order('created_at',{ascending:false}).limit(40);
+    $('#inv').innerHTML = tbl(['مبلغ','حالة','مزود','مرجع','تاريخ'], (inv||[]).map(i =>
+      `<tr><td>${money(i.amount)} ${esc(i.currency||'SAR')}</td><td><span class="pill">${esc(i.status)}</span></td><td>${esc(i.provider||'—')}</td><td dir="ltr">${esc(i.provider_ref||'—')}</td><td>${new Date(i.created_at).toLocaleDateString('ar-SA')}</td></tr>`
+    ).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا فواتير</td></tr>');
+
+    const { data: pay } = await db.from('payment_providers').select('*').order('slug');
+    $('#pay').innerHTML = tbl(['البوابة','مفعّلة','الوضع','ملاحظات'], (pay||[]).map(p =>
+      `<tr><td>${esc(p.display_name)} <small dir="ltr">(${esc(p.slug)})</small></td>
+       <td><input type="checkbox" data-pay="${p.id}" ${p.enabled?'checked':''} /></td>
+       <td>${esc(p.mode)}</td><td style="color:var(--muted);font-size:.85rem">${esc(JSON.stringify(p.config||{}))}</td></tr>`
+    ).join('') || '<tr><td colspan="4" style="color:var(--muted)">نفّذ migration 012</td></tr>');
+    $$('[data-pay]').forEach(c => c.onchange = async () => {
+      await db.from('payment_providers').update({ enabled: c.checked, updated_at: new Date().toISOString() }).eq('id', c.dataset.pay);
+      toast('تم التحديث');
+    });
+  };
+
+  $('#add-plan').onclick = () => crudModal({ title: 'خطة جديدة', fields: planFields, onSave: async d => {
+    d.price_monthly = Number(d.price_monthly)||0; d.price_yearly = Number(d.price_yearly)||0;
+    d.ai_requests_monthly = Number(d.ai_requests_monthly)||20;
+    d.max_projects = Number(d.max_projects)||1; d.max_agents = Number(d.max_agents)||1;
+    d.max_team_members = Number(d.max_team_members)||1; d.sort_order = Number(d.sort_order)||50;
+    d.is_public = d.is_public !== false;
+    await db.from('saas_plans').insert(d);
+    toast('تمت إضافة الخطة'); load();
+  }});
+  await load();
 };
 
 VIEWS['service-requests'] = async v => {

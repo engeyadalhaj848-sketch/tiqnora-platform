@@ -238,15 +238,48 @@ async function viewServices(v) {
 }
 
 async function viewPlans(v) {
+  await loadPlanUsage();
   const { data: plans } = await db.from('saas_plans').select('*').eq('is_public', true).order('sort_order');
-  v.innerHTML = `<div class="cards">${(plans || []).map(p => `
+  const { data: sub } = await db.from('subscriptions').select('*, saas_plans(*)').eq('organization_id', orgId).maybeSingle();
+  plan = sub?.saas_plans || plan;
+  const limit = plan?.ai_requests_monthly ?? 20;
+  const used = usage?.ai_requests ?? 0;
+  const over = used >= limit;
+  const { data: inv } = await db.from('billing_invoices').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(5);
+  v.innerHTML = `
+  <div class="card" style="${over ? 'border-color:var(--warn)' : ''}">
+    <h2>اشتراكك الحالي</h2>
+    <div class="cards" style="margin-top:12px">
+      <div class="card"><div class="sub">الخطة</div><div class="val" style="font-size:1.15rem">${esc(plan?.name_ar || 'مجاني')}</div></div>
+      <div class="card"><div class="sub">استخدام AI</div><div class="val">${used} / ${limit}</div>
+        ${over ? '<div class="sub" style="color:var(--warn)">وصلت للحد — رقِّ خطتك</div>' : ''}</div>
+      <div class="card"><div class="sub">المشاريع</div><div class="val">${plan?.max_projects ?? 1}</div></div>
+      <div class="card"><div class="sub">الوكلاء</div><div class="val">${plan?.max_agents ?? 1}</div></div>
+    </div>
+    <p class="sub">التجديد: ${sub?.current_period_end ? new Date(sub.current_period_end).toLocaleDateString('ar-SA') : '—'}</p>
+    <p style="color:var(--muted);line-height:1.6;margin:8px 0 0">${esc(plan?.description_ar || '')}</p>
+  </div>
+  <div class="cards" style="margin-top:12px">${(plans || []).map(p => `
     <div class="card" style="${plan?.slug === p.slug ? 'border-color:var(--accent)' : ''}">
-      <h2>${esc(p.name_ar)} ${plan?.slug === p.slug ? '<span class="pill ok">خطتك</span>' : ''}</h2>
+      <h2>${esc(p.name_ar)} ${plan?.slug === p.slug ? '<span class="pill ok">الحالية</span>' : ''}</h2>
       <div class="val">${Number(p.price_monthly) === 0 ? 'مجاناً' : Number(p.price_monthly).toLocaleString('ar-SA') + ' ر.س'}</div>
-      <div class="sub">شهرياً · ${p.ai_requests_monthly} طلب AI · ${p.max_projects} مشاريع · ${p.max_agents} وكلاء</div>
-      <p style="color:var(--muted);font-size:.85rem;margin:10px 0 0">${esc(p.description_ar || '')}</p>
+      <div class="sub">شهرياً · ${p.ai_requests_monthly} AI · ${p.max_projects} مشاريع · ${p.max_agents} وكلاء</div>
+      <p style="color:var(--muted);font-size:.85rem;margin:10px 0">${esc(p.description_ar || '')}</p>
+      ${plan?.slug === p.slug ? '' : `<button class="btn btn-primary btn-sm" data-upgrade="${esc(p.slug)}">${Number(p.price_monthly)===0?'التبديل للمجاني':'طلب ترقية'}</button>`}
     </div>`).join('')}</div>
-    <div class="card"><p style="margin:0;color:var(--muted);line-height:1.6">الترقية والدفع الإلكتروني سيُربطان لاحقاً ببوابة دفع سعودية. حالياً يمكن للمالك ترقية اشتراكك من لوحة الإدارة.</p></div>`;
+  <div class="card" style="margin-top:12px"><h2>الفواتير</h2>
+    <table><thead><tr><th>المبلغ</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+    <tbody>${(inv||[]).map(i=>`<tr><td>${Number(i.amount).toLocaleString('ar-SA')} ${esc(i.currency||'SAR')}</td><td><span class="pill">${esc(i.status)}</span></td><td>${new Date(i.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--muted)">لا فواتير بعد</td></tr>'}
+    </tbody></table>
+    <p style="color:var(--muted);font-size:.85rem;margin-top:10px">بوابات الدفع (Stripe / HyperPay / Tap / Mada) جاهزة معمارياً وغير مفعّلة بعد. طلب الترقية يُسجَّل ويُعالَج من الإدارة.</p>
+  </div>`;
+  $$('[data-upgrade]').forEach(b => b.onclick = async () => {
+    const { data, error } = await db.rpc('request_plan_change', { p_plan_slug: b.dataset.upgrade, p_billing_cycle: 'monthly' });
+    if (error) return toast(error.message, false);
+    toast(data?.message || 'تم تسجيل الطلب');
+    await loadPlanUsage();
+    viewPlans(v);
+  });
 }
 
 async function viewAccount(v) {
