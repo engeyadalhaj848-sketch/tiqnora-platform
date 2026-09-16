@@ -57,24 +57,16 @@
   ],
   "rewrites": [
     {
-      "source": "/blog/:slug/",
-      "destination": "/blog-post.html"
-    },
-    {
       "source": "/blog/:slug",
-      "destination": "/blog-post.html"
+      "destination": "/blog/:slug.html"
     },
     {
-      "source": "/compare/",
-      "destination": "/compare.html"
+      "source": "/blog/:slug/",
+      "destination": "/blog/:slug.html"
     },
     {
       "source": "/compare",
       "destination": "/compare.html"
-    },
-    {
-      "source": "/services/:slug/",
-      "destination": "/services/:slug.html"
     },
     {
       "source": "/services/:slug",
