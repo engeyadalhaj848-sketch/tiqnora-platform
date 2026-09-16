@@ -72,7 +72,7 @@ async function callAnthropic(agent, messages) {
 async function callGemini(agent, messages) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
-  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
+  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-2.5-flash');
   const systemInstruction = messages.find(message => message.role === 'system')?.content || '';
   const contents = messages.filter(message => message.role !== 'system').map(message => ({
     role: message.role === 'assistant' ? 'model' : 'user',
@@ -93,14 +93,35 @@ async function callGemini(agent, messages) {
   return { text, model };
 }
 
+
+async function callGrok(agent, messages) {
+  if (!process.env.XAI_API_KEY) throw Object.assign(new Error('لم يتم إعداد XAI_API_KEY في Vercel بعد.'), { status: 503 });
+  const model = agent.model?.startsWith('grok-') ? agent.model : (process.env.XAI_MODEL || 'grok-3-mini');
+  const response = await fetch('https://api.x.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      temperature: Number(agent.temperature ?? 0.7),
+      messages
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(payload.error?.message || `xAI/Grok request failed (${response.status})`), { status: 502 });
+  return { text: payload.choices?.[0]?.message?.content || '', model: payload.model || model };
+}
+
 function resolveProvider(agent) {
   const configured = String(agent.provider || '').toLowerCase();
   if (['google_ai', 'gemini', 'google'].includes(configured)) return 'google_ai';
   if (configured === 'anthropic') return 'anthropic';
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  // Existing agents were seeded as OpenAI. This fallback lets an owner who has
-  // configured only Gemini start using the workforce without editing every row.
+  if (['xai', 'grok'].includes(configured)) return 'xai';
+  if (configured === 'openai' && process.env.OPENAI_API_KEY) return 'openai';
+  // Prefer explicitly available keys when agent provider is generic/unset
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) return 'google_ai';
+  if (process.env.OPENAI_API_KEY) return 'openai';
+  if (process.env.XAI_API_KEY) return 'xai';
+  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
   return 'openai';
 }
 
@@ -145,11 +166,11 @@ export default async function handler(req, res) {
       { role: 'user', content: message }
     ];
     const provider = resolveProvider(agent);
-    const result = provider === 'anthropic'
-      ? await callAnthropic(agent, messages)
-      : provider === 'google_ai'
-        ? await callGemini(agent, messages)
-        : await callOpenAI(agent, messages);
+    let result;
+    if (provider === 'anthropic') result = await callAnthropic(agent, messages);
+    else if (provider === 'google_ai') result = await callGemini(agent, messages);
+    else if (provider === 'xai') result = await callGrok(agent, messages);
+    else result = await callOpenAI(agent, messages);
     if (!result.text) throw Object.assign(new Error('عاد المزود برد فارغ.'), { status: 502 });
     const conversation = await saveConversation(token, {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,

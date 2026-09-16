@@ -120,3 +120,19 @@ input, textarea, select { max-width: 100%; }
   .grid-stats { grid-template-columns: 1fr; }
   .login-card { padding: 20px 16px; }
 }
+
+/* ===== Phase 1: Mobile Admin / PWA polish ===== */
+@media (max-width: 900px) {
+  .admin-top { padding: 10px 12px; gap: 8px; }
+  .admin-top h1 { font-size: 1rem; }
+  .admin-main { padding: 12px; }
+  .card { padding: 14px; border-radius: 14px; }
+  .form-grid { grid-template-columns: 1fr !important; }
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .btn-primary, .btn-ghost, .btn-sm { min-height: 44px; }
+  .side-nav a { padding: 12px 14px; font-size: 0.95rem; }
+  .login-card { margin: 16px; max-width: 100%; }
+}
+@media (display-mode: standalone) {
+  body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+}

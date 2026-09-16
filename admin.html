@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tiqnora" />
+  <link rel="manifest" href="admin-manifest.json" />
+  <link rel="apple-touch-icon" href="assets/tiqnora-logo.png" />
   <title>لوحة التحكم | Tiqnora AI</title>
   <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" />
@@ -19,5 +25,12 @@
   <script src="js/admin-app.js"></script>
   <script src="js/social-inbox-admin.js"></script>
   <script src="js/password-recovery.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/admin-sw.js').catch(() => {});
+    });
+  }
+</script>
 </body>
 </html>

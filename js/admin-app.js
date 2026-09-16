@@ -704,42 +704,105 @@ VIEWS.seo = async v => {
 
 /* ---------- AI Modules ---------- */
 VIEWS.ai = async v => {
-  v.innerHTML = `<div class="card"><h2>وحدات الذكاء الاصطناعي</h2><p class="card-desc">فعّل كل وحدة واضبط موجهاتها — جاهزة للربط بمفاتيح API (OpenAI / Anthropic / أي مزود متوافق).</p><div id="rows"></div></div>
-  <div class="card"><h2>إعداد المزود</h2><p class="card-desc">للحماية، تُحفظ مفاتيح OpenAI وAnthropic في Environment Variables داخل Vercel فقط ولا تُرسل إلى المتصفح.</p>
-  <div class="form-grid"><div><label>المزود الافتراضي</label><select id="ai-prov"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="custom">مخصص</option></select></div>
-  <div><label>متغيرات الخادم المطلوبة</label><input dir="ltr" readonly value="GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY"></div></div>
-  <button class="btn-primary" id="ai-save" style="margin-top:14px">حفظ المزود الافتراضي</button></div>`;
-  const { data: rows } = await db.from('ai_agents').select('*').order('created_at');
-  $('#rows').innerHTML = (rows || []).map(a => `<div class="card" style="background:var(--bg2)">
-    <div class="card-head"><h2 style="margin:0">${esc(a.name_ar)} <small style="color:var(--muted)" dir="ltr">${esc(a.slug)}</small></h2>
-    <label class="check-row" style="margin:0"><input type="checkbox" data-en="${a.id}" ${a.is_enabled ? 'checked' : ''}> مفعّلة</label></div>
-    <div class="form-grid">
-      <div><label>المزود</label><select data-prov="${a.id}">${['google_ai', 'openai', 'anthropic', 'custom'].map(p => `<option ${a.provider === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
-      <div><label>الموديل</label><input dir="ltr" data-model="${a.id}" value="${esc(a.model || '')}"></div>
-      <div><label>درجة الإبداع (0-1)</label><input type="number" step="0.1" min="0" max="1" data-temp="${a.id}" value="${a.temperature ?? 0.7}"></div>
+  v.innerHTML = `<div class="card"><h2>حالة مزودي الذكاء الاصطناعي</h2>
+  <p class="card-desc">المفاتيح تبقى فقط في Vercel Environment Variables. هذه الشاشة تعرض حالة الاتصال دون كشف أي سر.</p>
+  <div id="prov-status" class="form-grid" style="margin-top:8px"><div style="color:var(--muted)">جارٍ الفحص…</div></div>
+  <div class="form-grid" style="margin-top:14px">
+    <div><label>المزود الافتراضي للمنصة</label>
+      <select id="ai-prov">
+        <option value="google_ai">Google Gemini</option>
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Claude (Anthropic)</option>
+        <option value="xai">Grok (xAI)</option>
+      </select>
     </div>
-    <label style="margin-top:10px">الوصف</label><p style="color:var(--muted);font-size:.84rem;margin:4px 0 12px">${esc(a.description_ar || '')}</p>
-    <label>System Prompt</label><textarea rows="3" data-prompt="${a.id}" dir="ltr">${esc(a.system_prompt || '')}</textarea>
-    <button class="btn-sm btn-primary" style="margin-top:10px" data-save="${a.id}">حفظ الوحدة</button></div>`).join('');
-  $$('[data-save]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.save;
-    await db.from('ai_agents').update({
-      is_enabled: $(`[data-en="${id}"]`).checked,
-      provider: $(`[data-prov="${id}"]`).value,
-      model: $(`[data-model="${id}"]`).value || null,
-      temperature: Number($(`[data-temp="${id}"]`).value) || 0.7,
-      system_prompt: $(`[data-prompt="${id}"]`).value || null,
-    }).eq('id', id);
-    log('ai_agent.update', 'ai_agents', id); toast('تم حفظ الوحدة');
-  });
-  const { data: aiS } = await db.from('site_settings').select('value').eq('key', 'ai').single();
+    <div><label>متغيرات الخادم</label>
+      <input dir="ltr" readonly value="GEMINI_API_KEY · OPENAI_API_KEY · ANTHROPIC_API_KEY · XAI_API_KEY">
+    </div>
+  </div>
+  <button class="btn-primary" id="ai-save" style="margin-top:14px">حفظ المزود الافتراضي</button>
+  </div>
+  <div class="card"><h2>وحدات / موظفو الذكاء الاصطناعي</h2>
+  <p class="card-desc">الوكلاء الأربعة لفريق العمل الداخلي. عدّل المزود والنموذج والموجّه ثم احفظ.</p>
+  <div id="rows"></div></div>
+  <div class="card"><h2>سجل العمليات الأخيرة</h2>
+  <p class="card-desc">آخر 30 محادثة من ai_conversations.</p>
+  <div id="ai-logs"></div></div>`;
+
+  // Provider status from serverless (no secrets)
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    const token = session?.access_token;
+    if (token) {
+      const res = await fetch('/api/ai-workforce/providers', { headers: { Authorization: 'Bearer ' + token } });
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok && payload.providers) {
+        $('#prov-status').innerHTML = payload.providers.map(p => `
+          <div class="card" style="background:var(--bg2);padding:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <b>${esc(p.name)}</b>
+              <span class="pill ${p.configured ? 'ok' : 'warn'}">${p.configured ? 'متصل' : 'غير مُعد'}</span>
+            </div>
+            <div style="margin-top:6px;color:var(--muted);font-size:.85rem" dir="ltr">${esc(p.defaultModel)} · ${(p.envVars || []).join(' / ')}</div>
+          </div>`).join('');
+      } else {
+        $('#prov-status').innerHTML = `<div style="color:var(--muted)">تعذر فحص المزودين (${esc(payload.error || res.status)}). تأكد من نشر /api/ai-workforce/providers.</div>`;
+      }
+    }
+  } catch (e) {
+    $('#prov-status').innerHTML = `<div style="color:var(--danger)">خطأ فحص المزودين: ${esc(e.message)}</div>`;
+  }
+
+  const providerOptions = [
+    ['google_ai', 'Gemini'],
+    ['openai', 'OpenAI'],
+    ['anthropic', 'Claude'],
+    ['xai', 'Grok']
+  ];
+  const { data: rows } = await db.from('ai_agents').select('*').order('created_at');
+  if (!rows || !rows.length) {
+    $('#rows').innerHTML = `<p style="color:var(--warn)">لا يوجد وكلاء بعد. نفّذ <code>supabase/migrations/010_phase1_activation.sql</code> في Supabase SQL Editor.</p>`;
+  } else {
+    $('#rows').innerHTML = rows.map(a => `<div class="card" style="background:var(--bg2)">
+      <div class="card-head"><h2 style="margin:0">${esc(a.name_ar || a.name)} <small style="color:var(--muted)" dir="ltr">${esc(a.slug)}</small></h2>
+      <label class="switch"><input type="checkbox" data-en="${a.id}" ${a.is_enabled ? 'checked' : ''}><span>مفعّل</span></label></div>
+      <div class="form-grid">
+        <div><label>المزود</label><select data-prov="${a.id}">${providerOptions.map(([k,t]) => `<option value="${k}" ${(a.provider===k || (k==='google_ai' && ['gemini','google'].includes(a.provider)))?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div><label>النموذج</label><input dir="ltr" data-model="${a.id}" value="${esc(a.model || '')}" placeholder="gemini-2.5-flash"></div>
+        <div><label>Temperature</label><input type="number" step="0.05" min="0" max="1.5" data-temp="${a.id}" value="${a.temperature ?? 0.7}"></div>
+        <div style="grid-column:1/-1"><label>System Prompt</label><textarea data-prompt="${a.id}" rows="4">${esc(a.system_prompt || '')}</textarea></div>
+      </div>
+      <button class="btn-primary btn-sm" data-save="${a.id}" style="margin-top:10px">حفظ الوحدة</button>
+    </div>`).join('');
+    $$('[data-save]').forEach(b => b.onclick = async () => {
+      const id = b.dataset.save;
+      await db.from('ai_agents').update({
+        is_enabled: $(`[data-en="${id}"]`).checked,
+        provider: $(`[data-prov="${id}"]`).value,
+        model: $(`[data-model="${id}"]`).value || null,
+        temperature: Number($(`[data-temp="${id}"]`).value) || 0.7,
+        system_prompt: $(`[data-prompt="${id}"]`).value || null,
+      }).eq('id', id);
+      log('ai_agent.update', 'ai_agents', id); toast('تم حفظ الوحدة');
+    });
+  }
+
+  const { data: aiS } = await db.from('site_settings').select('value').eq('key', 'ai').maybeSingle();
   const aiVal = aiS?.value || {};
-  $('#ai-prov').value = aiVal.default_provider || 'openai';
+  if ($('#ai-prov')) $('#ai-prov').value = aiVal.default_provider || 'google_ai';
   $('#ai-save').onclick = async () => {
     const { api_keys, ...safeAiVal } = aiVal;
     await db.from('site_settings').upsert({ key: 'ai', value: { ...safeAiVal, default_provider: $('#ai-prov').value } });
     toast('تم حفظ المزود الافتراضي');
   };
+
+  const { data: conv } = await db.from('ai_conversations').select('id,status,provider,model,created_at,error_message').order('created_at', { ascending: false }).limit(30);
+  $('#ai-logs').innerHTML = tbl(['الوقت','الحالة','المزود','النموذج','ملاحظة'], (conv || []).map(c =>
+    `<tr><td>${new Date(c.created_at).toLocaleString('ar-SA')}</td>
+     <td><span class="pill ${c.status==='completed'?'ok':c.status==='failed'?'danger':'warn'}">${esc(c.status)}</span></td>
+     <td dir="ltr">${esc(c.provider || '—')}</td><td dir="ltr">${esc(c.model || '—')}</td>
+     <td style="color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(c.error_message || '')}</td></tr>`
+  ).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا محادثات بعد</td></tr>');
 };
 
 /* ---------- Users ---------- */
