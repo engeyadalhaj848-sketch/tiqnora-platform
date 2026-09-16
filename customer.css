@@ -74,3 +74,9 @@ th { color: var(--muted); font-weight: 500; }
   .main { padding: 12px; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
 }
 @media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); } }
+
+/* Pre-launch polish */
+.skeleton { background: linear-gradient(90deg, var(--bg2), rgba(255,255,255,.04), var(--bg2)); background-size: 200% 100%; animation: sk 1.2s ease infinite; border-radius: 12px; min-height: 72px; }
+@keyframes sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.empty { text-align: center; padding: 28px 12px; color: var(--muted); }
+.empty b { display: block; color: var(--text); margin-bottom: 6px; }

@@ -52,4 +52,16 @@
     <priority>0.6</priority>
     <lastmod>2026-09-16</lastmod>
   </url>
+  <url>
+    <loc>https://www.tiqnora.com/#packages</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <lastmod>2026-09-16</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/#services</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-16</lastmod>
+  </url>
 </urlset>

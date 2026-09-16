@@ -226,7 +226,7 @@ async function viewProjects(v) {
       <button class="btn btn-primary btn-sm" id="add">إضافة</button>
     </div>
     <table><thead><tr><th>العنوان</th><th>الحالة</th><th>تاريخ</th></tr></thead>
-    <tbody>${(rows||[]).map(r=>`<tr><td>${esc(r.title)}</td><td><span class="pill">${esc(r.status)}</span></td><td>${new Date(r.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join('') || '<tr><td colspan="3" class="sub">لا مشاريع بعد</td></tr>'}
+    <tbody>${(rows||[]).map(r=>`<tr><td>${esc(r.title)}</td><td><span class="pill">${esc(r.status)}</span></td><td>${new Date(r.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join('') || '<tr><td colspan="3"><div class="empty"><b>لا مشاريع بعد</b>أنشئ أول مشروع لبدء العمل</div></td></tr>'}
     </tbody></table></div>`;
   $('#add').onclick = async () => {
     const title = $('#pt').value.trim(); if (!title) return;
@@ -341,7 +341,7 @@ async function route() {
   $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === item.id));
   $('#page-title').textContent = item.label;
   const v = $('#view');
-  v.innerHTML = '<p class="sub">…</p>';
+  v.innerHTML = '<div class="skeleton"></div>';
   await (VIEWS[item.id] || viewHome)(v);
 }
 
