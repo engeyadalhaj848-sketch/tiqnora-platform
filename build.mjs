@@ -6,6 +6,7 @@ mkdirSync(output, { recursive: true });
 
 const files = [
   'index.html', 'shop.html', 'product.html', 'checkout.html', 'track.html',
+  'national-day.html', 'national-day.css',
   'admin.html', 'customer.html', 'customer.css', 'blog.html', 'blog-post.html', 'compare.html', 'sales.html', 'marketing.css', 'styles.css', 'script.js', 'admin.css',
   'robots.txt', 'sitemap.xml', 'llms.txt',
 ];
@@ -22,6 +23,10 @@ for (const dir of ['js', 'supabase', 'docs', 'admin', 'api']) {
 
 if (existsSync('public/assets')) {
   cpSync('public/assets', `${output}/assets`, { recursive: true });
+}
+// Also merge root assets/ (e.g. product catalog images) if present
+if (existsSync('assets')) {
+  cpSync('assets', `${output}/assets`, { recursive: true });
 }
 
 // PWA admin assets
