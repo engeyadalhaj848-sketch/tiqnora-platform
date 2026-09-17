@@ -221,6 +221,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               const SizedBox(height: 12),
               Card(
                 child: ListTile(
+                  leading: const Icon(Icons.settings_outlined),
+                  title: const Text('الإعدادات'),
+                  subtitle: const Text('اللغة، السمة، الخصوصية'),
+                  trailing: const Icon(Icons.chevron_left),
+                  onTap: () => context.push('/settings'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
                   leading: const Icon(Icons.phone_android),
                   title: const Text('تسجيل الجهاز'),
                   subtitle: const Text('للتجهيز لإشعارات الدفع'),

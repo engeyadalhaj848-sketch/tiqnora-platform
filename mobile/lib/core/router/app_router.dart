@@ -14,6 +14,7 @@ import '../../features/subscriptions/presentation/subscription_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/admin/presentation/admin_requests_screen.dart';
+import '../../features/settings/presentation/settings_screen.dart';
 import '../widgets/placeholder_screen.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
@@ -104,6 +105,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const NotificationsScreen(),
       ),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+      GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
       GoRoute(
         path: '/admin/customers',
         builder: (_, __) => const PlaceholderScreen(

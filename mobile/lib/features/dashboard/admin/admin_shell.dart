@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'admin_dashboard_screen.dart';
 import '../../admin/presentation/admin_requests_screen.dart';
 import '../../notifications/presentation/notifications_screen.dart';
-import '../../profile/presentation/profile_screen.dart';
+import '../../settings/presentation/settings_screen.dart';
 import '../../home/home_providers.dart';
 import '../../device/device_registration.dart';
 import '../../../core/widgets/placeholder_screen.dart';
@@ -42,7 +42,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
       ),
       const AdminRequestsScreen(),
       const NotificationsScreen(),
-      const ProfileScreen(),
+      const SettingsScreen(),
     ];
 
     return Scaffold(

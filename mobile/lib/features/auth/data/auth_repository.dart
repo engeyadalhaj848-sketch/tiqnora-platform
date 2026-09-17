@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/user_profile.dart';
+import '../../../core/security/secure_session.dart';
 
 class AuthRepository {
   AuthRepository(this._client);
@@ -31,7 +32,9 @@ class AuthRepository {
     );
   }
 
-  Future<void> signOut() => _client.auth.signOut();
+  Future<void> signOut() async {
+    await SecureSession.signOutLocal(_client);
+  }
 
   Future<UserProfile?> fetchProfile() async {
     final user = currentUser;
