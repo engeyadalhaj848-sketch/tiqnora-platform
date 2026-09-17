@@ -12,7 +12,7 @@
   <style>
     .p-layout{display:grid;grid-template-columns:1.1fr 1fr;gap:28px;align-items:start}
     .p-gallery{background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-height:280px;display:flex;align-items:center;justify-content:center}
-    .p-gallery img{width:100%;height:100%;object-fit:cover;max-height:420px}
+    .p-gallery img{width:100%;height:100%;object-fit:contain;max-height:420px;background:#0b1220}
     .p-meta .price-row{display:flex;align-items:baseline;gap:12px;margin:12px 0}
     .p-meta .price-row strong{font-size:1.6rem;color:var(--accent)}
     .p-meta s{color:var(--muted)}
@@ -82,6 +82,12 @@
           <div class="price-row"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s> <span class="badge" style="position:static">-${Math.round(p.discount_percent)}%</span>`:''}</div>
           <p style="color:var(--muted)">${esc(p.delivery_note_ar||'الشحن داخل المملكة')}</p>
           <p>${esc(p.description_ar||'')}</p>
+          ${(() => {
+            const spec = p.specifications || {};
+            const benefits = spec.benefits_ar || [];
+            if (!benefits.length) return '';
+            return `<ul class="benefit-list">${benefits.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`;
+          })()}
           <div class="trust-bar">
             <div class="trust-pill"><b>✅ جودة المنتج</b>مطابق للوصف المعروض</div>
             <div class="trust-pill"><b>💬 دعم واتساب</b>مساعدة سريعة قبل وبعد الطلب</div>
@@ -107,10 +113,10 @@
           </div>`}
           <section class="faq" style="margin-top:28px">
             <h2 style="font-size:1.1rem">الأسئلة الشائعة</h2>
-            <details><summary>متى يصل الطلب؟</summary><p style="color:var(--muted)">${esc(p.delivery_note_ar||'عادة خلال 7–14 يوم عمل حسب المدينة.')}</p></details>
-            <details><summary>هل الدفع عند الاستلام متاح؟</summary><p style="color:var(--muted)">نعم لمعظم المدن. يمكنك أيضاً التحويل البنكي عند تأكيد الطلب.</p></details>
-            <details><summary>هل يمكن الإرجاع؟</summary><p style="color:var(--muted)">التواصل عبر واتساب خلال 48 ساعة من الاستلام لحالات التلف أو الخطأ في الصنف — حسب سياسة المنتج.</p></details>
-            <details><summary>كم يستغرق التوصيل؟</summary><p style="color:var(--muted)">عادة خلال المدة المذكورة في صفحة المنتج حسب المدينة. يتم تجهيز الطلب ومراجعته قبل الشحن.</p></details>
+            <details open><summary>متى يصل الطلب؟</summary><p style="color:var(--muted)">${esc(p.delivery_note_ar||'تجهيز 1–3 أيام عمل ثم شحن تقديري حسب المدينة.')}</p></details>
+            <details><summary>هل الدفع عند الاستلام متاح؟</summary><p style="color:var(--muted)">نعم لمعظم المدن، مع خيار التحويل البنكي عند التأكيد.</p></details>
+            <details><summary>ماذا عن الاستبدال؟</summary><p style="color:var(--muted)">تواصل عبر واتساب خلال 48 ساعة من الاستلام عند وجود تلف أو اختلاف عن الوصف. <a href="return-policy.html">سياسة الإرجاع</a></p></details>
+            ${(p.specifications && Array.isArray(p.specifications.faq) ? p.specifications.faq : []).map(item => `<details><summary>${esc(item.q||'')}</summary><p style="color:var(--muted)">${esc(item.a||'')}</p></details>`).join('')}
           </section>
         </div>
       </div>
