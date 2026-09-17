@@ -69,7 +69,7 @@
         <div class="product-body">
           <span class="p-cat">${esc(p.categories?.name_ar || '')}</span>
           <h3>${esc(p.name_ar)}</h3>
-          <span class="stock-note">${p.fulfillment_type==='dropship'?'دروبشيبنغ · ':''}${p.delivery_note_ar || (p.track_stock ? (p.stock_quantity>0?`متوفر`:'نفد') : 'متوفر')}</span>
+          <span class="stock-note">${p.delivery_note_ar || (p.track_stock ? (p.stock_quantity>0?`متوفر`:'نفد') : 'متوفر')}</span>
           <div class="product-price"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s>`:''}</div>
         </div></a>`;
     }

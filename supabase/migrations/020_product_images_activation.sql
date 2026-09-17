@@ -42,7 +42,7 @@ begin
   ) values
   ('nd96-led-strip-smart','ND96-LED-01',cat_nd,
    'شريط إضاءة RGB ذكي 5م','Smart RGB LED Strip 5m',
-   'تحكم بالتطبيق وألوان متعددة — مثالي للديكور والاحتفال. تنفيذ دروبشيبنغ بمراجعة يدوية.','App-controlled multicolor LED strip for décor and celebrations. Manual dropship fulfillment.',
+   'تحكم بالتطبيق وألوان متعددة — مثالي للديكور والاحتفال.','App-controlled multicolor LED strip for décor and celebrations.',
    129,20,55,80,true,
    array[base||'nd96-led-strip-smart-1.jpg', base||'nd96-led-strip-smart-2.jpg'],
    true,true,10,'dropship','يصل خلال 7–14 يوم عمل',array['national-day','best-seller'],'AliExpress / CJ','اليوم الوطني، إضاءة'),

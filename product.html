@@ -76,7 +76,7 @@
       <div class="p-layout">
         <div class="p-gallery">${img?`<img src="${esc(img)}" alt="${esc(p.name_ar)}">`:'<span style="font-size:3rem;opacity:.4">▣</span>'}</div>
         <div class="p-meta">
-          <p style="color:var(--muted);margin:0 0 6px">${esc(p.categories?.name_ar||'منتج')} ${p.fulfillment_type==='dropship'?'· دروبشيبنغ':''}</p>
+          <p style="color:var(--muted);margin:0 0 6px">${esc(p.categories?.name_ar||'منتج')}</p>
           <h1 style="margin:0 0 8px;font-size:clamp(1.4rem,3vw,2rem)">${esc(p.name_ar)}</h1>
           <div class="price-row"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s> <span class="badge" style="position:static">-${Math.round(p.discount_percent)}%</span>`:''}</div>
           <p style="color:var(--muted)">${esc(p.delivery_note_ar||'الشحن داخل المملكة')}</p>
@@ -103,7 +103,7 @@
             <details><summary>متى يصل الطلب؟</summary><p style="color:var(--muted)">${esc(p.delivery_note_ar||'عادة خلال 7–14 يوم عمل حسب المورد والمدينة.')}</p></details>
             <details><summary>هل الدفع عند الاستلام متاح؟</summary><p style="color:var(--muted)">نعم لمعظم المدن. يمكنك أيضاً التحويل البنكي عند تأكيد الطلب.</p></details>
             <details><summary>هل يمكن الإرجاع؟</summary><p style="color:var(--muted)">التواصل عبر واتساب خلال 48 ساعة من الاستلام لحالات التلف أو الخطأ في الصنف — حسب سياسة المنتج.</p></details>
-            <details><summary>هل الشراء من المورد تلقائي؟</summary><p style="color:var(--muted)">لا. يتم تنفيذ الطلبات بمراجعة يدوية من فريق Tiqnora دون شراء تلقائي.</p></details>
+            <details><summary>كم يستغرق التوصيل؟</summary><p style="color:var(--muted)">عادة خلال المدة المذكورة في صفحة المنتج حسب المدينة. يتم تجهيز الطلب ومراجعته قبل الشحن.</p></details>
           </section>
         </div>
       </div>

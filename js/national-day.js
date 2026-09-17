@@ -65,7 +65,6 @@
     let list = all.filter((p) => p.is_active && isCampaignProduct(p));
     if (filter === 'discount') list = list.filter((p) => Number(p.discount_percent) > 0);
     if (filter === 'featured') list = list.filter((p) => p.featured);
-    if (filter === 'dropship') list = list.filter((p) => p.fulfillment_type === 'dropship');
 
     if (!list.length) {
       // fallback: show any active products with discount or featured, else top active
@@ -86,7 +85,7 @@
           <div class="product-body">
             <span class="p-cat">${esc(p.categories?.name_ar || 'عرض وطني')}</span>
             <h3>${esc(p.name_ar)}</h3>
-            <span class="stock-note">${p.fulfillment_type === 'dropship' ? 'دروبشيبنغ · ' : ''}${p.delivery_note_ar || (p.track_stock ? (p.stock_quantity > 0 ? `متوفر (${p.stock_quantity})` : 'نفدت الكمية') : 'متوفر')}</span>
+            <span class="stock-note">${p.delivery_note_ar || (p.track_stock ? (p.stock_quantity > 0 ? `متوفر (${p.stock_quantity})` : 'نفدت الكمية') : 'متوفر')}</span>
             <div class="product-price"><strong>${money(final)}</strong>${hasDisc ? `<s>${money(p.price)}</s>` : ''}</div>
           </div></a>`;
           })
@@ -101,8 +100,7 @@
       { id: '', t: 'الكل' },
       { id: 'discount', t: 'بخصم' },
       { id: 'featured', t: 'مميز' },
-      { id: 'dropship', t: 'دروبشيبنغ' },
-    ];
+      ];
     row.innerHTML = chips
       .map((c, i) => `<button type="button" class="chip${i === 0 ? ' active' : ''}" data-filter="${c.id}">${c.t}</button>`)
       .join('');
