@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'admin_dashboard_screen.dart';
-import '../../../core/widgets/placeholder_screen.dart';
+import '../../admin/presentation/admin_requests_screen.dart';
+import '../../notifications/presentation/notifications_screen.dart';
+import '../../profile/presentation/profile_screen.dart';
 import '../../home/home_providers.dart';
+import '../../device/device_registration.dart';
+import '../../../core/widgets/placeholder_screen.dart';
 
 class AdminShell extends ConsumerStatefulWidget {
   const AdminShell({super.key});
@@ -13,6 +17,18 @@ class AdminShell extends ConsumerStatefulWidget {
 
 class _AdminShellState extends ConsumerState<AdminShell> {
   int _index = 0;
+  bool _deviceRegistered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_deviceRegistered) {
+        _deviceRegistered = true;
+        ensureDeviceRegistered(ref);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,10 +36,13 @@ class _AdminShellState extends ConsumerState<AdminShell> {
 
     final pages = [
       const AdminDashboardScreen(),
-      const PlaceholderScreen(title: 'العملاء', subtitle: 'M2'),
-      const PlaceholderScreen(title: 'الطلبات', subtitle: 'M2'),
-      const PlaceholderScreen(title: 'استخدام AI', subtitle: 'M2'),
-      const PlaceholderScreen(title: 'الإعدادات', subtitle: 'M2'),
+      const PlaceholderScreen(
+        title: 'العملاء',
+        subtitle: 'قائمة العملاء — مرحلة لاحقة',
+      ),
+      const AdminRequestsScreen(),
+      const NotificationsScreen(),
+      const ProfileScreen(),
     ];
 
     return Scaffold(
@@ -32,7 +51,11 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'لوحة'),
+          const NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'لوحة',
+          ),
           NavigationDestination(
             icon: Badge(
               isLabelVisible: (stats?.customers ?? 0) > 0,
@@ -51,8 +74,20 @@ class _AdminShellState extends ConsumerState<AdminShell> {
             selectedIcon: const Icon(Icons.assignment),
             label: 'طلبات',
           ),
-          const NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics), label: 'AI'),
-          const NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'إعدادات'),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: (stats?.unreadNotifications ?? 0) > 0,
+              label: Text('${stats?.unreadNotifications ?? 0}'),
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            selectedIcon: const Icon(Icons.notifications),
+            label: 'تنبيهات',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'إعدادات',
+          ),
         ],
       ),
     );

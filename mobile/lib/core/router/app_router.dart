@@ -8,6 +8,12 @@ import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/auth/presentation/forgot_password_screen.dart';
 import '../../features/dashboard/admin/admin_shell.dart';
 import '../../features/dashboard/customer/customer_shell.dart';
+import '../../features/ai_chat/presentation/ai_chat_screen.dart';
+import '../../features/services/presentation/services_screen.dart';
+import '../../features/subscriptions/presentation/subscription_screen.dart';
+import '../../features/notifications/presentation/notifications_screen.dart';
+import '../../features/profile/presentation/profile_screen.dart';
+import '../../features/admin/presentation/admin_requests_screen.dart';
 import '../widgets/placeholder_screen.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
@@ -31,7 +37,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       if (loc == '/splash') return null;
       if (!isLoggedIn && !public) return '/login';
-      if (isLoggedIn && (loc == '/login' || loc == '/register' || loc == '/forgot-password')) {
+      if (isLoggedIn &&
+          (loc == '/login' ||
+              loc == '/register' ||
+              loc == '/forgot-password')) {
         return '/home';
       }
       return null;
@@ -40,7 +49,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
-      GoRoute(path: '/forgot-password', builder: (_, __) => const ForgotPasswordScreen()),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (_, __) => const ForgotPasswordScreen(),
+      ),
       GoRoute(
         path: '/home',
         builder: (context, state) {
@@ -61,7 +73,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                           Text('تعذر تحميل الملف: $e'),
                           const SizedBox(height: 12),
                           ElevatedButton(
-                            onPressed: () => ref.invalidate(currentProfileProvider),
+                            onPressed: () =>
+                                ref.invalidate(currentProfileProvider),
                             child: const Text('إعادة المحاولة'),
                           ),
                         ],
@@ -80,40 +93,34 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
-      GoRoute(
-        path: '/ai-chat',
-        builder: (_, __) => const PlaceholderScreen(
-          title: 'محادثة الذكاء الاصطناعي',
-          subtitle: 'سيتم تفعيلها في M2',
-        ),
-      ),
-      GoRoute(
-        path: '/services',
-        builder: (_, __) => const PlaceholderScreen(title: 'طلب الخدمات', subtitle: 'M2'),
-      ),
+      GoRoute(path: '/ai-chat', builder: (_, __) => const AiChatScreen()),
+      GoRoute(path: '/services', builder: (_, __) => const ServicesScreen()),
       GoRoute(
         path: '/subscriptions',
-        builder: (_, __) => const PlaceholderScreen(title: 'الاشتراك والفواتير', subtitle: 'M2'),
+        builder: (_, __) => const SubscriptionScreen(),
       ),
       GoRoute(
         path: '/notifications',
-        builder: (_, __) => const PlaceholderScreen(title: 'الإشعارات', subtitle: 'M2'),
+        builder: (_, __) => const NotificationsScreen(),
       ),
-      GoRoute(
-        path: '/profile',
-        builder: (_, __) => const PlaceholderScreen(title: 'الملف الشخصي', subtitle: 'M2'),
-      ),
+      GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(
         path: '/admin/customers',
-        builder: (_, __) => const PlaceholderScreen(title: 'متابعة العملاء', subtitle: 'M2'),
+        builder: (_, __) => const PlaceholderScreen(
+          title: 'متابعة العملاء',
+          subtitle: 'قائمة العملاء التفصيلية — مرحلة لاحقة',
+        ),
       ),
       GoRoute(
         path: '/admin/requests',
-        builder: (_, __) => const PlaceholderScreen(title: 'الطلبات', subtitle: 'M2'),
+        builder: (_, __) => const AdminRequestsScreen(),
       ),
       GoRoute(
         path: '/admin/ai-usage',
-        builder: (_, __) => const PlaceholderScreen(title: 'استخدام الذكاء الاصطناعي', subtitle: 'M2'),
+        builder: (_, __) => const PlaceholderScreen(
+          title: 'استخدام الذكاء الاصطناعي',
+          subtitle: 'إحصائيات مفصلة — مرحلة لاحقة',
+        ),
       ),
     ],
   );

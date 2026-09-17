@@ -8,7 +8,7 @@ class ApiClient {
       BaseOptions(
         baseUrl: AppConfig.apiBaseUrl,
         connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 45),
         headers: {'Content-Type': 'application/json'},
       ),
     );
@@ -16,7 +16,8 @@ class ApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
-          final token = Supabase.instance.client.auth.currentSession?.accessToken;
+          final token =
+              Supabase.instance.client.auth.currentSession?.accessToken;
           if (token != null) {
             options.headers['Authorization'] = 'Bearer $token';
           }
@@ -55,12 +56,29 @@ class ApiClient {
   }
 }
 
-/// Feature API stubs for M1+
+/// Customer AI Chat — /api/customer/ai-chat
 class AiChatApi {
   AiChatApi(this._dio);
   final Dio _dio;
 
-  Future<Map<String, dynamic>> sendMessage(String message) async {
+  Future<Map<String, dynamic>> sendMessage({
+    required String message,
+    String? agentId,
+    String? conversationId,
+  }) async {
+    final res = await _dio.post(
+      '/api/customer/ai-chat',
+      data: {
+        'message': message,
+        if (agentId != null) 'agent_id': agentId,
+        if (conversationId != null) 'conversation_id': conversationId,
+      },
+    );
+    return Map<String, dynamic>.from(res.data as Map);
+  }
+
+  /// Fallback public sales chat when customer endpoint is unavailable
+  Future<Map<String, dynamic>> sendSalesMessage(String message) async {
     final res = await _dio.post('/api/sales/chat', data: {'message': message});
     return Map<String, dynamic>.from(res.data as Map);
   }
@@ -71,11 +89,33 @@ class ServiceRequestsApi {
   final Dio _dio;
 
   Future<List<dynamic>> listMine() async {
-    final res = await _dio.get('/api/customer/service-requests');
-    final data = res.data;
-    if (data is List) return data;
-    if (data is Map && data['items'] is List) return data['items'] as List;
+    try {
+      final res = await _dio.get('/api/customer/service-requests');
+      final data = res.data;
+      if (data is List) return data;
+      if (data is Map && data['items'] is List) return data['items'] as List;
+    } catch (_) {}
     return const [];
+  }
+
+  Future<Map<String, dynamic>?> create({
+    required String serviceType,
+    required String description,
+    String? title,
+  }) async {
+    try {
+      final res = await _dio.post(
+        '/api/customer/service-requests',
+        data: {
+          'service_type': serviceType,
+          'description': description,
+          if (title != null) 'title': title,
+        },
+      );
+      return Map<String, dynamic>.from(res.data as Map);
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -84,9 +124,13 @@ class SubscriptionsApi {
   final Dio _dio;
 
   Future<Map<String, dynamic>?> current() async {
-    final res = await _dio.get('/api/customer/subscription');
-    if (res.data == null) return null;
-    return Map<String, dynamic>.from(res.data as Map);
+    try {
+      final res = await _dio.get('/api/customer/subscription');
+      if (res.data == null) return null;
+      return Map<String, dynamic>.from(res.data as Map);
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -95,10 +139,12 @@ class NotificationsApi {
   final Dio _dio;
 
   Future<List<dynamic>> list() async {
-    final res = await _dio.get('/api/notifications');
-    final data = res.data;
-    if (data is List) return data;
-    if (data is Map && data['items'] is List) return data['items'] as List;
+    try {
+      final res = await _dio.get('/api/notifications');
+      final data = res.data;
+      if (data is List) return data;
+      if (data is Map && data['items'] is List) return data['items'] as List;
+    } catch (_) {}
     return const [];
   }
 }

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'customer_dashboard_screen.dart';
-import '../../auth/presentation/auth_provider.dart';
-import '../../../core/widgets/placeholder_screen.dart';
+import '../../ai_chat/presentation/ai_chat_screen.dart';
+import '../../services/presentation/services_screen.dart';
+import '../../subscriptions/presentation/subscription_screen.dart';
+import '../../profile/presentation/profile_screen.dart';
 import '../../home/home_providers.dart';
+import '../../device/device_registration.dart';
 
 class CustomerShell extends ConsumerStatefulWidget {
   const CustomerShell({super.key, this.initialIndex = 0});
@@ -17,11 +19,18 @@ class CustomerShell extends ConsumerStatefulWidget {
 
 class _CustomerShellState extends ConsumerState<CustomerShell> {
   late int _index;
+  bool _deviceRegistered = false;
 
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_deviceRegistered) {
+        _deviceRegistered = true;
+        ensureDeviceRegistered(ref);
+      }
+    });
   }
 
   @override
@@ -30,10 +39,10 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
 
     final pages = [
       const CustomerDashboardScreen(),
-      const PlaceholderScreen(title: 'محادثة الذكاء الاصطناعي', subtitle: 'M2'),
-      const PlaceholderScreen(title: 'الخدمات', subtitle: 'M2'),
-      const PlaceholderScreen(title: 'الاشتراك', subtitle: 'M2'),
-      const PlaceholderScreen(title: 'الملف الشخصي', subtitle: 'M2'),
+      const AiChatScreen(),
+      const ServicesScreen(),
+      const SubscriptionScreen(),
+      const ProfileScreen(),
     ];
 
     return Scaffold(
@@ -42,10 +51,26 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'الرئيسية'),
-          const NavigationDestination(icon: Icon(Icons.smart_toy_outlined), selectedIcon: Icon(Icons.smart_toy), label: 'AI'),
-          const NavigationDestination(icon: Icon(Icons.assignment_outlined), selectedIcon: Icon(Icons.assignment), label: 'خدمات'),
-          const NavigationDestination(icon: Icon(Icons.card_membership_outlined), selectedIcon: Icon(Icons.card_membership), label: 'اشتراك'),
+          const NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'الرئيسية',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.smart_toy_outlined),
+            selectedIcon: Icon(Icons.smart_toy),
+            label: 'AI',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.assignment_outlined),
+            selectedIcon: Icon(Icons.assignment),
+            label: 'خدمات',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.card_membership_outlined),
+            selectedIcon: Icon(Icons.card_membership),
+            label: 'اشتراك',
+          ),
           NavigationDestination(
             icon: Badge(
               isLabelVisible: notifCount > 0,

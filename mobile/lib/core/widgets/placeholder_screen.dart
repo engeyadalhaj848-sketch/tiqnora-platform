@@ -16,15 +16,14 @@ class PlaceholderScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.construction, size: 48, color: Theme.of(context).colorScheme.primary),
+              Icon(Icons.construction,
+                  size: 48, color: Theme.of(context).colorScheme.primary),
               const SizedBox(height: 16),
               Text(title, style: Theme.of(context).textTheme.titleLarge),
               if (subtitle != null) ...[
                 const SizedBox(height: 8),
                 Text(subtitle!, textAlign: TextAlign.center),
               ],
-              const SizedBox(height: 8),
-              const Text('سيتم تفعيل هذه الشاشة في المرحلة M1'),
             ],
           ),
         ),
