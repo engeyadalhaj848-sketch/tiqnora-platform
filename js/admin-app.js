@@ -360,11 +360,14 @@ VIEWS.products = async v => {
     { k: 'sku', t: 'SKU', dir: 'ltr' },
     { k: 'category_id', t: 'القسم', type: 'select', options: [{ v: '', t: '—' }, ...(cats || []).map(c => ({ v: c.id, t: c.name_ar }))] },
     { k: 'brand_id', t: 'الماركة', type: 'select', options: [{ v: '', t: '—' }, ...(brands || []).map(b => ({ v: b.id, t: b.name }))] },
-    { k: 'price', t: 'السعر (ر.س)', type: 'number', req: 1 },
+    { k: 'price', t: 'سعر البيع (ر.س)', type: 'number', req: 1 },
     { k: 'discount_percent', t: 'خصم %', type: 'number' },
-    { k: 'cost_price', t: 'سعر التكلفة (للاستخدام الداخلي)', type: 'number' },
+    { k: 'cost_price', t: 'سعر التكلفة', type: 'number' },
+    { k: 'supplier_name', t: 'المورد (يدوي)', ph: 'AliExpress / CJ / محلي' },
+    { k: 'supplier_url', t: 'رابط المورد', dir: 'ltr', ph: 'https://...' },
     { k: 'fulfillment_type', t: 'طريقة التنفيذ', type: 'select', options: [{ v: 'own_stock', t: 'مخزون Tiqnora' }, { v: 'dropship', t: 'دروبشيبنغ — مورد خارجي' }] },
     { k: 'delivery_note_ar', t: 'ملاحظة الشحن للعميل', ph: 'يصل خلال 7–14 يوم عمل' },
+    { k: 'campaign_tags', t: 'وسوم الحملة (سطر أو فواصل: national-day)', type: 'list', full: 1, dir: 'ltr' },
     { k: 'stock_quantity', t: 'الكمية بالمخزون', type: 'number', default: 0 },
     { k: 'track_stock', t: 'تتبع المخزون', type: 'checkbox', default: true },
     { k: 'is_active', t: 'ظاهر في المتجر', type: 'checkbox', default: true },
@@ -376,13 +379,28 @@ VIEWS.products = async v => {
     { k: 'seo_title_ar', t: 'SEO عنوان' }, { k: 'seo_description_ar', t: 'SEO وصف', type: 'textarea' },
   ];
   const { data: rows } = await db.from('products').select('*, categories(name_ar), brands(name)').order('sort_order');
-  $('#tbl').innerHTML = tbl(['المنتج', 'القسم', 'السعر', 'المخزون', 'الحالة', 'إجراءات'], (rows || []).map(p =>
-    `<tr><td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}</td>
-     <td>${esc(p.categories?.name_ar || '—')}</td><td>${money(p.price)}${p.discount_percent > 0 ? ` <span class="pill warn">-${p.discount_percent}%</span>` : ''}</td>
+  const margin = (p) => {
+    const cost = Number(p.cost_price);
+    const price = Number(p.price);
+    if (!cost || !price || cost <= 0) return '—';
+    const m = ((price - cost) / price) * 100;
+    return m.toFixed(0) + '%';
+  };
+  $('#tbl').innerHTML = tbl(['المنتج', 'المورد', 'بيع', 'تكلفة', 'هامش', 'المخزون', 'الحالة', 'إجراءات'], (rows || []).map(p =>
+    `<tr><td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}${p.fulfillment_type==='dropship'?' <span class="pill warn">DS</span>':''}${(p.campaign_tags||[]).includes('national-day')?' <span class="pill ok">وطني</span>':''}</td>
+     <td>${esc(p.supplier_name || '—')}</td>
+     <td>${money(p.price)}${p.discount_percent > 0 ? ` <span class="pill warn">-${p.discount_percent}%</span>` : ''}</td>
+     <td>${p.cost_price != null ? money(p.cost_price) : '—'}</td>
+     <td><b>${margin(p)}</b></td>
      <td>${p.track_stock ? (p.stock_quantity > 3 ? `<span class="pill ok">${p.stock_quantity}</span>` : `<span class="pill danger">${p.stock_quantity}</span>`) : '—'}</td>
      <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مخفي'}</span></td>
      <td class="actions"><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
-  const fixImgs = d => { if (Array.isArray(d.images)) return d; return d; };
+  const fixImgs = d => {
+    if (typeof d.images === 'string') d.images = d.images.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+    if (typeof d.campaign_tags === 'string') d.campaign_tags = d.campaign_tags.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+    if (Array.isArray(d.campaign_tags) === false && d.campaign_tags) d.campaign_tags = [String(d.campaign_tags)];
+    return d;
+  };
   $('#add').onclick = () => crudModal({ title: 'منتج جديد', fields: F, onSave: async d => { await db.from('products').insert(fixImgs(d)); log('product.create', 'products'); toast('تمت إضافة المنتج'); VIEWS.products(v); } });
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\n') }, onSave: async d => { await db.from('products').update(d).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });

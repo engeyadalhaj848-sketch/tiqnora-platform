@@ -75,6 +75,14 @@
     {
       "source": "/sales",
       "destination": "/sales.html"
+    },
+    {
+      "source": "/national-day",
+      "destination": "/national-day.html"
+    },
+    {
+      "source": "/national-day/",
+      "destination": "/national-day.html"
     }
   ]
 }
