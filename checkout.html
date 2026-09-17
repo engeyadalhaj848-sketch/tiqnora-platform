@@ -29,12 +29,18 @@
   <main class="store-main"><div class="container">
     <h1 class="store-title">إتمام الطلب</h1>
     <p class="store-sub">راجع طلبك واملأ بيانات التوصيل — سنؤكد الطلب برسالة.</p>
-    <div class="chip-row" style="margin-bottom:18px" id="trust-checkout">
-      <span class="chip" style="cursor:default">🔒 بيانات محمية</span>
-      <span class="chip" style="cursor:default">🚚 شحن لكل المملكة</span>
-      <span class="chip" style="cursor:default">💳 دفع عند الاستلام</span>
-      <span class="chip" style="cursor:default">🇸🇦 عروض اليوم الوطني</span>
+    <div class="trust-bar" id="trust-checkout">
+      <div class="trust-pill"><b>🔒 بياناتك</b>تُستخدم لإتمام الطلب فقط</div>
+      <div class="trust-pill"><b>🚚 الشحن</b>تجهيز 1–3 أيام · توصيل تقديري 3–14 يوم</div>
+      <div class="trust-pill"><b>↩️ الإرجاع</b>خلال 48 ساعة عند الاستلام عند وجود مشكلة</div>
+      <div class="trust-pill"><b>💬 الدعم</b>واتساب +966 55 134 1398</div>
     </div>
+    <p style="font-size:.85rem;margin:0 0 16px;color:var(--muted)">
+      <a href="shipping-policy.html">الشحن</a> ·
+      <a href="return-policy.html">الإرجاع</a> ·
+      <a href="faq.html">الأسئلة الشائعة</a> ·
+      <a href="terms.html">الشروط</a>
+    </p>
     <div class="checkout-grid">
       <form class="panel" id="checkout-form" novalidate>
         <h2>بيانات التوصيل</h2>
@@ -74,6 +80,7 @@
   <script src="js/db.js" defer></script>
   <script src="script.js" defer></script>
   <script src="js/analytics.js" defer></script>
+  <script src="js/whatsapp.js" defer></script>
   <script defer>
   window.addEventListener('DOMContentLoaded', () => {
     const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
@@ -152,9 +159,9 @@
       render();
     }
     init();
-    const wa = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966500000000';
+    const wa = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966551341398';
     const waEl = document.querySelector('#checkout-wa');
-    if (waEl) waEl.href = 'https://wa.me/' + wa + '?text=' + encodeURIComponent('مرحبا، أحتاج مساعدة في إتمام طلب من متجر Tiqnora');
+    if (waEl) waEl.href = 'https://wa.me/' + wa + '?text=' + encodeURIComponent('أحتاج مساعدة في إكمال الطلب');
   });
   </script>
 </body>

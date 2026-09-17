@@ -45,6 +45,7 @@
   <script src="js/db.js" defer></script>
   <script src="script.js" defer></script>
   <script src="js/analytics.js" defer></script>
+  <script src="js/whatsapp.js" defer></script>
   <script defer>
   window.addEventListener('DOMContentLoaded', () => {
     const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
@@ -52,7 +53,7 @@
     const slug = new URLSearchParams(location.search).get('slug');
     const wrap = document.querySelector('#product-wrap');
     const year = document.querySelector('#year'); if (year) year.textContent = new Date().getFullYear();
-    const WA = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966500000000';
+    const WA = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966551341398';
 
     function renderCount(){ const c=(window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
 
@@ -67,7 +68,7 @@
       const final = hasDisc ? p.price * (1 - p.discount_percent/100) : p.price;
       const out = p.track_stock && p.stock_quantity <= 0;
       const img = (p.images||[])[0];
-      const waText = encodeURIComponent(`مرحبا، أريد الاستفسار عن: ${p.name_ar} (${p.slug})`);
+      const waText = encodeURIComponent(`مرحباً، أريد الاستفسار عن هذا المنتج: ${p.name_ar}`);
 
       document.title = `${p.name_ar} | Tiqnora AI`;
       window.TiqnoraAnalytics?.productView?.(p.slug, p.name_ar, final);
@@ -81,11 +82,17 @@
           <div class="price-row"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s> <span class="badge" style="position:static">-${Math.round(p.discount_percent)}%</span>`:''}</div>
           <p style="color:var(--muted)">${esc(p.delivery_note_ar||'الشحن داخل المملكة')}</p>
           <p>${esc(p.description_ar||'')}</p>
-          <div class="trust-row">
-            <div class="trust-item">🔒 طلب آمن</div>
-            <div class="trust-item">🚚 شحن لكل المدن</div>
-            <div class="trust-item">💳 دفع عند الاستلام</div>
+          <div class="trust-bar">
+            <div class="trust-pill"><b>✅ جودة المنتج</b>مطابق للوصف المعروض</div>
+            <div class="trust-pill"><b>💬 دعم واتساب</b>مساعدة سريعة قبل وبعد الطلب</div>
+            <div class="trust-pill"><b>💳 الدفع</b>عند الاستلام أو تحويل</div>
+            <div class="trust-pill"><b>🚚 الشحن</b>لكل مدن المملكة</div>
           </div>
+          <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
+            <a href="shipping-policy.html">سياسة الشحن</a> ·
+            <a href="return-policy.html">الاستبدال والإرجاع</a> ·
+            <a href="faq.html">الأسئلة الشائعة</a>
+          </p>
           ${out ? '<p style="color:#f88">غير متوفر حالياً</p>' : `
           <div class="qty-row">
             <span>الكمية</span>

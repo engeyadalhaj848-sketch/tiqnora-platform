@@ -83,6 +83,46 @@
     {
       "source": "/national-day/",
       "destination": "/national-day.html"
+    },
+    {
+      "source": "/shipping-policy",
+      "destination": "/shipping-policy.html"
+    },
+    {
+      "source": "/shipping-policy/",
+      "destination": "/shipping-policy.html"
+    },
+    {
+      "source": "/return-policy",
+      "destination": "/return-policy.html"
+    },
+    {
+      "source": "/return-policy/",
+      "destination": "/return-policy.html"
+    },
+    {
+      "source": "/privacy-policy",
+      "destination": "/privacy-policy.html"
+    },
+    {
+      "source": "/privacy-policy/",
+      "destination": "/privacy-policy.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms.html"
+    },
+    {
+      "source": "/terms/",
+      "destination": "/terms.html"
+    },
+    {
+      "source": "/faq",
+      "destination": "/faq.html"
+    },
+    {
+      "source": "/faq/",
+      "destination": "/faq.html"
     }
   ]
 }

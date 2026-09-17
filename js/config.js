@@ -16,7 +16,7 @@ supabaseAnonKey: 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao',
   // Admin dashboard: first admin email(s) that get role 'super_admin'
   // after they sign up (must match auth.users email exactly)
   ownerEmails: ['eng.eyadalhaj848@gmail.com'],
-  version: '3.1.0',
+  version: '3.2.0',
   /** WhatsApp business number without + (update to real number) */
-  whatsapp: '966500000000'
+  whatsapp: '966551341398'
 };
