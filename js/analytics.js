@@ -1,4 +1,4 @@
-/* Tiqnora first-party + GA4 event bridge */
+/* Tiqnora first-party + GA4 event bridge + commerce funnel */
 (function () {
   const KEY = 'tiqnora_sid';
   function sid() {
@@ -18,7 +18,7 @@
   }
   async function send(event_name, properties = {}) {
     try {
-      if (typeof gtag === 'function' && window.TIQNORA_CONFIG?.googleAnalyticsId) {
+      if (typeof gtag === 'function') {
         gtag('event', event_name, properties);
       }
     } catch (_) {}
@@ -41,7 +41,11 @@
     serviceRequest() { return send('service_request'); },
     aiDemo(agent) { return send('ai_demo', { agent }); },
     planClick(plan) { return send('plan_click', { plan }); },
-    leadSubmit(source) { return send('generate_lead', { source }); }
+    leadSubmit(source) { return send('generate_lead', { source }); },
+    productView(slug, name, price) { return send('view_item', { slug, name, price, currency: 'SAR' }); },
+    addToCart(slug, name, price, qty) { return send('add_to_cart', { slug, name, price, qty, currency: 'SAR' }); },
+    beginCheckout(value, items) { return send('begin_checkout', { value, items, currency: 'SAR' }); },
+    purchase(orderNumber, value, items) { return send('purchase', { order_number: orderNumber, value, items, currency: 'SAR' }); }
   };
   document.addEventListener('DOMContentLoaded', () => {
     window.TiqnoraAnalytics.pageView();

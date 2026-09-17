@@ -29,6 +29,12 @@
   <main class="store-main"><div class="container">
     <h1 class="store-title">إتمام الطلب</h1>
     <p class="store-sub">راجع طلبك واملأ بيانات التوصيل — سنؤكد الطلب برسالة.</p>
+    <div class="chip-row" style="margin-bottom:18px" id="trust-checkout">
+      <span class="chip" style="cursor:default">🔒 بيانات محمية</span>
+      <span class="chip" style="cursor:default">🚚 شحن لكل المملكة</span>
+      <span class="chip" style="cursor:default">💳 دفع عند الاستلام</span>
+      <span class="chip" style="cursor:default">🇸🇦 عروض اليوم الوطني</span>
+    </div>
     <div class="checkout-grid">
       <form class="panel" id="checkout-form" novalidate>
         <h2>بيانات التوصيل</h2>
@@ -56,6 +62,10 @@
         <div class="checkout-total" style="border-top:1px solid var(--line)"><span>الإجمالي</span><span id="sum-total">0 ر.س</span></div>
         <button class="button button-primary" id="place-order" style="width:100%;margin-top:10px">تأكيد الطلب</button>
         <p style="color:var(--muted);font-size:.8rem;margin-top:12px">بتأكيد الطلب أنت توافق على الشروط وأحكام المتجر.</p>
+        <p style="margin-top:10px;font-size:.85rem"><a id="checkout-wa" href="#" target="_blank" rel="noopener" style="color:#25D366;font-weight:700">أو تواصل عبر واتساب للمساعدة ←</a></p>
+        <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:600">الأسئلة الشائعة</summary>
+          <p style="color:var(--muted);font-size:.9rem">التوصيل 7–14 يوم عمل للدروبشيبنغ. الدفع عند الاستلام أو تحويل. لا يوجد شراء تلقائي من المورد — التنفيذ بمراجعة يدوية.</p>
+        </details>
       </aside>
     </div>
   </div></main>
@@ -63,6 +73,7 @@
   <script src="js/config.js" defer></script>
   <script src="js/db.js" defer></script>
   <script src="script.js" defer></script>
+  <script src="js/analytics.js" defer></script>
   <script defer>
   window.addEventListener('DOMContentLoaded', () => {
     const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
@@ -78,6 +89,8 @@
     function subtotal() { return cart.reduce((a, i) => a + i.price * i.qty, 0); }
 
     function render() {
+      try { window.TiqnoraAnalytics?.beginCheckout?.(subtotal() + shippingCost, cart.map(i => i.titleAr)); } catch(_){}
+
       const box = document.querySelector('#sum-items');
       if (!cart.length) { box.innerHTML = '<p style="color:var(--muted)">السلة فارغة. <a href="shop.html" style="color:var(--accent)">تصفح المتجر</a></p>'; document.querySelector('#place-order').disabled = true; return; }
       box.innerHTML = cart.map(i => `<div class="checkout-item"><span>${esc(i.titleAr)} × ${i.qty}</span><span>${money(i.price * i.qty)}</span></div>`).join('');
@@ -116,6 +129,7 @@
         const res = await window.TiqnoraDB.placeOrder(order);
         if (res.ok) {
           window.TiqnoraStore.saveCart([]);
+          try { window.TiqnoraAnalytics?.purchase?.(res.order.order_number, order.total, cart.map(i => i.titleAr)); } catch(_){}
           location.href = `track.html?order=${encodeURIComponent(res.order.order_number)}&new=1`;
           return;
         }
@@ -138,6 +152,9 @@
       render();
     }
     init();
+    const wa = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966500000000';
+    const waEl = document.querySelector('#checkout-wa');
+    if (waEl) waEl.href = 'https://wa.me/' + wa + '?text=' + encodeURIComponent('مرحبا، أحتاج مساعدة في إتمام طلب من متجر Tiqnora');
   });
   </script>
 </body>

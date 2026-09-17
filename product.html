@@ -3,88 +3,127 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="تفاصيل المنتج — متجر Tiqnora AI للمعدات التقنية." />
+  <meta name="description" content="تفاصيل المنتج — متجر Tiqnora AI." />
   <link rel="canonical" href="https://www.tiqnora.com/product.html" />
   <title>المنتج | Tiqnora AI</title>
   <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-XW3K04YQMH"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-XW3K04YQMH', { anonymize_ip: true });
-  </script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-XW3K04YQMH',{anonymize_ip:true});</script>
+  <style>
+    .p-layout{display:grid;grid-template-columns:1.1fr 1fr;gap:28px;align-items:start}
+    .p-gallery{background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-height:280px;display:flex;align-items:center;justify-content:center}
+    .p-gallery img{width:100%;height:100%;object-fit:cover;max-height:420px}
+    .p-meta .price-row{display:flex;align-items:baseline;gap:12px;margin:12px 0}
+    .p-meta .price-row strong{font-size:1.6rem;color:var(--accent)}
+    .p-meta s{color:var(--muted)}
+    .qty-row{display:flex;align-items:center;gap:10px;margin:16px 0}
+    .qty-row button{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text)}
+    .trust-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
+    .trust-item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:.85rem;text-align:center}
+    .faq details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+    .faq summary{cursor:pointer;font-weight:600}
+    .wa-btn{display:inline-flex;align-items:center;gap:8px;background:#25D366;color:#062;font-weight:700;border:none;border-radius:12px;padding:12px 16px;text-decoration:none}
+    .p-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+    @media(max-width:800px){.p-layout{grid-template-columns:1fr}.trust-row{grid-template-columns:1fr}}
+  </style>
 </head>
 <body>
   <header class="store-header">
     <div class="container store-nav">
       <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
-      <nav class="store-links" aria-label="المتجر">
-        <a href="index.html">الرئيسية</a>
-        <a href="index.html#services">الخدمات</a>
+      <nav class="store-links">
         <a href="shop.html">المتجر</a>
+        <a href="national-day.html">اليوم الوطني</a>
         <a href="track.html">تتبع الطلب</a>
       </nav>
       <a class="cart-link" href="checkout.html">🛒 السلة <b id="store-cart-count">0</b></a>
     </div>
   </header>
   <main class="store-main"><div class="container" id="product-wrap"><p style="color:var(--muted)">جارٍ التحميل…</p></div></main>
-  <footer class="store-footer"><div class="container" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px"><span>© <span id="year"></span> Tiqnora AI</span><a href="admin.html" style="color:inherit">إدارة</a></div></footer>
+  <footer class="store-footer"><div class="container">© <span id="year"></span> Tiqnora AI</div></footer>
   <script src="js/config.js" defer></script>
   <script src="js/db.js" defer></script>
   <script src="script.js" defer></script>
+  <script src="js/analytics.js" defer></script>
   <script defer>
   window.addEventListener('DOMContentLoaded', () => {
     const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
     const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
     const slug = new URLSearchParams(location.search).get('slug');
     const wrap = document.querySelector('#product-wrap');
+    const year = document.querySelector('#year'); if (year) year.textContent = new Date().getFullYear();
+    const WA = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966500000000';
 
     function renderCount(){ const c=(window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
 
     async function load(){
-      if (!slug) { wrap.innerHTML = '<p style="color:var(--muted)">لم يتم تحديد منتج. <a href="shop.html" style="color:var(--accent)">تصفح المتجر</a></p>'; return; }
-      const ok = await window.TiqnoraDB.ready();
-      if (!ok) { wrap.innerHTML = '<p style="color:var(--muted)">صفحة المنتج تحتاج ربط قاعدة البيانات. <a href="shop.html" style="color:var(--accent)">رجوع للمتجر</a></p>'; return; }
-      const prods = await window.TiqnoraDB.getProducts() || [];
-      const p = prods.find(x => x.slug === slug);
-      if (!p) { wrap.innerHTML = '<p style="color:var(--muted)">المنتج غير موجود. <a href="shop.html" style="color:var(--accent)">تصفح المتجر</a></p>'; return; }
+      if (!slug) { wrap.innerHTML = '<p>منتج غير محدد. <a href="shop.html">العودة للمتجر</a></p>'; return; }
+      await window.TiqnoraDB?.ready?.();
+      const all = await window.TiqnoraDB?.getProducts?.() || [];
+      const p = all.find(x => x.slug === slug);
+      if (!p) { wrap.innerHTML = '<p>المنتج غير موجود. <a href="shop.html">المتجر</a></p>'; return; }
 
-      document.title = `${p.name_ar} | Tiqnora AI`;
-      const meta = document.querySelector('meta[name="description"]'); if (meta) meta.content = (p.description_ar || p.name_ar).slice(0, 155);
       const hasDisc = Number(p.discount_percent) > 0;
       const final = hasDisc ? p.price * (1 - p.discount_percent/100) : p.price;
       const out = p.track_stock && p.stock_quantity <= 0;
-      const specs = Array.isArray(p.specifications) ? p.specifications : [];
+      const img = (p.images||[])[0];
+      const waText = encodeURIComponent(`مرحبا، أريد الاستفسار عن: ${p.name_ar} (${p.slug})`);
+
+      document.title = `${p.name_ar} | Tiqnora AI`;
+      window.TiqnoraAnalytics?.productView?.(p.slug, p.name_ar, final);
 
       wrap.innerHTML = `
-      <nav style="margin-bottom:20px;font-size:.85rem"><a href="shop.html" style="color:var(--muted);text-decoration:none">المتجر</a> <span style="color:var(--muted)">←</span> <span>${esc(p.categories?.name_ar || '')}</span></nav>
-      <div class="product-detail">
-        <div class="p-gallery">${(p.images||[])[0] ? `<img src="${esc(p.images[0])}" alt="${esc(p.name_ar)}">` : '▣'}</div>
-        <div class="p-info">
-          <span class="p-cat" style="color:var(--muted)">${esc(p.categories?.name_ar || '')} ${p.brands ? '· ' + esc(p.brands.name) : ''} ${p.sku ? '· SKU: ' + esc(p.sku) : ''}</span>
-          <h1>${esc(p.name_ar)}</h1>
-          <p style="color:var(--muted)">${esc(p.description_ar || '')}</p>
-          <div class="p-price"><strong>${money(final)}</strong>${hasDisc ? `<s style="color:var(--muted);font-size:1rem;margin-inline-start:8px">${money(p.price)}</s>` : ''}</div>
-          ${out ? '<span class="status-pill" style="background:transparent;border-color:#888;color:#888">غير متوفر حاليًا</span>' : '<span class="status-pill">متوفر — جاهز للشحن</span>'}
-          <div class="qty-row">
-            <div class="qty"><button type="button" id="q-minus">−</button><span id="q-val">1</span><button type="button" id="q-plus">+</button></div>
-            <button class="button button-primary" id="add-btn" ${out ? 'disabled style="opacity:.5"' : ''}>أضف إلى السلة</button>
+      <div class="p-layout">
+        <div class="p-gallery">${img?`<img src="${esc(img)}" alt="${esc(p.name_ar)}">`:'<span style="font-size:3rem;opacity:.4">▣</span>'}</div>
+        <div class="p-meta">
+          <p style="color:var(--muted);margin:0 0 6px">${esc(p.categories?.name_ar||'منتج')} ${p.fulfillment_type==='dropship'?'· دروبشيبنغ':''}</p>
+          <h1 style="margin:0 0 8px;font-size:clamp(1.4rem,3vw,2rem)">${esc(p.name_ar)}</h1>
+          <div class="price-row"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s> <span class="badge" style="position:static">-${Math.round(p.discount_percent)}%</span>`:''}</div>
+          <p style="color:var(--muted)">${esc(p.delivery_note_ar||'الشحن داخل المملكة')}</p>
+          <p>${esc(p.description_ar||'')}</p>
+          <div class="trust-row">
+            <div class="trust-item">🔒 طلب آمن</div>
+            <div class="trust-item">🚚 شحن لكل المدن</div>
+            <div class="trust-item">💳 دفع عند الاستلام</div>
           </div>
-          ${specs.length ? `<table class="spec-table">${specs.map(s => `<tr><td>${esc(s.key_ar || s.key_en || '')}</td><td>${esc(s.value_ar || s.value_en || '')}</td></tr>`).join('')}</table>` : ''}
+          ${out ? '<p style="color:#f88">غير متوفر حالياً</p>' : `
+          <div class="qty-row">
+            <span>الكمية</span>
+            <button type="button" id="q-minus">−</button>
+            <b id="q-val">1</b>
+            <button type="button" id="q-plus">+</button>
+          </div>
+          <div class="p-actions">
+            <button class="button button-primary" id="add-btn" type="button">أضف إلى السلة</button>
+            <a class="wa-btn" id="wa-btn" href="https://wa.me/${WA}?text=${waText}" target="_blank" rel="noopener">واتساب</a>
+            <a class="button button-ghost" href="checkout.html">إتمام الطلب</a>
+          </div>`}
+          <section class="faq" style="margin-top:28px">
+            <h2 style="font-size:1.1rem">الأسئلة الشائعة</h2>
+            <details><summary>متى يصل الطلب؟</summary><p style="color:var(--muted)">${esc(p.delivery_note_ar||'عادة خلال 7–14 يوم عمل حسب المورد والمدينة.')}</p></details>
+            <details><summary>هل الدفع عند الاستلام متاح؟</summary><p style="color:var(--muted)">نعم لمعظم المدن. يمكنك أيضاً التحويل البنكي عند تأكيد الطلب.</p></details>
+            <details><summary>هل يمكن الإرجاع؟</summary><p style="color:var(--muted)">التواصل عبر واتساب خلال 48 ساعة من الاستلام لحالات التلف أو الخطأ في الصنف — حسب سياسة المنتج.</p></details>
+            <details><summary>هل الشراء من المورد تلقائي؟</summary><p style="color:var(--muted)">لا. يتم تنفيذ الطلبات بمراجعة يدوية من فريق Tiqnora دون شراء تلقائي.</p></details>
+          </section>
         </div>
       </div>
-      <script type="application/ld+json">${JSON.stringify({"@context":"https://schema.org","@type":"Product","name":p.name_ar,"description":p.description_ar||"","sku":p.sku||"","brand":p.brands?.name||"Tiqnora","offers":{"@type":"Offer","price":final,"priceCurrency":"SAR","availability":out?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}})}<\/script>`;
+      <script type="application/ld+json">${JSON.stringify({"@context":"https://schema.org","@type":"Product","name":p.name_ar,"description":p.description_ar||"","sku":p.sku||p.slug,"offers":{"@type":"Offer","price":final,"priceCurrency":"SAR","availability":out?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}})}<\/script>`;
 
-      let qty = 1;
-      const qv = () => document.querySelector('#q-val');
-      document.querySelector('#q-minus').onclick = () => { if (qty > 1) { qty--; qv().textContent = qty; } };
-      document.querySelector('#q-plus').onclick = () => { qty++; qv().textContent = qty; };
-      document.querySelector('#add-btn').onclick = () => {
-        window.TiqnoraStore.addProduct(p, qty);
-        renderCount();
-        const b = document.querySelector('#add-btn'); b.textContent = '✓ تمت الإضافة'; setTimeout(() => b.textContent = 'أضف إلى السلة', 1600);
-      };
+      if (!out) {
+        let qty = 1;
+        const qv = () => document.querySelector('#q-val');
+        document.querySelector('#q-minus').onclick = () => { if (qty > 1) { qty--; qv().textContent = qty; } };
+        document.querySelector('#q-plus').onclick = () => { qty++; qv().textContent = qty; };
+        document.querySelector('#add-btn').onclick = () => {
+          window.TiqnoraStore.addProduct(p, qty);
+          renderCount();
+          window.TiqnoraAnalytics?.addToCart?.(p.slug, p.name_ar, final, qty);
+          const b = document.querySelector('#add-btn'); b.textContent = '✓ تمت الإضافة'; setTimeout(() => b.textContent = 'أضف إلى السلة', 1600);
+        };
+        document.querySelector('#wa-btn')?.addEventListener('click', () => {
+          window.TiqnoraAnalytics?.track?.('whatsapp_click', { slug: p.slug });
+        });
+      }
       renderCount();
     }
     load();
