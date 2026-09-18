@@ -148,6 +148,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/webhooks/meta",
+      "destination": "/api/social/webhook?platform=meta"
+    },
+    {
       "source": "/api/mobile/app-version",
       "destination": "/api/mobile/app-version?action=app-version"
     },

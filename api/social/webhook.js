@@ -40,36 +40,202 @@ function normalizeMeta(payload) {
   const object = String(payload?.object || '').toLowerCase();
 
   for (const entry of payload?.entry || []) {
+    const accountId = String(entry?.id || '');
+
+    // Instagram / Messenger messaging webhooks (entry.messaging[])
+    for (const msg of entry?.messaging || []) {
+      try {
+        const platform = object === 'instagram' ? 'instagram' : 'facebook';
+        const sender = String(msg?.sender?.id || '');
+        const recipient = String(msg?.recipient?.id || '');
+        if (msg?.message) {
+          const m = msg.message;
+          const mid = String(m?.mid || m?.is_deleted || msg?.timestamp || `${sender}-${msg?.timestamp}`);
+          const isEcho = Boolean(m?.is_echo);
+          const isDeleted = Boolean(m?.is_deleted);
+          let eventType = 'message.received';
+          if (isDeleted) eventType = 'message.deleted';
+          else if (isEcho) eventType = 'message.echo';
+          else if (m?.is_edited) eventType = 'message.edited';
+          events.push({
+            platform,
+            event_type: eventType,
+            external_event_id: mid,
+            external_parent_id: m?.reply_to?.mid ? String(m.reply_to.mid) : null,
+            author_external_id: sender || null,
+            author_name: null,
+            content: m?.text || (m?.attachments ? '[attachment]' : null),
+            permalink: null,
+            occurred_at: toIso(msg?.timestamp),
+            account_external_id: accountId || recipient,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, kind: 'messaging', entry_id: entry?.id, messaging: { sender, recipient, timestamp: msg?.timestamp, message_type: eventType } }
+          });
+        } else if (msg?.postback) {
+          events.push({
+            platform,
+            event_type: 'messaging_postback',
+            external_event_id: String(msg.postback?.mid || `postback-${sender}-${msg?.timestamp}`),
+            external_parent_id: null,
+            author_external_id: sender || null,
+            author_name: null,
+            content: msg.postback?.payload || msg.postback?.title || null,
+            permalink: null,
+            occurred_at: toIso(msg?.timestamp),
+            account_external_id: accountId || recipient,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, kind: 'postback', entry_id: entry?.id }
+          });
+        } else if (msg?.read) {
+          events.push({
+            platform,
+            event_type: 'messaging_seen',
+            external_event_id: `read-${sender}-${msg.read?.watermark || msg?.timestamp}`,
+            external_parent_id: null,
+            author_external_id: sender || null,
+            author_name: null,
+            content: null,
+            permalink: null,
+            occurred_at: toIso(msg?.timestamp),
+            account_external_id: accountId || recipient,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, kind: 'read', entry_id: entry?.id }
+          });
+        } else if (msg?.reaction) {
+          events.push({
+            platform,
+            event_type: 'messaging_reaction',
+            external_event_id: `reaction-${msg.reaction?.mid || ''}-${sender}-${msg?.timestamp}`,
+            external_parent_id: msg.reaction?.mid ? String(msg.reaction.mid) : null,
+            author_external_id: sender || null,
+            author_name: null,
+            content: msg.reaction?.emoji || msg.reaction?.reaction || null,
+            permalink: null,
+            occurred_at: toIso(msg?.timestamp),
+            account_external_id: accountId || recipient,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, kind: 'reaction', entry_id: entry?.id }
+          });
+        } else {
+          // unknown messaging subtype — store lightweight for observability
+          events.push({
+            platform,
+            event_type: 'messaging.unknown',
+            external_event_id: `msg-unknown-${sender || 'x'}-${msg?.timestamp || Date.now()}`,
+            external_parent_id: null,
+            author_external_id: sender || null,
+            author_name: null,
+            content: null,
+            permalink: null,
+            occurred_at: toIso(msg?.timestamp),
+            account_external_id: accountId,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, kind: 'messaging_unknown', entry_id: entry?.id, keys: Object.keys(msg || {}) }
+          });
+        }
+      } catch (_) {
+        // never crash webhook on unexpected messaging shape
+      }
+    }
+
+    // changes[] — comments, mentions, feed, etc.
     for (const change of entry?.changes || []) {
-      const field = String(change?.field || '').toLowerCase();
-      const value = change?.value || {};
-      if (!['comments', 'feed'].includes(field)) continue;
+      try {
+        const field = String(change?.field || '').toLowerCase();
+        const value = change?.value || {};
+        const platform = object === 'instagram' ? 'instagram' : (object === 'page' || object === 'facebook' ? 'facebook' : (object || 'facebook'));
 
-      const isInstagram = object === 'instagram' || field === 'comments';
-      const platform = isInstagram ? 'instagram' : 'facebook';
-      const isFacebookComment = value?.item === 'comment' || Boolean(value?.comment_id);
-      const isInstagramComment = field === 'comments' && (value?.id || value?.comment_id);
-      if (!isFacebookComment && !isInstagramComment) continue;
+        if (field === 'comments' || field === 'feed' || value?.item === 'comment' || value?.comment_id) {
+          const isFacebookComment = value?.item === 'comment' || Boolean(value?.comment_id);
+          const isInstagramComment = field === 'comments' && (value?.id || value?.comment_id);
+          if (field === 'feed' && !isFacebookComment) {
+            // non-comment feed change
+            const eid = value?.post_id || value?.id || `${accountId}-${field}-${entry?.time}`;
+            events.push({
+              platform,
+              event_type: `feed.${String(value?.verb || 'update').toLowerCase()}`,
+              external_event_id: String(eid),
+              external_parent_id: value?.post_id ? String(value.post_id) : null,
+              author_external_id: String(value?.from?.id || ''),
+              author_name: value?.from?.name || null,
+              content: value?.message || null,
+              permalink: value?.permalink_url || null,
+              occurred_at: toIso(value?.created_time || entry?.time),
+              account_external_id: accountId,
+              detected_intent: null,
+              detected_intent_confidence: null,
+              raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field }
+            });
+            continue;
+          }
+          if (!isFacebookComment && !isInstagramComment && field !== 'comments') continue;
 
-      const externalEventId = value?.comment_id || value?.id;
-      if (!externalEventId) continue;
+          const externalEventId = value?.comment_id || value?.id;
+          if (!externalEventId) continue;
+          const removed = ['remove', 'delete', 'deleted'].includes(String(value?.verb || value?.action || '').toLowerCase());
+          events.push({
+            platform: object === 'instagram' || field === 'comments' ? (object === 'page' ? 'facebook' : (object === 'instagram' ? 'instagram' : platform)) : platform,
+            event_type: removed ? 'comment.deleted' : 'comment.created',
+            external_event_id: String(externalEventId),
+            external_parent_id: String(value?.media_id || value?.media?.id || value?.post_id || value?.parent_id || ''),
+            author_external_id: String(value?.from?.id || value?.sender_id || value?.user_id || ''),
+            author_name: value?.from?.name || value?.from?.username || value?.username || value?.sender_name || null,
+            content: value?.message || value?.text || null,
+            permalink: value?.permalink_url || value?.permalink || null,
+            occurred_at: toIso(value?.created_time || value?.timestamp || entry?.time),
+            account_external_id: accountId,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field }
+          });
+          continue;
+        }
 
-      const removed = ['remove', 'delete', 'deleted'].includes(String(value?.verb || value?.action || '').toLowerCase());
-      events.push({
-        platform,
-        event_type: removed ? 'comment.deleted' : 'comment.created',
-        external_event_id: String(externalEventId),
-        external_parent_id: String(value?.media_id || value?.media?.id || value?.post_id || value?.parent_id || ''),
-        author_external_id: String(value?.from?.id || value?.sender_id || value?.user_id || ''),
-        author_name: value?.from?.name || value?.from?.username || value?.username || value?.sender_name || null,
-        content: value?.message || value?.text || null,
-        permalink: value?.permalink_url || value?.permalink || null,
-        occurred_at: toIso(value?.created_time || value?.timestamp || entry?.time),
-        account_external_id: String(entry?.id || ''),
-        detected_intent: null,
-        detected_intent_confidence: null,
-        raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field, value }
-      });
+        if (field === 'mentions' || field === 'story_insights' || field === 'live_comments') {
+          const eid = value?.id || value?.comment_id || value?.media_id || `${accountId}-${field}-${entry?.time || Date.now()}`;
+          events.push({
+            platform: object === 'instagram' ? 'instagram' : platform,
+            event_type: field,
+            external_event_id: String(eid),
+            external_parent_id: value?.media_id ? String(value.media_id) : null,
+            author_external_id: String(value?.from?.id || value?.sender_id || ''),
+            author_name: value?.from?.username || value?.from?.name || null,
+            content: value?.text || value?.message || null,
+            permalink: value?.permalink || null,
+            occurred_at: toIso(value?.timestamp || entry?.time),
+            account_external_id: accountId,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field }
+          });
+          continue;
+        }
+
+        // Unknown change field — acknowledge without crashing (idempotent id)
+        const fallbackId = value?.id || value?.comment_id || value?.mid || `${accountId}-${field || 'change'}-${entry?.time || Date.now()}`;
+        events.push({
+          platform: object === 'instagram' ? 'instagram' : platform,
+          event_type: field ? `change.${field}` : 'change.unknown',
+          external_event_id: String(fallbackId),
+          external_parent_id: null,
+          author_external_id: String(value?.from?.id || ''),
+          author_name: null,
+          content: value?.message || value?.text || null,
+          permalink: null,
+          occurred_at: toIso(entry?.time),
+          account_external_id: accountId,
+          detected_intent: null,
+          detected_intent_confidence: null,
+          raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field: field || null, keys: Object.keys(value || {}) }
+        });
+      } catch (_) {
+        // swallow per-change errors
+      }
     }
   }
 
@@ -340,12 +506,33 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   return { matched: true, intent: rule.intent || null, confidence };
 }
 
+function getQuery(req) {
+  const q = { ...(req.query || {}) };
+  try {
+    const host = req.headers?.host || 'localhost';
+    const url = new URL(req.url || '/', `https://${host}`);
+    url.searchParams.forEach((v, k) => { if (q[k] == null) q[k] = v; });
+  } catch (_) {}
+  return q;
+}
+
 export default async function handler(req, res) {
-  const platform = String(req.query?.platform || 'meta').toLowerCase();
+  const query = getQuery(req);
+  const platform = String(query.platform || 'meta').toLowerCase();
 
   if (req.method === 'GET' && ['meta', 'whatsapp'].includes(platform)) {
-    const ok = req.query['hub.mode'] === 'subscribe' && safeEqualText(req.query['hub.verify_token'], process.env.META_WEBHOOK_VERIFY_TOKEN);
-    return ok ? res.status(200).send(req.query['hub.challenge']) : send(res, 403, { error: 'Verification failed' });
+    const mode = String(query['hub.mode'] || '');
+    const token = String(query['hub.verify_token'] || '');
+    const challenge = String(query['hub.challenge'] || '');
+    const expected = process.env.META_WEBHOOK_VERIFY_TOKEN || '';
+    if (mode === 'subscribe' && expected && safeEqualText(token, expected)) {
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.end(challenge);
+    }
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.end('Forbidden');
   }
   if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
 
