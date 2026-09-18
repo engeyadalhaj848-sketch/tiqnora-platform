@@ -6,11 +6,13 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.s
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 function json(res, status, body) {
+  res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  return res.status(status).json(body);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.end(JSON.stringify(body));
 }
 
 function num(v, d = 0) {

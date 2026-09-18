@@ -251,5 +251,7 @@
       "source": "/solutions/:slug/",
       "destination": "/solutions/:slug.html"
     }
-  ]
+  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
 }

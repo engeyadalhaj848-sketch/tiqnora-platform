@@ -9,11 +9,13 @@ const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ANON = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 function json(res, status, body) {
+  res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  return res.status(status).json(body);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.end(JSON.stringify(body));
 }
 
 function envPresent(name) {

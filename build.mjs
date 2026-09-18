@@ -20,9 +20,11 @@ if (existsSync('services')) cpSync('services', `${output}/services`, { recursive
 if (existsSync('products')) cpSync('products', `${output}/products`, { recursive: true });
 if (existsSync('solutions')) cpSync('solutions', `${output}/solutions`, { recursive: true });
 if (existsSync('blog')) cpSync('blog', `${output}/blog`, { recursive: true });
-for (const dir of ['js', 'supabase', 'docs', 'admin', 'api']) {
+for (const dir of ['js', 'admin']) {
   if (existsSync(dir)) cpSync(dir, `${output}/${dir}`, { recursive: true });
 }
+// Note: api/ stays at repo root for Vercel Serverless — do not copy into dist
+// supabase/ and docs/ are not needed in static output
 
 if (existsSync('public/assets')) {
   cpSync('public/assets', `${output}/assets`, { recursive: true });
