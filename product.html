@@ -126,7 +126,23 @@
           </section>
         </div>
       </div>
-      <script type="application/ld+json">${JSON.stringify({"@context":"https://schema.org","@type":"Product","name":p.name_ar,"description":p.description_ar||"","sku":p.sku||p.slug,"offers":{"@type":"Offer","price":final,"priceCurrency":"SAR","availability":out?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}})}<\/script>`;
+      <script type="application/ld+json">${JSON.stringify((()=>{
+        const faq = (p.specifications && Array.isArray(p.specifications.faq)) ? p.specifications.faq : [];
+        const schemas = [{
+          "@context":"https://schema.org","@type":"Product",
+          "name": p.name_ar, "description": p.description_ar||"", "sku": p.sku||p.slug,
+          "image": (p.images||[]).slice(0,5),
+          "brand": p.brands?.name ? {"@type":"Brand","name":p.brands.name} : undefined,
+          "offers": {"@type":"Offer","price":final,"priceCurrency":"SAR","availability":out?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}
+        }];
+        if (faq.length) schemas.push({"@context":"https://schema.org","@type":"FAQPage","mainEntity":faq.map(f=>({"@type":"Question","name":f.q||"","acceptedAnswer":{"@type":"Answer","text":f.a||""}}))});
+        schemas.push({"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+          {"@type":"ListItem","position":1,"name":"الرئيسية","item":"https://www.tiqnora.com/"},
+          {"@type":"ListItem","position":2,"name":"المتجر","item":"https://www.tiqnora.com/shop"},
+          {"@type":"ListItem","position":3,"name":p.name_ar,"item":location.href}
+        ]});
+        return schemas.length===1?schemas[0]:schemas;
+      })())}<\/script>`;
 
       if (!out) {
         let qty = 1;

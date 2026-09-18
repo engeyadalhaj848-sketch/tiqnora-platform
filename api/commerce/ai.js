@@ -20,6 +20,13 @@ const MODE_PROMPTS = {
   market_compare: `You are Tiqnora market comparison analyst. No live stock claims. Arabic.`,
   import_brief: `Prepare product import brief for admin review. Never publish.`,
   content: `Write Arabic sales copy for product listing. No supplier disclosure.`,
+  product_seo: `You are Tiqnora AI Product SEO writer for Saudi B2B/B2C tech marketplace.
+Return STRICT JSON only with keys:
+name_ar, name_en, short_description_ar, description_ar, description_en,
+specs (object of string key-value technical specs in Arabic keys preferred),
+benefits_ar (array of strings), faq (array of {q,a} in Arabic),
+keywords_ar, keywords_en, seo_title_ar, seo_description_ar, seo_title_en, seo_description_en.
+No supplier disclosure. No fake certifications. Saudi market tone.`,
 };
 
 function num(v, d = 0) {
@@ -277,6 +284,66 @@ async function handleSuppliersGet(action) {
   return { status: 400, payload: { error: 'Unknown action. Use action=status|suppliers|scout_history' } };
 }
 
+
+function computeQualityScore(p) {
+  let score = 0;
+  const notes = [];
+  const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : [];
+  if (imgs.length >= 1) score += 15; else notes.push('no_images');
+  if (imgs.length >= 2) score += 10;
+  if (imgs.length >= 3) score += 5;
+  if (p.image_source && p.image_source !== 'placeholder') score += 5;
+  if ((p.description_ar || '').length >= 80) score += 15; else notes.push('short_description');
+  if ((p.description_en || '').length >= 40) score += 5;
+  const specs = p.specifications || {};
+  const hasSpecs = specs.specs && typeof specs.specs === 'object' && Object.keys(specs.specs).length > 0;
+  const hasBenefits = Array.isArray(specs.benefits_ar) && specs.benefits_ar.length > 0;
+  const hasFaq = Array.isArray(specs.faq) && specs.faq.length > 0;
+  if (hasSpecs) score += 15; else notes.push('missing_specs');
+  if (hasBenefits) score += 5;
+  if (hasFaq) score += 10; else notes.push('missing_faq');
+  if (p.seo_title_ar && p.seo_description_ar) score += 15; else notes.push('missing_seo');
+  if (p.keywords_ar) score += 5;
+  if (p.category_id) score += 5; else notes.push('missing_category');
+  if (p.brand_id) score += 5; else notes.push('missing_brand');
+  if (p.sku) score += 5;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const ready = score >= 75 && imgs.length >= 1 && p.seo_title_ar && p.description_ar;
+  return { score, ready_to_publish: !!ready, notes, checks: { images: imgs.length, hasSpecs, hasBenefits, hasFaq, hasSeo: !!(p.seo_title_ar && p.seo_description_ar) } };
+}
+
+async function handleProductSeo(body) {
+  const name = String(body.name_ar || body.product_name || body.name || '').trim();
+  if (!name) return { status: 400, payload: { error: 'name_ar or product_name required' } };
+  const category = String(body.category || body.product_category || '');
+  const brand = String(body.brand || '');
+  const existing = String(body.description_ar || body.description || '').slice(0, 800);
+  const prompt = `Product: ${name}
+English name hint: ${body.name_en || ''}
+Category: ${category}
+Brand: ${brand}
+SKU: ${body.sku || ''}
+Existing description: ${existing}
+Price SAR: ${body.price || ''}
+Write complete Saudi marketplace SEO package as strict JSON.`;
+  const text = await callGemini(MODE_PROMPTS.product_seo, prompt, 0.35);
+  let data = null;
+  try {
+    data = JSON.parse(text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim());
+  } catch {
+    data = { description_ar: text.slice(0, 2000), notes: 'parse_fallback' };
+  }
+  return {
+    status: 200,
+    payload: {
+      ...data,
+      auto_publish: false,
+      disclaimer: 'محتوى AI للمراجعة — لا نشر تلقائي.',
+    },
+  };
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -308,13 +375,28 @@ export default async function handler(req, res) {
   const mode = String(body.mode || body.action || 'research').toLowerCase();
 
   // Product Scout
-  if (mode === 'scout' || body.product_name) {
+  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score')) {
     try {
       const out = await handleScout(body);
       return json(res, out.status, out.payload);
     } catch (e) {
       return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
     }
+  }
+
+  if (mode === 'product_seo' || mode === 'seo_content') {
+    try {
+      const out = await handleProductSeo(body);
+      return json(res, out.status, out.payload);
+    } catch (e) {
+      return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
+    }
+  }
+
+  if (mode === 'quality_score') {
+    const product = body.product || body;
+    const result = computeQualityScore(product);
+    return json(res, 200, { ...result, auto_publish: false });
   }
 
   // Supplier queue / log actions (lightweight, no secrets)

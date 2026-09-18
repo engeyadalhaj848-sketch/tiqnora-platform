@@ -371,6 +371,9 @@ VIEWS.products = async v => {
       <option value="live" ${f.mode==='live'?'selected':''}>منشور فقط</option>
       <option value="missing_images" ${f.mode==='missing_images'?'selected':''}>بدون صور كافية</option>
       <option value="missing_seo" ${f.mode==='missing_seo'?'selected':''}>ناقص SEO</option>
+      <option value="needs_review" ${f.mode==='needs_review'?'selected':''}>صور تحتاج مراجعة</option>
+      <option value="ready" ${f.mode==='ready'?'selected':''}>جاهز للنشر (جودة ≥75)</option>
+      <option value="low_quality" ${f.mode==='low_quality'?'selected':''}>جودة منخفضة</option>
     </select></label>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -391,6 +394,8 @@ VIEWS.products = async v => {
         <option value="assign_supplier">تعيين مورد</option>
         <option value="add_tags">إضافة وسوم</option>
         <option value="change_status">تغيير الحالة</option>
+        <option value="generate_seo">توليد محتوى SEO (AI)</option>
+        <option value="quality_score">حساب درجة الجودة</option>
       </select>
       <button class="btn-primary" id="bulk-run">تنفيذ</button>
     </div>
@@ -457,6 +462,15 @@ VIEWS.products = async v => {
   if (f.mode === 'missing_seo') {
     rows = rows.filter(p => !p.seo_title_ar || !p.seo_description_ar);
   }
+  if (f.mode === 'needs_review') {
+    rows = rows.filter(p => p.media_status === 'pending_review' || (p.specifications && p.specifications.image_status === 'placeholder_reuse_pending_official'));
+  }
+  if (f.mode === 'ready') {
+    rows = rows.filter(p => (p.quality_score != null && p.quality_score >= 75));
+  }
+  if (f.mode === 'low_quality') {
+    rows = rows.filter(p => p.quality_score != null && p.quality_score < 60);
+  }
 
   const allCount = (await db.from('products').select('id', { count: 'exact', head: true })).count;
   const draftCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', false)).count;
@@ -481,17 +495,23 @@ VIEWS.products = async v => {
     return (((price - cost) / price) * 100).toFixed(0) + '%';
   };
 
+  const qBadge = (p) => {
+    if (p.quality_score == null) return '<span class="pill muted">—</span>';
+    const s = Number(p.quality_score);
+    const cls = s >= 75 ? 'ok' : (s >= 50 ? 'warn' : 'danger');
+    return `<span class="pill ${cls}"><b>${s}</b>/100</span>`;
+  };
   $('#tbl').innerHTML = tbl(
-    ['', 'المنتج', 'تصنيف', 'المورد', 'بيع', 'هامش', 'الحالة', 'إجراءات'],
+    ['', 'المنتج', 'تصنيف', 'جودة', 'بيع', 'وسائط', 'الحالة', 'إجراءات'],
     rows.map(p => `<tr>
       <td><input type="checkbox" class="prod-check" value="${p.id}"></td>
-      <td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}${p.fulfillment_type==='dropship'?' <span class="pill warn">DS</span>':''}${(p.campaign_tags||[]).includes('national-day')?' <span class="pill ok">وطني</span>':''}</td>
+      <td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}${p.fulfillment_type==='dropship'?' <span class="pill warn">DS</span>':''}</td>
       <td>${esc(p.categories?.name_ar||'—')}</td>
-      <td>${esc(p.supplier_name || '—')}</td>
-      <td>${money(p.price)}${p.discount_percent > 0 ? ` <span class="pill warn">-${p.discount_percent}%</span>` : ''}</td>
-      <td><b>${margin(p)}</b></td>
+      <td>${qBadge(p)}</td>
+      <td>${money(p.price)}</td>
+      <td>${(p.images||[]).length} ${p.media_status?`<small>${esc(p.media_status)}</small>`:''}</td>
       <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مسودة'}</span></td>
-      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
+      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-media="${p.id}">وسائط</button><button class="btn-sm" data-seo="${p.id}">SEO AI</button><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
     </tr>`).join('')
   );
 
@@ -542,7 +562,6 @@ VIEWS.products = async v => {
         const { error } = await db.from('products').update({ supplier_name: payload.supplier_name }).in('id', ids);
         if (error) throw error;
       } else if (payload.action === 'add_tags') {
-        // merge tags per product
         for (const id of ids) {
           const row = rows.find(r => r.id === id);
           const cur = Array.isArray(row?.campaign_tags) ? row.campaign_tags : [];
@@ -550,6 +569,55 @@ VIEWS.products = async v => {
           const { error } = await db.from('products').update({ campaign_tags: merged }).eq('id', id);
           if (error) throw error;
         }
+      } else if (payload.action === 'generate_seo') {
+        let ok = 0, fail = 0;
+        for (const id of ids.slice(0, 25)) {
+          const row = rows.find(r => r.id === id);
+          if (!row) continue;
+          try {
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+              mode: 'product_seo', name_ar: row.name_ar, name_en: row.name_en, sku: row.sku,
+              description_ar: row.description_ar, price: row.price, category: row.categories?.name_ar, brand: row.brands?.name
+            })});
+            const j = await r.json();
+            if (j.error) { fail++; continue; }
+            const specs = { ...(row.specifications || {}) };
+            if (j.specs) specs.specs = j.specs;
+            if (j.benefits_ar) specs.benefits_ar = j.benefits_ar;
+            if (j.faq) specs.faq = j.faq;
+            const patch = {
+              name_ar: j.name_ar || row.name_ar,
+              name_en: j.name_en || row.name_en,
+              description_ar: j.description_ar || j.short_description_ar || row.description_ar,
+              description_en: j.description_en || row.description_en,
+              seo_title_ar: j.seo_title_ar || row.seo_title_ar,
+              seo_description_ar: j.seo_description_ar || row.seo_description_ar,
+              seo_title_en: j.seo_title_en || row.seo_title_en,
+              seo_description_en: j.seo_description_en || row.seo_description_en,
+              keywords_ar: j.keywords_ar || row.keywords_ar,
+              keywords_en: j.keywords_en || row.keywords_en,
+              specifications: specs
+            };
+            const { error } = await db.from('products').update(patch).eq('id', id);
+            if (error) fail++; else ok++;
+          } catch { fail++; }
+        }
+        toast(`SEO: نجح ${ok} · فشل ${fail} (حد 25/مرة)`);
+        VIEWS.products(v); return;
+      } else if (payload.action === 'quality_score') {
+        for (const id of ids.slice(0, 100)) {
+          const row = rows.find(r => r.id === id);
+          if (!row) continue;
+          try {
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: row })});
+            const j = await r.json();
+            if (j.score != null) {
+              await db.from('products').update({ quality_score: j.score, quality_notes: { notes: j.notes, checks: j.checks, ready: j.ready_to_publish } }).eq('id', id);
+            }
+          } catch (_) {}
+        }
+        toast('تم تحديث درجات الجودة');
+        VIEWS.products(v); return;
       }
       // Also notify API when session available (audit path)
       try {
@@ -617,7 +685,135 @@ VIEWS.products = async v => {
     await db.from('products').update({ is_active: false }).eq('id', b.dataset.unpublish);
     toast('أُلغي النشر — مسودة'); VIEWS.products(v);
   });
+
+  const openMediaManager = async (productId) => {
+    const row = rows.find(r => r.id === productId);
+    if (!row) return;
+    let imgs = [];
+    try {
+      const { data, error } = await db.from('product_images').select('*').eq('product_id', productId).order('sort_order');
+      if (!error) imgs = data || [];
+    } catch (_) {}
+    // fallback from products.images
+    if (!imgs.length && Array.isArray(row.images)) {
+      imgs = row.images.map((url, i) => ({ id: null, image_url: url, image_type: i===0?'main':'gallery', sort_order: i, source: row.image_source || 'placeholder', approval_status: 'pending_review' }));
+    }
+    const html = `<div style="max-height:60vh;overflow:auto">
+      <p class="card-desc">صور رسمية من المصنّع/المورد فقط — لا صور مزيفة. الحالة: معتمد / بانتظار مراجعة / مرفوض.</p>
+      <label>مصدر الصور العام<input id="mm-source" value="${esc(row.image_source||'admin')}" placeholder="manufacturer / supplier / admin"></label>
+      <div id="mm-list">${imgs.map((im,i)=>`
+        <div class="card" style="margin:8px 0;padding:10px;background:var(--bg2)" data-mm-i="${i}">
+          <div style="display:flex;gap:10px;align-items:start">
+            <img src="${esc(im.image_url)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px" onerror="this.style.opacity=.3">
+            <div style="flex:1">
+              <input class="mm-url" value="${esc(im.image_url)}" dir="ltr" style="width:100%">
+              <div class="grid-2" style="gap:6px;margin-top:6px">
+                <select class="mm-type"><option value="main" ${im.image_type==='main'?'selected':''}>رئيسية</option><option value="gallery" ${im.image_type==='gallery'?'selected':''}>معرض</option><option value="detail" ${im.image_type==='detail'?'selected':''}>تفاصيل</option></select>
+                <select class="mm-status"><option value="pending_review" ${im.approval_status==='pending_review'?'selected':''}>مراجعة</option><option value="approved" ${im.approval_status==='approved'?'selected':''}>معتمد</option><option value="rejected" ${im.approval_status==='rejected'?'selected':''}>مرفوض</option></select>
+                <input class="mm-order" type="number" value="${im.sort_order??i}" style="width:80px">
+                <select class="mm-src"><option value="admin">admin</option><option value="manufacturer" ${im.source==='manufacturer'?'selected':''}>manufacturer</option><option value="supplier" ${im.source==='supplier'?'selected':''}>supplier</option><option value="placeholder" ${im.source==='placeholder'?'selected':''}>placeholder</option></select>
+              </div>
+              <input type="hidden" class="mm-id" value="${im.id||''}">
+            </div>
+          </div>
+        </div>`).join('') || '<p style="color:var(--muted)">لا صور — أضف رابطاً أدناه</p>'}
+      </div>
+      <label>رابط صورة جديدة (HTTPS)<input id="mm-new" dir="ltr" placeholder="https://..."></label>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn-sm" type="button" id="mm-add">+ إضافة رابط</button>
+        <button class="btn-primary" type="button" id="mm-save">حفظ الوسائط</button>
+      </div>
+    </div>`;
+    // simple overlay modal
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = `<div class="card" style="width:min(640px,100%);max-height:90vh;overflow:auto"><div class="card-head"><h2>وسائط: ${esc(row.name_ar)}</h2><button class="btn-sm" id="mm-close">إغلاق</button></div>${html}</div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelector('#mm-close').onclick = close;
+    ov.querySelector('#mm-add').onclick = () => {
+      const url = (ov.querySelector('#mm-new').value||'').trim();
+      if (!url) return toast('أدخل رابط الصورة');
+      const list = ov.querySelector('#mm-list');
+      const i = list.children.length;
+      const div = document.createElement('div');
+      div.className = 'card'; div.style.cssText='margin:8px 0;padding:10px;background:var(--bg2)';
+      div.innerHTML = `<input class="mm-url" value="${esc(url)}" dir="ltr" style="width:100%"><div class="grid-2" style="gap:6px;margin-top:6px"><select class="mm-type"><option value="gallery">معرض</option><option value="main">رئيسية</option></select><select class="mm-status"><option value="pending_review">مراجعة</option><option value="approved">معتمد</option></select><input class="mm-order" type="number" value="${i}"><select class="mm-src"><option value="admin">admin</option><option value="manufacturer">manufacturer</option><option value="supplier">supplier</option></select><input type="hidden" class="mm-id" value=""></div>`;
+      list.appendChild(div);
+      ov.querySelector('#mm-new').value = '';
+    };
+    ov.querySelector('#mm-save').onclick = async () => {
+      const cards = [...ov.querySelectorAll('#mm-list > div')];
+      const payload = cards.map((c, idx) => ({
+        id: c.querySelector('.mm-id')?.value || null,
+        image_url: (c.querySelector('.mm-url')?.value || '').trim(),
+        image_type: c.querySelector('.mm-type')?.value || 'gallery',
+        approval_status: c.querySelector('.mm-status')?.value || 'pending_review',
+        sort_order: Number(c.querySelector('.mm-order')?.value ?? idx),
+        source: c.querySelector('.mm-src')?.value || 'admin',
+      })).filter(x => x.image_url);
+      // Prefer product_images table; always sync products.images for storefront
+      const approvedUrls = payload.filter(x => x.approval_status === 'approved').sort((a,b)=>a.sort_order-b.sort_order).map(x=>x.image_url);
+      const allUrls = payload.sort((a,b)=>a.sort_order-b.sort_order).map(x=>x.image_url);
+      const main = payload.find(x => x.image_type === 'main') || payload[0];
+      const urlsForStore = approvedUrls.length ? approvedUrls : allUrls;
+      const image_source = (ov.querySelector('#mm-source')?.value || 'admin').trim();
+      const media_status = payload.some(x => x.approval_status === 'pending_review') ? 'pending_review' : (urlsForStore.length ? 'ready' : 'needs_images');
+      try {
+        // replace rows in product_images if table exists
+        await db.from('product_images').delete().eq('product_id', productId);
+        if (payload.length) {
+          const ins = payload.map(x => ({
+            product_id: productId, image_url: x.image_url, image_type: x.image_type,
+            sort_order: x.sort_order, source: x.source, approval_status: x.approval_status
+          }));
+          const { error } = await db.from('product_images').insert(ins);
+          if (error && !String(error.message||'').includes('schema cache')) toast('product_images: ' + error.message + ' — نُسخ إلى products.images');
+        }
+      } catch (e) { /* table may not exist yet */ }
+      await db.from('products').update({ images: urlsForStore, image_source, media_status }).eq('id', productId);
+      toast('تم حفظ الوسائط');
+      close();
+      VIEWS.products(v);
+    };
+  };
+
+  $$('[data-media]').forEach(b => b.onclick = () => openMediaManager(b.dataset.media));
+
+  $$('[data-seo]').forEach(b => b.onclick = async () => {
+    const row = rows.find(r => r.id === b.dataset.seo);
+    if (!row) return;
+    if (!confirm('توليد محتوى SEO بالذكاء الاصطناعي لهذا المنتج؟ (للمراجعة فقط)')) return;
+    toast('جارٍ التوليد…');
+    try {
+      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+        mode: 'product_seo', name_ar: row.name_ar, name_en: row.name_en, sku: row.sku,
+        description_ar: row.description_ar, price: row.price, category: row.categories?.name_ar, brand: row.brands?.name
+      })});
+      const j = await r.json();
+      if (j.error) return toast(j.error);
+      const specs = { ...(row.specifications || {}) };
+      if (j.specs) specs.specs = j.specs;
+      if (j.benefits_ar) specs.benefits_ar = j.benefits_ar;
+      if (j.faq) specs.faq = j.faq;
+      await db.from('products').update({
+        description_ar: j.description_ar || j.short_description_ar || row.description_ar,
+        description_en: j.description_en || row.description_en,
+        seo_title_ar: j.seo_title_ar, seo_description_ar: j.seo_description_ar,
+        seo_title_en: j.seo_title_en, seo_description_en: j.seo_description_en,
+        keywords_ar: j.keywords_ar, keywords_en: j.keywords_en,
+        specifications: specs
+      }).eq('id', row.id);
+      // refresh quality
+      const qr = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: { ...row, ...j, specifications: specs } })});
+      const qj = await qr.json();
+      if (qj.score != null) await db.from('products').update({ quality_score: qj.score, quality_notes: { notes: qj.notes, ready: qj.ready_to_publish } }).eq('id', row.id);
+      toast('تم توليد SEO — راجع قبل النشر');
+      VIEWS.products(v);
+    } catch (e) { toast(e.message || 'فشل SEO'); }
+  });
 };
+
 
 
 VIEWS.commerce = async v => {
