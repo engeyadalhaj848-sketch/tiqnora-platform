@@ -400,6 +400,7 @@ VIEWS.products = async v => {
         <option value="quality_score">حساب درجة الجودة</option>
         <option value="ai_review">مراجعة AI للمنتجات المحددة</option>
         <option value="ai_verify">تحقق AI للمنتجات المحددة</option>
+        <option value="ai_market">تحليل سوق للمنتجات المحددة</option>
       </select>
       <button class="btn-primary" id="bulk-run">تنفيذ</button>
     </div>
@@ -649,6 +650,37 @@ VIEWS.products = async v => {
         toast(`تحقق AI: مكتمل ${n} · جاهز ${ready} · يحتاج إصلاح ${needs}`);
         VIEWS.products(v); return;
       }
+      } else if (payload.action === 'ai_market') {
+        let n = 0, add = 0, rev = 0, rej = 0;
+        for (const id of ids.slice(0, 50)) {
+          const row = rows.find(r => r.id === id);
+          if (!row) continue;
+          try {
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+              mode: 'market_research', product_name: row.name_ar, category: row.categories?.name_ar,
+              brand: row.brands?.name, supplier: row.supplier_name, cost: row.cost_price, shipping: 0
+            })});
+            const j = await r.json();
+            if (j.error) continue;
+            try {
+              await db.from('product_market_reports').insert({
+                product_id: id, product_name: j.product_name,
+                demand_score: j.demand_score, competition_score: j.competition_score,
+                seo_score: j.seo_score, supplier_score: j.supplier_score,
+                suggested_price: j.suggested_price, estimated_profit: j.estimated_profit,
+                profit_margin: j.profit_margin, keywords: j.keywords||[], analysis: j.analysis||{},
+                ai_decision: j.ai_decision||'REVIEW_FIRST'
+              });
+            } catch (_) {}
+            n++;
+            if (j.ai_decision === 'ADD_PRODUCT') add++;
+            else if (j.ai_decision === 'NOT_RECOMMENDED') rej++;
+            else rev++;
+          } catch (_) {}
+        }
+        toast(`تحليل سوق: ${n} · ADD ${add} · REVIEW ${rev} · REJECT ${rej}`);
+        VIEWS.products(v); return;
+      }
       // Also notify API when session available (audit path)
       try {
         const { data: sess } = await db.auth.getSession();
@@ -690,7 +722,7 @@ VIEWS.products = async v => {
 
     const labels = {
       publish: 'نشر', unpublish: 'إلغاء النشر', update_category: 'تغيير التصنيف',
-      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI', ai_verify: 'تحقق AI'
+      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI', ai_verify: 'تحقق AI', ai_market: 'تحليل سوق'
     };
     if (!confirm(`تأكيد: ${labels[action] || action} على ${ids.length} منتج؟\nلا يمكن التراجع بسهولة.`)) return;
     runBulk(payload);
@@ -988,6 +1020,25 @@ VIEWS.commerce = async v => {
     <pre id="scout-out" style="white-space:pre-wrap;margin-top:10px;max-height:320px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">مثال: تكلفة 150 → بيع 399 → ربح 249</pre>
   </div>
 
+  <div class="card"><h2>Market Intelligence — ذكاء السوق</h2>
+    <p class="card-desc">قبل الاستيراد/النشر: تحليل الطلب والمنافسة والهامش وSEO. قرار AI استرشادي فقط — المشرف يقرر.</p>
+    <div class="grid-2" style="gap:10px">
+      <label>اسم المنتج<input id="mi-name" placeholder="مثال: نظام كاشير أندرويد 15"></label>
+      <label>التصنيف<input id="mi-cat" placeholder="pos-systems / cctv / networking"></label>
+      <label>الماركة<input id="mi-brand" placeholder="Hikvision / TP-Link"></label>
+      <label>المورد<input id="mi-sup" placeholder="محلي / CJ"></label>
+      <label>التكلفة ر.س<input type="number" id="mi-cost" step="0.01" value="200"></label>
+      <label>الشحن ر.س<input type="number" id="mi-ship" step="0.01" value="25"></label>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn-primary" id="mi-run">تحليل السوق</button>
+      <button class="btn-sm" id="mi-save">تحليل + حفظ التقرير</button>
+    </div>
+    <pre id="mi-out" style="white-space:pre-wrap;margin-top:10px;max-height:280px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    <h3 style="margin-top:16px">آخر تقارير الفرص</h3>
+    <div id="mi-list"></div>
+  </div>
+
   <div class="card"><h2>بحث AI للمنتجات</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <select id="ai-mode"><option value="research">بحث منتج</option><option value="profit">تحليل ربح</option><option value="market_compare">مقارنة سوق</option><option value="import_brief">موجز استيراد</option><option value="content">وصف SEO</option><option value="trend">ترند</option></select>
@@ -1162,6 +1213,112 @@ VIEWS.commerce = async v => {
     } catch(e) {
       $('#scout-out').textContent = e.message || 'فشل Scout';
     }
+  };
+
+  // Market Intelligence
+  const renderMiList = async () => {
+    try {
+      const { data, error } = await db.from('product_market_reports').select('id,product_name,demand_score,competition_score,seo_score,profit_margin,ai_decision,created_at').order('created_at',{ascending:false}).limit(20);
+      if (error) { $('#mi-list').innerHTML = '<p style="color:var(--muted)">نفّذ migration 032 لعرض التقارير</p>'; return; }
+      const rows = data || [];
+      $('#mi-list').innerHTML = tbl(['المنتج','طلب','منافسة','SEO','هامش٪','قرار','وقت'], rows.map(r => `<tr>
+        <td><b>${esc(r.product_name)}</b></td>
+        <td>${r.demand_score??'—'}</td>
+        <td>${r.competition_score??'—'}</td>
+        <td>${r.seo_score??'—'}</td>
+        <td>${r.profit_margin??'—'}</td>
+        <td><span class="pill ${r.ai_decision==='ADD_PRODUCT'?'ok':r.ai_decision==='NOT_RECOMMENDED'?'danger':'warn'}">${esc(r.ai_decision)}</span></td>
+        <td dir="ltr">${esc(String(r.created_at||'').slice(0,19))}</td>
+      </tr>`).join('')) || '<p style="color:var(--muted)">لا تقارير بعد</p>';
+    } catch (_) {
+      $('#mi-list').innerHTML = '<p style="color:var(--muted)">تعذر تحميل التقارير</p>';
+    }
+  };
+  renderMiList();
+
+  $('#mi-run').onclick = async () => {
+    const payload = {
+      mode: 'market_research',
+      product_name: ($('#mi-name').value||'').trim(),
+      category: ($('#mi-cat').value||'').trim(),
+      brand: ($('#mi-brand').value||'').trim(),
+      supplier: ($('#mi-sup').value||'').trim(),
+      cost: Number($('#mi-cost').value)||0,
+      shipping: Number($('#mi-ship').value)||0,
+      target_market: 'saudi_arabia'
+    };
+    if (!payload.product_name) return toast('أدخل اسم المنتج');
+    $('#mi-out').textContent = 'جارٍ تحليل السوق…';
+    try {
+      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j.error) { $('#mi-out').textContent = j.error; return; }
+      window.__lastMi = j;
+      $('#mi-out').textContent = [
+        'المنتج: ' + j.product_name,
+        'Demand: ' + j.demand_score + '/100 (' + j.demand_level + ')',
+        'Competition: ' + j.competition_score + '/100 (' + j.competition_level + ')',
+        'SEO: ' + j.seo_score + '/100 (' + j.opportunity_level + ')',
+        'Supplier score: ' + j.supplier_score,
+        'Suggested price: ' + j.suggested_price + ' ر.س',
+        'Profit: ' + j.estimated_profit + ' ر.س · Margin: ' + j.profit_margin + '%',
+        'Keywords: ' + (j.keywords||[]).join(' · '),
+        'Decision: ' + j.ai_decision,
+        'Reasons: ' + ((j.analysis&&j.analysis.reasons)||[]).join(' · '),
+        '— لا نشر تلقائي / لا شراء تلقائي —'
+      ].join('\n');
+    } catch (e) {
+      $('#mi-out').textContent = e.message || 'فشل التحليل';
+    }
+  };
+  $('#mi-save').onclick = async () => {
+    if (!window.__lastMi || !window.__lastMi.product_name) {
+      window.__miSaveAfter = true;
+      $('#mi-run').click();
+      // wait briefly - better run analysis then save in one path
+    }
+    const saveReport = async (j) => {
+      try {
+        const { error } = await db.from('product_market_reports').insert({
+          product_name: j.product_name,
+          demand_score: j.demand_score,
+          competition_score: j.competition_score,
+          seo_score: j.seo_score,
+          supplier_score: j.supplier_score,
+          suggested_price: j.suggested_price,
+          estimated_profit: j.estimated_profit,
+          profit_margin: j.profit_margin,
+          keywords: j.keywords || [],
+          analysis: j.analysis || {},
+          ai_decision: j.ai_decision || 'REVIEW_FIRST'
+        });
+        if (error) toast(error.message || 'فشل الحفظ — نفّذ migration 032');
+        else { toast('حُفظ تقرير السوق'); renderMiList(); }
+      } catch (e) { toast(e.message || 'فشل الحفظ'); }
+    };
+    if (window.__lastMi && window.__lastMi.product_name) {
+      await saveReport(window.__lastMi);
+      return;
+    }
+    // run then save
+    const payload = {
+      mode: 'market_research',
+      product_name: ($('#mi-name').value||'').trim(),
+      category: ($('#mi-cat').value||'').trim(),
+      brand: ($('#mi-brand').value||'').trim(),
+      supplier: ($('#mi-sup').value||'').trim(),
+      cost: Number($('#mi-cost').value)||0,
+      shipping: Number($('#mi-ship').value)||0
+    };
+    if (!payload.product_name) return toast('أدخل اسم المنتج');
+    try {
+      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j.error) return toast(j.error);
+      window.__lastMi = j;
+      $('#mi-out').textContent = 'Decision: ' + j.ai_decision + ' · Margin: ' + j.profit_margin + '%';
+      await saveReport(j);
+    } catch (e) { toast(e.message || 'فشل'); }
   };
 
   // AI agent

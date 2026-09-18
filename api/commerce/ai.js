@@ -494,6 +494,144 @@ Write complete Saudi marketplace SEO package as strict JSON.`;
 }
 
 
+
+function levelFromScore(s) {
+  if (s >= 75) return 'High';
+  if (s >= 45) return 'Medium';
+  return 'Low';
+}
+
+function handleMarketResearch(body) {
+  const productName = String(body.product_name || body.name || body.name_ar || body.message || '').trim();
+  if (!productName || productName.length > 200) {
+    return { status: 400, payload: { error: 'product_name required' } };
+  }
+  const category = String(body.category || body.product_category || '').toLowerCase();
+  const brand = String(body.brand || '').trim();
+  const supplier = String(body.supplier || body.supplier_name || 'unknown').trim();
+  const cost = num(body.cost ?? body.purchase_cost ?? body.cost_price, 0);
+  const shipping = num(body.shipping ?? body.shipping_cost, cost > 0 ? Math.max(15, cost * 0.08) : 25);
+  const targetMarket = String(body.target_market || 'saudi_arabia').toLowerCase();
+
+  // —— Demand heuristics (Saudi B2B tech)
+  let demand = 50;
+  const demandKeywords = [
+    [/pos|كاشير|نقاط بيع|android pos/i, 28],
+    [/cctv|كاميرا|مراقبة|hikvision|dahua|nvr/i, 26],
+    [/wifi|router|سويتش|شبكة|access point|omada|unifi/i, 24],
+    [/hotel|فندق|grandstream|pbx|voip/i, 22],
+    [/laptop|لابتوب|server|سيرفر|طابعة/i, 18],
+    [/fingerprint|بصمة|access control|تحكم دخول/i, 20],
+  ];
+  for (const [re, pts] of demandKeywords) {
+    if (re.test(productName) || re.test(category)) demand += pts;
+  }
+  if (/saudi|ksa|السعودية/.test(targetMarket)) demand += 5;
+  if (brand) demand += 4;
+  demand = Math.max(5, Math.min(100, Math.round(demand)));
+
+  // —— Competition
+  let competition = 55;
+  if (/hikvision|dahua|tp-link|ubiquiti|cisco|hp|lenovo/i.test(productName + brand)) competition += 15;
+  if (/generic|no-name|غير معروف/i.test(productName + brand)) competition -= 10;
+  if (/pos|cctv|wifi|router/i.test(productName + category)) competition += 8;
+  competition = Math.max(10, Math.min(95, Math.round(competition)));
+
+  // —— Price intelligence
+  const landed = cost + shipping;
+  const vatOnMargin = 0.15; // informational; retail often tax-inclusive in display
+  let suggested = num(body.suggested_price ?? body.selling_price, 0);
+  if (suggested <= 0 && landed > 0) {
+    // tech hardware retail target ~2.0–2.6x depending on competition
+    const mult = competition >= 70 ? 2.05 : competition >= 50 ? 2.35 : 2.6;
+    suggested = Number((landed * mult).toFixed(2));
+  }
+  const profit = suggested > 0 ? Number((suggested - landed).toFixed(2)) : 0;
+  const margin = suggested > 0 ? Number((((suggested - landed) / suggested) * 100).toFixed(1)) : 0;
+
+  // —— SEO opportunity
+  let seo = 50;
+  if (demand >= 70) seo += 15;
+  if (competition <= 55) seo += 12;
+  if (/saudi|السعودية|ksa/i.test(productName) === false) seo += 8; // room for geo keywords
+  if (category) seo += 6;
+  seo = Math.max(10, Math.min(100, Math.round(seo)));
+  const keywords = [];
+  const base = productName.split(/\s+/).slice(0, 4).join(' ');
+  keywords.push(base, `${base} السعودية`, `${base} سعر`, category || 'تقنية', 'Tiqnora');
+  if (/pos|كاشير/i.test(productName + category)) keywords.push('نظام كاشير', 'نقاط بيع مطاعم');
+  if (/كاميرا|cctv|مراقبة/i.test(productName + category)) keywords.push('كاميرات مراقبة', 'NVR');
+
+  // —— Supplier score
+  let supplierScore = 55;
+  if (supplier && supplier !== 'unknown') supplierScore += 15;
+  if (/local|saudi|محلي|السعودية/i.test(supplier)) supplierScore += 12;
+  if (/aliexpress|cj|generic/i.test(supplier)) supplierScore -= 5;
+  if (cost > 0) supplierScore += 8;
+  supplierScore = Math.max(15, Math.min(95, Math.round(supplierScore)));
+
+  // —— Decision engine
+  let decision = 'REVIEW_FIRST';
+  const reasons = [];
+  if (margin < 15 && cost > 0) {
+    decision = 'NOT_RECOMMENDED';
+    reasons.push('هامش ربح منخفض جداً');
+  } else if (demand >= 70 && margin >= 25 && competition <= 80) {
+    decision = 'ADD_PRODUCT';
+    reasons.push('طلب جيد وهامش مقبول');
+  } else if (demand < 40 || margin < 18) {
+    decision = 'NOT_RECOMMENDED';
+    reasons.push(demand < 40 ? 'طلب سوقي ضعيف' : 'هامش غير كافٍ');
+  } else {
+    decision = 'REVIEW_FIRST';
+    reasons.push('يحتاج مراجعة مشرف قبل الإضافة');
+  }
+  if (competition >= 85 && margin < 30) {
+    decision = decision === 'ADD_PRODUCT' ? 'REVIEW_FIRST' : decision;
+    reasons.push('منافسة عالية — راجع التسعير');
+  }
+
+  const analysis = {
+    target_market: targetMarket,
+    landed_cost: landed,
+    vat_rate: 0.15,
+    vat_note: 'ضريبة 15٪ تقديرية عند العرض النهائي للعميل حسب سياسة التسعير',
+    demand_level: levelFromScore(demand),
+    competition_level: levelFromScore(competition),
+    opportunity_level: levelFromScore(seo),
+    reasons,
+    brand: brand || null,
+    category: category || null,
+  };
+
+  return {
+    status: 200,
+    payload: {
+      product_name: productName,
+      demand_score: demand,
+      demand_level: levelFromScore(demand),
+      competition_score: competition,
+      competition_level: levelFromScore(competition),
+      seo_score: seo,
+      opportunity_level: levelFromScore(seo),
+      keywords: Array.from(new Set(keywords.filter(Boolean))).slice(0, 12),
+      supplier_score: supplierScore,
+      supplier,
+      cost,
+      shipping_estimate: shipping,
+      suggested_price: suggested,
+      estimated_profit: profit,
+      profit_margin: margin,
+      ai_decision: decision,
+      analysis,
+      auto_publish: false,
+      auto_purchase: false,
+      agent: 'tiqnora_market_intelligence_agent',
+      disclaimer: 'تحليل استرشادي — لا نشر ولا شراء تلقائي. قرار الإضافة للمشرف.',
+    },
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -525,7 +663,7 @@ export default async function handler(req, res) {
   const mode = String(body.mode || body.action || 'research').toLowerCase();
 
   // Product Scout
-  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review' && mode !== 'product_verification' && mode !== 'verify')) {
+  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review' && mode !== 'product_verification' && mode !== 'verify' && mode !== 'market_research' && mode !== 'market_intelligence' && mode !== 'product_intelligence')) {
     try {
       const out = await handleScout(body);
       return json(res, out.status, out.payload);
@@ -563,6 +701,15 @@ export default async function handler(req, res) {
       auto_publish: false,
       disclaimer: 'تحقق آلي — النشر يتطلب اعتماد مشرف. لا نشر تلقائي.',
     });
+  }
+
+  if (mode === 'market_research' || mode === 'market_intelligence' || mode === 'product_intelligence') {
+    try {
+      const out = handleMarketResearch(body);
+      return json(res, out.status, out.payload);
+    } catch (e) {
+      return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
+    }
   }
 
   // Supplier queue / log actions (lightweight, no secrets)
