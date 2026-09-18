@@ -438,7 +438,10 @@ VIEWS.commerce = async v => {
       <label>سعر البيع المقترح ر.س<input type="number" id="sc-price" step="0.01" value="399"></label>
       <label>التصنيف<input id="sc-cat" placeholder="cctv / networking"></label>
     </div>
-    <button class="btn-primary" id="scout-run" style="margin-top:10px">تحليل Scout</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn-primary" id="scout-run">تحليل Scout</button>
+      <button class="btn-sm" id="scout-save">تحليل + حفظ مسودة</button>
+    </div>
     <pre id="scout-out" style="white-space:pre-wrap;margin-top:10px;max-height:320px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">مثال: تكلفة 150 → بيع 399 → ربح 249</pre>
   </div>
 
@@ -546,6 +549,22 @@ VIEWS.commerce = async v => {
       <td dir="ltr">${esc(String(s.started_at||'').slice(0,19))}</td>
     </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا سجلات بعد</td></tr>');
 
+  
+
+  // Phase3: scout opportunities
+  try {
+    const sc = await db.from('product_scout_results').select('id,product_name,score,margin_pct,recommendation,status,created_at').order('score',{ascending:false}).limit(20);
+    if (!sc.error && sc.data && sc.data.length) {
+      const box = document.createElement('div');
+      box.className = 'card';
+      box.innerHTML = '<h2>فرص المنتجات (Scout Scores)</h2><div style="overflow:auto"><table class="tbl"><thead><tr><th>المنتج</th><th>درجة</th><th>هامش</th><th>توصية</th><th>حالة</th></tr></thead><tbody>' +
+        sc.data.map(o=>'<tr><td>'+esc(o.product_name)+'</td><td><b>'+(o.score??'—')+'</b></td><td>'+(o.margin_pct!=null?o.margin_pct+'%':'—')+'</td><td>'+esc(o.recommendation||'—')+'</td><td>'+esc(o.status||'')+'</td></tr>').join('') +
+        '</tbody></table></div>';
+      const sum = $('#commerce-summary');
+      if (sum && sum.parentElement) sum.parentElement.after(box);
+    }
+  } catch(_) {}
+
   // Profit calculator
   $('#pc-run').onclick = () => {
     const cost = Number($('#pc-cost').value)||0;
@@ -554,10 +573,12 @@ VIEWS.commerce = async v => {
     const fees = price * (feePct/100);
     const profit = price - cost - fees;
     const margin = price > 0 ? (profit/price*100) : 0;
-    $('#pc-out').textContent = `الربح التقديري: ${profit.toFixed(2)} ر.س · الهامش: ${margin.toFixed(1)}٪ · بعد رسوم ${fees.toFixed(2)} ر.س — للمراجعة فقط.`;
+    const vat = price * 0.15 / 1.15;
+    $('#pc-out').textContent = `الربح التقديري: ${profit.toFixed(2)} ر.س · الهامش: ${margin.toFixed(1)}٪ · ضريبة تقديرية ضمن السعر: ${vat.toFixed(2)} ر.س · رسوم: ${fees.toFixed(2)} — للمراجعة فقط.`;
   };
 
   // Product Scout
+  $('#scout-save').onclick = () => { window.__scoutSave = true; $('#scout-run').click(); };
   $('#scout-run').onclick = async () => {
     const payload = {
       mode: 'scout',
@@ -567,8 +588,9 @@ VIEWS.commerce = async v => {
       shipping_cost: Number($('#sc-ship').value)||0,
       suggested_price: Number($('#sc-price').value)||0,
       category: ($('#sc-cat').value||'').trim(),
-      save: false
+      save: !!window.__scoutSave
     };
+    window.__scoutSave = false;
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     $('#scout-out').textContent = 'جارٍ تحليل Scout…';
     try {
@@ -580,16 +602,20 @@ VIEWS.commerce = async v => {
       if (j.error) { $('#scout-out').textContent = j.error; return; }
       $('#scout-out').textContent = [
         'المنتج: ' + j.product_name,
-        'التكلفة + الشحن: ' + j.purchase_cost + ' + ' + j.shipping_cost + ' ر.س',
+        'التكلفة + الشحن: ' + j.purchase_cost + ' + ' + j.shipping_cost + ' = ' + (j.purchase_total||'') + ' ر.س',
         'سعر البيع المقترح: ' + j.suggested_selling_price + ' ر.س',
-        'الربح المتوقع: ' + j.expected_profit + ' ر.س (' + j.margin_pct + '٪)',
-        'الطلب: ' + j.market_demand + ' · المنافسة: ' + j.competition_level,
+        'ضريبة تقديرية 15٪ ضمن السعر: ' + (j.vat_amount??'—') + ' ر.س',
+        'الربح المتوقع: ' + j.expected_profit + ' ر.س · الهامش: ' + j.margin_pct + '٪',
+        'الدرجة (0–100): ' + (j.score??'—'),
+        'الطلب: ' + j.market_demand + ' · المنافسة: ' + j.competition_level + ' · SEO: ' + (j.seo_opportunity||'—'),
+        'التصنيف: ' + (j.product_category||'—'),
         'التوصية: ' + j.recommendation,
         'السبب: ' + (j.recommendation_reason||''),
         'SEO: ' + (j.seo_title_ar||''),
         'كلمات: ' + (j.seo_keywords||''),
-        '— لا نشر تلقائي —'
-      ].join('\n');
+        j.saved_id ? ('محفوظ كمسودة: ' + j.saved_id) : '',
+        '— لا نشر تلقائي / لا شراء تلقائي —'
+      ].filter(Boolean).join('\n');
     } catch(e) {
       $('#scout-out').textContent = e.message || 'فشل Scout';
     }

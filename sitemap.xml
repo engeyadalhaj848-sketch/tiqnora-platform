@@ -552,4 +552,14 @@
     <priority>0.85</priority>
     <lastmod>2026-09-18</lastmod>
   </url>
+  <url>
+    <loc>https://www.tiqnora.com/solutions/pos-solutions-saudi</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/solutions/hotel-technology-saudi</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
 </urlset>
