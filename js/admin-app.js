@@ -350,7 +350,13 @@ VIEWS.categories = async v => {
 
 /* ---------- Products ---------- */
 VIEWS.products = async v => {
-  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>منتجات المتجر</h2><p class="card-desc">إدارة المخزون والأسعار والمواصفات وصور المنتجات.</p></div><button class="btn-primary" id="add">+ منتج جديد</button></div><div id="tbl"></div></div>`;
+  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>منتجات المتجر — مدير الكتالوج</h2><p class="card-desc">إدارة المخزون والأسعار والمواصفات. المسودات (غير مفعّلة) تحتاج اعتماد قبل الظهور في المتجر — لا نشر تلقائي.</p></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn-sm" id="filter-all">الكل</button>
+    <button class="btn-sm" id="filter-draft">مسودات فقط</button>
+    <button class="btn-sm" id="filter-live">منشور فقط</button>
+    <button class="btn-primary" id="add">+ منتج جديد</button>
+  </div></div><div id="prod-stats" class="grid-stats" style="margin-bottom:12px"></div><div id="tbl"></div></div>`;
   const [{ data: cats }, { data: brands }] = await Promise.all([
     db.from('categories').select('*').eq('type', 'product').order('sort_order'),
     db.from('brands').select('*').order('name')]);
@@ -378,7 +384,18 @@ VIEWS.products = async v => {
     { k: 'description_en', t: 'Description (EN)', type: 'textarea', full: 1, dir: 'ltr' },
     { k: 'seo_title_ar', t: 'SEO عنوان' }, { k: 'seo_description_ar', t: 'SEO وصف', type: 'textarea' },
   ];
-  const { data: rows } = await db.from('products').select('*, categories(name_ar), brands(name)').order('sort_order');
+  const filterMode = window.__prodFilter || 'all';
+  let q = db.from('products').select('*, categories(name_ar), brands(name)').order('sort_order');
+  if (filterMode === 'draft') q = q.eq('is_active', false);
+  if (filterMode === 'live') q = q.eq('is_active', true);
+  const { data: rows } = await q;
+  const allCount = (await db.from('products').select('id', { count: 'exact', head: true })).count;
+  const draftCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', false)).count;
+  const liveCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true)).count;
+  $('#prod-stats').innerHTML = `<div class="stat"><b>${allCount??'—'}</b><span>الكل</span></div><div class="stat"><b>${draftCount??'—'}</b><span>مسودات</span></div><div class="stat"><b>${liveCount??'—'}</b><span>منشور</span></div>`;
+  $('#filter-all').onclick = () => { window.__prodFilter = 'all'; VIEWS.products(v); };
+  $('#filter-draft').onclick = () => { window.__prodFilter = 'draft'; VIEWS.products(v); };
+  $('#filter-live').onclick = () => { window.__prodFilter = 'live'; VIEWS.products(v); };
   const margin = (p) => {
     const cost = Number(p.cost_price);
     const price = Number(p.price);
@@ -394,7 +411,7 @@ VIEWS.products = async v => {
      <td><b>${margin(p)}</b></td>
      <td>${p.track_stock ? (p.stock_quantity > 3 ? `<span class="pill ok">${p.stock_quantity}</span>` : `<span class="pill danger">${p.stock_quantity}</span>`) : '—'}</td>
      <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مخفي'}</span></td>
-     <td class="actions"><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
+     <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد نشر</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إلغاء نشر</button>`}<button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
   const fixImgs = d => {
     if (typeof d.images === 'string') d.images = d.images.split(/\n+/).map(s=>s.trim()).filter(Boolean);
     if (typeof d.campaign_tags === 'string') d.campaign_tags = d.campaign_tags.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
@@ -404,6 +421,16 @@ VIEWS.products = async v => {
   $('#add').onclick = () => crudModal({ title: 'منتج جديد', fields: F, onSave: async d => { await db.from('products').insert(fixImgs(d)); log('product.create', 'products'); toast('تمت إضافة المنتج'); VIEWS.products(v); } });
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\n') }, onSave: async d => { await db.from('products').update(d).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
+  $$('[data-publish]').forEach(b => b.onclick = async () => {
+    if (!confirm('اعتماد نشر هذا المنتج في المتجر؟ تأكد من الصورة الرسمية والمواصفات.')) return;
+    await db.from('products').update({ is_active: true }).eq('id', b.dataset.publish);
+    toast('تم النشر — ظاهر في المتجر'); VIEWS.products(v);
+  });
+  $$('[data-unpublish]').forEach(b => b.onclick = async () => {
+    if (!confirm('إخفاء المنتج من المتجر؟')) return;
+    await db.from('products').update({ is_active: false }).eq('id', b.dataset.unpublish);
+    toast('أُلغي النشر — مسودة'); VIEWS.products(v);
+  });
 };
 
 /* ---------- Tiqnora Commerce AI ---------- */
