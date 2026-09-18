@@ -5,11 +5,25 @@
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#07111f" />
-  <meta name="description" content="متجر Tiqnora AI في السعودية — عروض إلكترونيات وديكور، حلول تقنية للتجارة الإلكترونية، شحن لكل المدن، ودعم واتساب." />
+  <meta name="description" content="متجر حلول تقنية Tiqnora AI في السعودية — كمبيوترات، شبكات، كاميرات مراقبة، طابعات، مكتب ذكي، وحلول AI رقمية." />
   <link rel="canonical" href="https://www.tiqnora.com/shop" />
-  <meta property="og:type" content="website" /><meta property="og:site_name" content="Tiqnora AI" /><meta property="og:title" content="متجر Tiqnora AI | عروض اليوم الوطني" /><meta property="og:description" content="منتجات تقنية مختارة بخصومات موسمية — شحن لكل مدن المملكة." />
-  <title>المتجر | Tiqnora AI</title>
-  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="ar_SA" />
+  <meta property="og:site_name" content="Tiqnora AI" />
+  <meta property="og:title" content="متجر الحلول التقنية | Tiqnora AI" />
+  <meta property="og:description" content="كتالوج تقني متكامل: أجهزة، شبكات، أمن، طباعة، مكتب ذكي وحلول رقمية." />
+  <meta property="og:url" content="https://www.tiqnora.com/shop" />
+  <meta property="og:image" content="https://www.tiqnora.com/assets/tiqnora-logo.png" />
+  <title>متجر الحلول التقنية | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .shop-filters{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:10px;margin:0 0 18px}
+    .shop-filters input,.shop-filters select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit}
+    .shop-meta-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;color:var(--muted);font-size:.9rem}
+    @media(max-width:900px){.shop-filters{grid-template-columns:1fr 1fr}}
+    @media(max-width:560px){.shop-filters{grid-template-columns:1fr}}
+  </style>
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-XW3K04YQMH"></script>
   <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-XW3K04YQMH',{anonymize_ip:true});</script>
 </head>
@@ -28,23 +42,44 @@
   </header>
   <main class="store-main">
     <div class="container">
-      <h1 class="store-title">المتجر</h1>
-      <p class="store-sub">عروض اليوم الوطني · منتجات مميزة · الأكثر مبيعاً — الشحن لكل مدن المملكة.</p>
+      <h1 class="store-title">متجر الحلول التقنية</h1>
+      <p class="store-sub">كمبيوترات · شبكات · مراقبة وأمن · طابعات · مكتب ذكي · حلول AI — شحن داخل المملكة.</p>
+
+      <div class="shop-filters" id="shop-filters">
+        <input type="search" id="f-q" placeholder="ابحث عن منتج..." autocomplete="off" />
+        <select id="f-cat" aria-label="القسم"><option value="">كل الأقسام</option></select>
+        <select id="f-brand" aria-label="العلامة"><option value="">كل العلامات</option></select>
+        <select id="f-price" aria-label="السعر">
+          <option value="">كل الأسعار</option>
+          <option value="0-200">حتى 200 ر.س</option>
+          <option value="200-500">200 – 500</option>
+          <option value="500-1500">500 – 1,500</option>
+          <option value="1500-5000">1,500 – 5,000</option>
+          <option value="5000-999999">أكثر من 5,000</option>
+        </select>
+        <select id="f-status" aria-label="الحالة">
+          <option value="">كل الحالات</option>
+          <option value="in">متوفر</option>
+          <option value="out">غير متوفر</option>
+          <option value="featured">مميز</option>
+          <option value="national">عروض وطنية</option>
+        </select>
+      </div>
+
       <div class="chip-row" id="section-chips" style="margin-bottom:10px"></div>
       <div class="chip-row" id="cat-chips"></div>
+      <div class="shop-meta-row">
+        <span id="result-count">—</span>
+        <a href="faq.html" style="color:var(--accent)">الأسئلة الشائعة</a>
+      </div>
       <div class="products-grid" id="products-grid">
         <p style="color:var(--muted)">جارٍ تحميل المنتجات…</p>
       </div>
     </div>
   </main>
   <section class="container" style="padding:28px 0 10px">
-    <h2 style="font-size:1.2rem;margin-bottom:12px">الأسئلة الشائعة</h2>
-    <div class="faq-block">
-      <details><summary>كم مدة التوصيل؟</summary><p>تجهيز 1–3 أيام عمل ثم شحن تقديري 3–14 يوم حسب المدينة.</p></details>
-      <details><summary>كيف أتتبع طلبي؟</summary><p>من صفحة <a href="track.html">تتبع الطلب</a> أو واتساب الدعم.</p></details>
-      <details><summary>كيف أتواصل مع الدعم؟</summary><p><a href="https://wa.me/966551341398?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7%D9%8B%D8%8C%20%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%A7%D9%84%D9%85%D8%B3%D8%A7%D8%B9%D8%AF%D8%A9%20%D9%81%D9%8A%20%D8%A7%D8%AE%D8%AA%D9%8A%D8%A7%D8%B1%20%D9%85%D9%86%D8%AA%D8%AC%20%D9%85%D9%86%20%D8%A7%D9%84%D9%85%D8%AA%D8%AC%D8%B1" target="_blank" rel="noopener">واتساب +966 55 134 1398</a></p></details>
-    </div>
-    <p style="margin-top:12px"><a href="faq.html">عرض كل الأسئلة</a> · <a href="shipping-policy.html">سياسة الشحن</a> · <a href="return-policy.html">الإرجاع</a></p>
+    <h2 style="font-size:1.2rem;margin-bottom:12px">الأقسام الرئيسية</h2>
+    <div class="chip-row" id="cat-links"></div>
   </section>
   <footer class="store-footer"><div class="container">© <span id="year"></span> Tiqnora AI · <a href="national-day.html">عروض اليوم الوطني</a> · <a href="privacy-policy.html">الخصوصية</a> · <a href="terms.html">الشروط</a></div></footer>
   <script src="js/config.js" defer></script>
@@ -58,36 +93,66 @@
     const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
     const grid = document.querySelector('#products-grid');
     const year = document.querySelector('#year'); if (year) year.textContent = new Date().getFullYear();
-    let all = [], section = 'all', cat = null;
+    let all = [], brands = [], section = 'all';
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('cat')) document.querySelector('#f-cat').value = params.get('cat');
 
     function renderCount(){ const c=(window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
-
     function tags(p){ return Array.isArray(p.campaign_tags) ? p.campaign_tags : []; }
-    function inSection(p){
-      if (section === 'national') return tags(p).includes('national-day') || p.categories?.slug === 'national-day';
-      if (section === 'featured') return !!p.featured;
-      if (section === 'best') return tags(p).includes('best-seller') || !!p.featured;
-      return true;
-    }
+    function finalPrice(p){ const d=Number(p.discount_percent)||0; return d>0 ? p.price*(1-d/100) : Number(p.price)||0; }
+    function inStock(p){ return !(p.track_stock && p.stock_quantity <= 0); }
 
     function card(p){
       const hasDisc = Number(p.discount_percent) > 0;
-      const final = hasDisc ? p.price * (1 - p.discount_percent/100) : p.price;
-      const out = p.track_stock && p.stock_quantity <= 0;
-      return `<a class="product-card" href="product.html?slug=${encodeURIComponent(p.slug)}" data-slug="${esc(p.slug)}">
+      const final = finalPrice(p);
+      const out = !inStock(p);
+      return `<a class="product-card" href="product.html?slug=${encodeURIComponent(p.slug)}">
         ${out ? '<span class="badge out">غير متوفر</span>' : (hasDisc ? `<span class="badge">-${Math.round(p.discount_percent)}%</span>` : (p.featured ? '<span class="badge">مميز</span>' : ''))}
         <div class="product-thumb">${(p.images||[])[0] ? `<img src="${esc(p.images[0])}" alt="${esc(p.name_ar)}" loading="lazy">` : '▣'}</div>
         <div class="product-body">
-          <span class="p-cat">${esc(p.categories?.name_ar || '')}</span>
+          <span class="p-cat">${esc(p.categories?.name_ar || '')}${p.brands?.name ? ' · ' + esc(p.brands.name) : ''}</span>
           <h3>${esc(p.name_ar)}</h3>
-          <span class="stock-note">${p.delivery_note_ar || (p.track_stock ? (p.stock_quantity>0?`متوفر`:'نفد') : 'متوفر')}</span>
+          <span class="stock-note">${p.delivery_note_ar || (out ? 'غير متوفر' : 'متوفر')}</span>
           <div class="product-price"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s>`:''}</div>
         </div></a>`;
     }
 
+    function filtered(){
+      const q = (document.querySelector('#f-q').value || '').trim().toLowerCase();
+      const cat = document.querySelector('#f-cat').value || null;
+      const brand = document.querySelector('#f-brand').value || null;
+      const price = document.querySelector('#f-price').value || '';
+      const status = document.querySelector('#f-status').value || '';
+      let list = all.filter(p => p.is_active);
+
+      if (section === 'national') list = list.filter(p => tags(p).includes('national-day') || p.categories?.slug === 'national-day');
+      if (section === 'featured') list = list.filter(p => !!p.featured);
+      if (section === 'best') list = list.filter(p => tags(p).includes('best-seller') || !!p.featured);
+
+      if (cat) list = list.filter(p => p.categories?.slug === cat);
+      if (brand) list = list.filter(p => p.brands?.slug === brand || String(p.brand_id||'') === brand);
+      if (q) list = list.filter(p =>
+        (p.name_ar||'').toLowerCase().includes(q) ||
+        (p.name_en||'').toLowerCase().includes(q) ||
+        (p.keywords_ar||'').toLowerCase().includes(q) ||
+        (p.sku||'').toLowerCase().includes(q)
+      );
+      if (price) {
+        const [a,b] = price.split('-').map(Number);
+        list = list.filter(p => { const f=finalPrice(p); return f>=a && f<=b; });
+      }
+      if (status === 'in') list = list.filter(inStock);
+      if (status === 'out') list = list.filter(p => !inStock(p));
+      if (status === 'featured') list = list.filter(p => !!p.featured);
+      if (status === 'national') list = list.filter(p => tags(p).includes('national-day'));
+      return list;
+    }
+
     function render(){
-      let list = all.filter(p => p.is_active && inSection(p) && (!cat || p.categories?.slug === cat));
-      grid.innerHTML = list.length ? list.map(card).join('') : '<p style="color:var(--muted)">لا توجد منتجات في هذا القسم بعد.</p>';
+      const list = filtered();
+      grid.innerHTML = list.length ? list.map(card).join('') : '<p style="color:var(--muted)">لا توجد منتجات مطابقة للفلتر.</p>';
+      document.querySelector('#result-count').textContent = `${list.length} منتج`;
     }
 
     function renderSectionChips(){
@@ -105,23 +170,50 @@
       });
     }
 
-    function renderChips(cats){
+    function fillCats(cats){
+      const preferred = ['computers-laptops','computers','networking-equipment','cctv-security','cctv-cameras','printers-accessories','printers','smart-office','ai-digital-solutions','national-day','electronics','accessories','home-office'];
+      const sorted = [...(cats||[])].sort((a,b)=> (preferred.indexOf(a.slug)+1||99) - (preferred.indexOf(b.slug)+1||99));
+      const sel = document.querySelector('#f-cat');
+      const pre = params.get('cat') || '';
+      sel.innerHTML = `<option value="">كل الأقسام</option>` + sorted.map(c =>
+        `<option value="${esc(c.slug)}" ${c.slug===pre?'selected':''}>${esc(c.name_ar)}</option>`).join('');
       const row = document.querySelector('#cat-chips');
-      row.innerHTML = `<button class="chip active" data-cat="">كل الأقسام</button>` + (cats||[]).map(c =>
-        `<button class="chip" data-cat="${esc(c.slug)}">${esc(c.name_ar)}</button>`).join('');
-      row.querySelectorAll('.chip').forEach(b => b.onclick = () => {
+      row.innerHTML = `<button type="button" class="chip${!pre?' active':''}" data-cat="">الكل</button>` + sorted.map(c =>
+        `<button type="button" class="chip${c.slug===pre?' active':''}" data-cat="${esc(c.slug)}">${esc(c.name_ar)}</button>`).join('');
+      row.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => {
         row.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
-        b.classList.add('active'); cat = b.dataset.cat || null; render();
+        b.classList.add('active');
+        sel.value = b.dataset.cat || '';
+        render();
       });
+      document.querySelector('#cat-links').innerHTML = sorted.map(c =>
+        `<a class="chip" href="shop.html?cat=${encodeURIComponent(c.slug)}">${esc(c.name_ar)}</a>`).join('');
     }
+
+    function fillBrands(list){
+      const sel = document.querySelector('#f-brand');
+      sel.innerHTML = `<option value="">كل العلامات</option>` + (list||[]).map(b =>
+        `<option value="${esc(b.slug)}">${esc(b.name)}</option>`).join('');
+    }
+
+    ['f-q','f-cat','f-brand','f-price','f-status'].forEach(id => {
+      document.querySelector('#'+id).addEventListener('input', render);
+      document.querySelector('#'+id).addEventListener('change', render);
+    });
 
     async function load(){
       renderSectionChips();
       const dbOk = await window.TiqnoraDB.ready();
       if (dbOk) {
-        const [prods, cats] = await Promise.all([window.TiqnoraDB.getProducts(), window.TiqnoraDB.getCategories('product')]);
+        const [prods, cats, br] = await Promise.all([
+          window.TiqnoraDB.getProducts(),
+          window.TiqnoraDB.getCategories('product'),
+          window.TiqnoraDB.getBrands()
+        ]);
         all = prods || [];
-        renderChips(cats || []);
+        brands = br || [];
+        fillCats(cats || []);
+        fillBrands(brands);
         render();
         window.TiqnoraAnalytics?.track?.('shop_view', { count: all.length });
       } else {
