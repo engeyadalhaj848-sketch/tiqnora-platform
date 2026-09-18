@@ -408,24 +408,242 @@ VIEWS.products = async v => {
 
 /* ---------- Tiqnora Commerce AI ---------- */
 VIEWS.commerce = async v => {
-  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>Tiqnora Commerce AI</h2><p class="card-desc">إدارة البيع بدون مخزون. الوكلاء يقترحون ويجهزون؛ اعتماد المنتج وتنفيذ طلب المورد يتطلبان موافقة المالك.</p></div><button class="btn-primary" id="add-source">+ إضافة منتج مرشح</button></div><div id="commerce-summary" class="grid-stats"></div></div><div class="card"><h2>الموردون والتكاملات</h2><div id="supplier-list">جارٍ التحميل…</div></div><div class="card"><h2>مرشحات المنتجات</h2><div id="candidate-list">جارٍ التحميل…</div></div><div class="card"><h2>طلبات التنفيذ</h2><div id="fulfillment-list">جارٍ التحميل…</div></div>`;
-  const [suppliersRes, candidatesRes, requestsRes] = await Promise.all([
+  v.innerHTML = dbBanner() + `
+  <div class="card"><div class="card-head"><div>
+    <h2>Tiqnora Commerce AI — لوحة الموردين</h2>
+    <p class="card-desc">تكامل الموردين + بحث المنتجات + حاسبة الربح. <b>لا نشر تلقائي</b> و<b>لا شراء تلقائي</b> — كل منتج وطلب يحتاج اعتماد المشرف.</p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn-primary" id="add-source">+ مرشّح مورد</button>
+    <button class="btn-sm" id="add-queue">+ طابور استيراد</button>
+  </div></div>
+  <div id="commerce-summary" class="grid-stats"></div></div>
+
+  <div class="card"><h2>حاسبة الربح السريعة (ر.س)</h2>
+    <div class="grid-2" style="gap:12px;align-items:end">
+      <label>تكلفة المورد + شحن<input type="number" id="pc-cost" step="0.01" value="40"></label>
+      <label>سعر البيع المقترح<input type="number" id="pc-price" step="0.01" value="99"></label>
+      <label>رسوم تقديرية %<input type="number" id="pc-fee" step="0.1" value="2.5"></label>
+      <button class="btn-primary" id="pc-run">احسب</button>
+    </div>
+    <p id="pc-out" style="margin-top:12px;color:var(--muted)">—</p>
+  </div>
+
+  <div class="card"><h2>بحث AI للمنتجات</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <select id="ai-mode"><option value="research">بحث منتج</option><option value="profit">تحليل ربح</option><option value="market_compare">مقارنة سوق</option><option value="import_brief">موجز استيراد</option><option value="content">وصف SEO</option><option value="trend">ترند</option></select>
+      <button class="btn-primary" id="ai-run">تشغيل الوكيل</button>
+    </div>
+    <textarea id="ai-msg" rows="3" style="width:100%" placeholder="مثال: باور بانك 20000mAh للسوق السعودي مع شحن سريع"></textarea>
+    <pre id="ai-out" style="white-space:pre-wrap;margin-top:10px;max-height:280px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">النتيجة تظهر هنا…</pre>
+  </div>
+
+  <div class="card"><h2>الموردون والجاهزية</h2><div id="supplier-list">جارٍ التحميل…</div></div>
+  <div class="card"><h2>طابور الاستيراد (قبل النشر)</h2><div id="queue-list">جارٍ التحميل…</div></div>
+  <div class="card"><h2>مرشحات المنتجات (supplier_products)</h2><div id="candidate-list">جارٍ التحميل…</div></div>
+  <div class="card"><h2>طلبات التنفيذ → إعداد طلب المورد</h2><div id="fulfillment-list">جارٍ التحميل…</div></div>
+  <div class="card"><h2>سجلات المزامنة</h2><div id="sync-list">جارٍ التحميل…</div></div>
+  <div class="card"><h2>مسار الطلب</h2>
+    <ol class="clean">
+      <li>طلب العميل</li>
+      <li>اعتماد المشرف (fulfillment)</li>
+      <li>إعداد طلب المورد (supplier_orders)</li>
+      <li>تحديث التتبع</li>
+      <li>إشعار العميل</li>
+    </ol>
+    <p style="color:var(--muted)">في هذه المرحلة الإرسال للمورد يدوي/شبه آلي بعد الاعتماد — لا يوجد auto-purchase.</p>
+  </div>`;
+
+  const results = await Promise.all([
     db.from('commerce_suppliers').select('*').order('display_name'),
     db.from('supplier_products').select('*, commerce_suppliers(display_name,provider), products(name_ar)').order('created_at',{ascending:false}).limit(100),
-    db.from('fulfillment_requests').select('*, orders(order_number,customer_name), commerce_suppliers(display_name)').order('created_at',{ascending:false}).limit(50)
+    db.from('fulfillment_requests').select('*, orders(order_number,customer_name), commerce_suppliers(display_name)').order('created_at',{ascending:false}).limit(50),
+    db.from('product_import_queue').select('*').order('created_at',{ascending:false}).limit(50),
+    db.from('supplier_sync_logs').select('*, commerce_suppliers(display_name)').order('started_at',{ascending:false}).limit(30),
+    db.from('supplier_orders').select('*, orders(order_number), commerce_suppliers(display_name)').order('created_at',{ascending:false}).limit(30),
   ]);
-  if (suppliersRes.error || candidatesRes.error || requestsRes.error) {
-    v.innerHTML = `<div class="card"><h2>Tiqnora Commerce AI</h2><p class="card-desc">يلزم تنفيذ ملف <code dir="ltr">009_commerce_ai_dropshipping.sql</code> في Supabase SQL Editor أولًا، ثم أعد تحميل اللوحة.</p></div>`; return;
+  const [supRes, candRes, fulRes, qRes, syncRes, soRes] = results;
+  if (supRes.error && String(supRes.error.message||'').includes('does not exist')) {
+    v.innerHTML = `<div class="card"><h2>Tiqnora Commerce AI</h2><p class="card-desc">نفّذ <code dir="ltr">009_commerce_ai_dropshipping.sql</code> ثم <code dir="ltr">025_supplier_integration_layer.sql</code> في Supabase SQL Editor.</p></div>`;
+    return;
   }
-  const suppliers = suppliersRes.data || [], candidates = candidatesRes.data || [], requests = requestsRes.data || [];
-  $('#commerce-summary').innerHTML = [['الموردون المتصلون', suppliers.filter(x=>x.status==='connected').length],['منتجات بانتظار المراجعة',candidates.filter(x=>x.approval_status==='candidate').length],['طلبات بانتظار الاعتماد',requests.filter(x=>x.status==='awaiting_approval').length]].map(([t,n])=>`<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${t}</div></div>`).join('');
-  $('#supplier-list').innerHTML = tbl(['المورد','الحالة','تنفيذ الطلب','الدول','إجراء'], suppliers.map(s=>`<tr><td><b>${esc(s.display_name)}</b><br><small dir="ltr">${esc(s.provider)}</small></td><td><span class="pill ${s.status==='connected'?'ok':s.status==='error'?'danger':'warn'}">${esc(s.status)}</span></td><td>${s.fulfillment_mode==='approval_required'?'موافقة إلزامية':esc(s.fulfillment_mode)}</td><td dir="ltr">${esc((s.shipping_countries||[]).join(', '))}</td><td><button class="btn-sm" data-supplier="${s.id}">تحديث الإعداد</button></td></tr>`).join(''));
-  $('#candidate-list').innerHTML = tbl(['المنتج المصدر','المورد','التكلفة','التوصيل','الحالة','إجراء'], candidates.map(c=>`<tr><td><b>${esc(c.source_title||'—')}</b><br><small dir="ltr">${esc(c.external_product_id)}</small></td><td>${esc(c.commerce_suppliers?.display_name||'—')}</td><td>${c.source_price == null ? '—' : `${c.source_price} ${esc(c.source_currency)}`}</td><td>${c.estimated_delivery_min_days||'?'}–${c.estimated_delivery_max_days||'?'} يوم</td><td><span class="pill ${c.approval_status==='approved'?'ok':c.approval_status==='rejected'?'danger':'warn'}">${esc(c.approval_status)}</span></td><td><button class="btn-sm" data-candidate="${c.id}">مراجعة</button></td></tr>`).join(''));
-  $('#fulfillment-list').innerHTML = tbl(['الطلب','المورد','الحالة','المرجع','إجراء'], requests.map(r=>`<tr><td dir="ltr">${esc(r.orders?.order_number||'—')}</td><td>${esc(r.commerce_suppliers?.display_name||'—')}</td><td><span class="pill ${r.status==='fulfilled'?'ok':r.status==='failed'?'danger':'warn'}">${esc(r.status)}</span></td><td dir="ltr">${esc(r.supplier_order_reference||'—')}</td><td>${r.status==='awaiting_approval'?`<button class="btn-sm btn-primary" data-approve="${r.id}">اعتماد للتنفيذ</button>`:'—'}</td></tr>`).join(''));
-  $$('[data-supplier]').forEach(b=>b.onclick=()=>{ const s=suppliers.find(x=>x.id===b.dataset.supplier); crudModal({title:`إعداد ${s.display_name}`,fields:[{k:'status',t:'حالة الاتصال',type:'select',options:[{v:'not_configured',t:'غير مهيأ'},{v:'pending',t:'بانتظار الربط'},{v:'connected',t:'متصل'},{v:'paused',t:'موقوف'}]},{k:'fulfillment_mode',t:'طريقة التنفيذ',type:'select',options:[{v:'approval_required',t:'موافقة إلزامية'},{v:'semi_automatic',t:'شبه تلقائي'}]}],row:s,onSave:async d=>{await db.from('commerce_suppliers').update(d).eq('id',s.id);log('commerce.supplier.update','commerce_suppliers',s.id,d);toast('تم حفظ إعداد المورد');VIEWS.commerce(v);}});});
-  $$('[data-candidate]').forEach(b=>b.onclick=()=>{ const c=candidates.find(x=>x.id===b.dataset.candidate); crudModal({title:'مراجعة منتج مرشح',fields:[{k:'approval_status',t:'القرار',type:'select',options:[{v:'candidate',t:'قيد المراجعة'},{v:'approved',t:'معتمد'},{v:'rejected',t:'مرفوض'},{v:'paused',t:'موقوف'}]},{k:'review_notes',t:'ملاحظات',type:'textarea',full:1}],row:c,onSave:async d=>{await db.from('supplier_products').update(d).eq('id',c.id);log('commerce.candidate.review','supplier_products',c.id,d);toast('تم حفظ القرار');VIEWS.commerce(v);}});});
-  $$('[data-approve]').forEach(b=>b.onclick=async()=>{if(!confirm('اعتماد هذا الطلب لإرساله للمورد؟ لن يتم الإرسال تلقائيًا من Tiqnora في هذه المرحلة.'))return; await db.from('fulfillment_requests').update({status:'approved',approved_by:me.id,approved_at:new Date().toISOString()}).eq('id',b.dataset.approve);log('commerce.fulfillment.approve','fulfillment_requests',b.dataset.approve);toast('تم الاعتماد — جاهز للإرسال عبر التكامل الرسمي');VIEWS.commerce(v);});
-  $('#add-source').onclick=()=>crudModal({title:'إضافة منتج مرشح من مورد',fields:[{k:'supplier_id',t:'المورد',type:'select',req:1,options:suppliers.map(s=>({v:s.id,t:s.display_name}))},{k:'external_product_id',t:'رقم/معرف المنتج عند المورد',req:1,dir:'ltr'},{k:'source_url',t:'رابط المنتج عند المورد',req:1,dir:'ltr'},{k:'source_title',t:'اسم المنتج عند المورد',full:1},{k:'source_price',t:'سعر المورد',type:'number'},{k:'source_currency',t:'العملة',default:'USD',dir:'ltr'},{k:'shipping_cost',t:'تكلفة الشحن',type:'number',default:0},{k:'estimated_delivery_min_days',t:'أقل مدة توصيل (يوم)',type:'number'},{k:'estimated_delivery_max_days',t:'أعلى مدة توصيل (يوم)',type:'number'}],onSave:async d=>{await db.from('supplier_products').insert(d);log('commerce.candidate.create','supplier_products',null,{supplier_id:d.supplier_id});toast('تمت إضافة المنتج للمراجعة');VIEWS.commerce(v);}});
+  const suppliers = supRes.data || [];
+  const candidates = candRes.data || [];
+  const requests = fulRes.data || [];
+  const queue = qRes.error ? [] : (qRes.data || []);
+  const syncs = syncRes.error ? [] : (syncRes.data || []);
+  const supplierOrders = soRes.error ? [] : (soRes.data || []);
+
+  $('#commerce-summary').innerHTML = [
+    ['الموردون', suppliers.length],
+    ['بانتظار مراجعة مرشّح', candidates.filter(x=>x.approval_status==='candidate').length],
+    ['طابور استيراد', queue.filter(x=>x.status==='pending_review').length],
+    ['تنفيذ بانتظار اعتماد', requests.filter(x=>x.status==='awaiting_approval').length],
+  ].map(([t,n])=>`<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${t}</div></div>`).join('');
+
+  $('#supplier-list').innerHTML = suppliers.length
+    ? tbl(['المورد','Provider','الحالة','وضع التنفيذ','آخر مزامنة'], suppliers.map(s=>`<tr>
+      <td>${esc(s.display_name)}</td><td dir="ltr">${esc(s.provider)}</td>
+      <td><span class="pill ${s.status==='connected'?'ok':'warn'}">${esc(s.status)}</span></td>
+      <td>${esc(s.fulfillment_mode)}</td>
+      <td dir="ltr">${s.last_synced_at ? esc(String(s.last_synced_at).slice(0,16)) : '—'}</td></tr>`).join(''))
+    : '<p style="color:var(--muted)">لا موردين — نفّذ الهجرة 009/025</p>';
+
+  $('#queue-list').innerHTML = qRes.error
+    ? `<p style="color:var(--muted)">نفّذ migration 025 لجدول product_import_queue</p>`
+    : tbl(['الاسم المقترح','سعر/تكلفة','هامش٪','الحالة','إجراء'], queue.map(q=>`<tr>
+      <td><b>${esc(q.proposed_name_ar||'—')}</b></td>
+      <td>${q.proposed_price??'—'} / ${q.proposed_cost??'—'}</td>
+      <td>${q.profit_margin_pct??'—'}</td>
+      <td><span class="pill ${q.status==='approved'||q.status==='published'?'ok':q.status==='rejected'?'danger':'warn'}">${esc(q.status)}</span></td>
+      <td>${q.status==='pending_review'?`<button class="btn-sm btn-primary" data-q-approve="${q.id}">اعتماد</button> <button class="btn-sm btn-danger" data-q-reject="${q.id}">رفض</button>`: q.status==='approved'?`<button class="btn-sm" data-q-publish="${q.id}">تجهيز نشر يدوي</button>`:'—'}</td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">الطابور فارغ</td></tr>');
+
+  $('#candidate-list').innerHTML = tbl(['المنتج المصدر','المورد','التكلفة','التوصيل','الحالة','إجراء'], candidates.map(c=>`<tr>
+    <td><b>${esc(c.source_title||'—')}</b><br><small dir="ltr">${esc(c.external_product_id||'')}</small></td>
+    <td>${esc(c.commerce_suppliers?.display_name||'—')}</td>
+    <td>${c.source_price == null ? '—' : `${c.source_price} ${esc(c.source_currency||'')}`}</td>
+    <td>${c.estimated_delivery_min_days||'?'}–${c.estimated_delivery_max_days||'?'} يوم</td>
+    <td><span class="pill ${c.approval_status==='approved'?'ok':c.approval_status==='rejected'?'danger':'warn'}">${esc(c.approval_status)}</span></td>
+    <td><button class="btn-sm" data-cand="${c.id}">مراجعة</button></td>
+  </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">لا مرشحات</td></tr>');
+
+  $('#fulfillment-list').innerHTML = tbl(['الطلب','المورد','تنفيذ','طلب مورد','إجراء'], requests.map(r=>{
+    const so = supplierOrders.find(x=>x.fulfillment_request_id===r.id || x.order_id===r.order_id);
+    return `<tr>
+      <td dir="ltr">${esc(r.orders?.order_number||'—')}</td>
+      <td>${esc(r.commerce_suppliers?.display_name||'—')}</td>
+      <td><span class="pill ${r.status==='fulfilled'?'ok':r.status==='failed'?'danger':'warn'}">${esc(r.status)}</span></td>
+      <td>${so?esc(so.status):'—'}</td>
+      <td>${r.status==='awaiting_approval'?`<button class="btn-sm btn-primary" data-approve="${r.id}">اعتماد</button>`:''}
+      ${r.status==='approved'?`<button class="btn-sm" data-prep="${r.id}" data-order="${r.order_id}" data-sup="${r.supplier_id||''}">إعداد طلب مورد</button>`:''}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا طلبات تنفيذ</td></tr>');
+
+  $('#sync-list').innerHTML = syncRes.error
+    ? '<p style="color:var(--muted)">نفّذ migration 025 لسجلات المزامنة</p>'
+    : tbl(['المورد','النوع','الحالة','رسالة','الوقت'], syncs.map(s=>`<tr>
+      <td>${esc(s.commerce_suppliers?.display_name||'—')}</td>
+      <td>${esc(s.sync_type)}</td>
+      <td>${esc(s.status)}</td>
+      <td>${esc(s.message||'—')}</td>
+      <td dir="ltr">${esc(String(s.started_at||'').slice(0,19))}</td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا سجلات بعد</td></tr>');
+
+  // Profit calculator
+  $('#pc-run').onclick = () => {
+    const cost = Number($('#pc-cost').value)||0;
+    const price = Number($('#pc-price').value)||0;
+    const feePct = Number($('#pc-fee').value)||0;
+    const fees = price * (feePct/100);
+    const profit = price - cost - fees;
+    const margin = price > 0 ? (profit/price*100) : 0;
+    $('#pc-out').textContent = `الربح التقديري: ${profit.toFixed(2)} ر.س · الهامش: ${margin.toFixed(1)}٪ · بعد رسوم ${fees.toFixed(2)} ر.س — للمراجعة فقط.`;
+  };
+
+  // AI agent
+  $('#ai-run').onclick = async () => {
+    const message = ($('#ai-msg').value||'').trim();
+    if (!message) return toast('اكتب وصفاً للبحث');
+    $('#ai-out').textContent = 'جارٍ التحليل…';
+    try {
+      const r = await fetch('/api/commerce/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: $('#ai-mode').value, message })
+      });
+      const j = await r.json();
+      $('#ai-out').textContent = j.reply || j.error || JSON.stringify(j);
+    } catch (e) {
+      $('#ai-out').textContent = e.message || 'فشل الاتصال';
+    }
+  };
+
+  // Queue actions
+  $$('[data-q-approve]').forEach(b=>b.onclick=async()=>{
+    await db.from('product_import_queue').update({ status:'approved', reviewed_by:me.id, reviewed_at:new Date().toISOString() }).eq('id', b.dataset.qApprove);
+    try { await db.from('commerce_audit_logs').insert({ actor_id:me.id, action:'import_queue.approve', entity_type:'product_import_queue', entity_id:b.dataset.qApprove }); } catch(_){}
+    toast('تم الاعتماد — لم يُنشر تلقائياً'); VIEWS.commerce(v);
+  });
+  $$('[data-q-reject]').forEach(b=>b.onclick=async()=>{
+    await db.from('product_import_queue').update({ status:'rejected', reviewed_by:me.id, reviewed_at:new Date().toISOString() }).eq('id', b.dataset.qReject);
+    toast('مرفوض'); VIEWS.commerce(v);
+  });
+  $$('[data-q-publish]').forEach(b=>b.onclick=async()=>{
+    toast('النشر اليدوي: أنشئ/اربط منتجاً من شاشة المنتجات ثم حدّث published_product_id — لا نشر تلقائي');
+  });
+
+  $$('[data-cand]').forEach(b=>b.onclick=()=>{
+    const c = candidates.find(x=>x.id===b.dataset.cand);
+    if (!c) return;
+    crudModal({ title:'مراجعة مرشّح مورد', fields:[
+      {k:'approval_status',t:'القرار',type:'select',req:1,options:[{v:'candidate',t:'مرشّح'},{v:'approved',t:'معتمد'},{v:'rejected',t:'مرفوض'},{v:'paused',t:'موقوف'}]},
+      {k:'review_notes',t:'ملاحظات',full:1}
+    ], row:c, onSave:async d=>{
+      await db.from('supplier_products').update(d).eq('id',c.id);
+      try{await db.from('commerce_audit_logs').insert({actor_id:me.id,action:'supplier_product.review',entity_type:'supplier_products',entity_id:c.id,meta:d});}catch(_){}
+      toast('تم حفظ القرار'); VIEWS.commerce(v);
+    }});
+  });
+
+  $$('[data-approve]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('اعتماد هذا الطلب لإرساله للمورد؟ لن يتم الإرسال تلقائياً.')) return;
+    await db.from('fulfillment_requests').update({status:'approved',approved_by:me.id,approved_at:new Date().toISOString()}).eq('id',b.dataset.approve);
+    try{await db.from('commerce_audit_logs').insert({actor_id:me.id,action:'fulfillment.approve',entity_type:'fulfillment_requests',entity_id:b.dataset.approve});}catch(_){}
+    toast('تم الاعتماد — جهّز طلب المورد من الزر التالي'); VIEWS.commerce(v);
+  });
+
+  $$('[data-prep]').forEach(b=>b.onclick=async()=>{
+    if (soRes.error) { toast('نفّذ migration 025 لجدول supplier_orders'); return; }
+    const payload = {
+      fulfillment_request_id: b.dataset.prep,
+      order_id: b.dataset.order,
+      supplier_id: b.dataset.sup || null,
+      status: 'ready',
+      notes: 'Prepared after admin approval — submit via official supplier channel manually',
+      prepared_by: me.id,
+    };
+    const { error } = await db.from('supplier_orders').insert(payload);
+    if (error) toast(error.message||'فشل الإعداد');
+    else { toast('تم إعداد طلب المورد (draft/ready) — بدون إرسال تلقائي'); VIEWS.commerce(v); }
+  });
+
+  $('#add-source').onclick=()=>crudModal({title:'إضافة منتج مرشح من مورد',fields:[
+    {k:'supplier_id',t:'المورد',type:'select',req:1,options:suppliers.map(s=>({v:s.id,t:s.display_name}))},
+    {k:'external_product_id',t:'معرف المنتج عند المورد',req:1,dir:'ltr'},
+    {k:'source_url',t:'رابط المنتج',req:1,dir:'ltr'},
+    {k:'source_title',t:'اسم المنتج عند المورد',full:1},
+    {k:'source_price',t:'سعر المورد',type:'number'},
+    {k:'source_currency',t:'العملة',default:'USD',dir:'ltr'},
+    {k:'shipping_cost',t:'تكلفة الشحن',type:'number',default:0},
+    {k:'estimated_delivery_min_days',t:'أقل مدة توصيل',type:'number'},
+    {k:'estimated_delivery_max_days',t:'أعلى مدة توصيل',type:'number'},
+  ],onSave:async d=>{
+    await db.from('supplier_products').insert(d);
+    toast('أُضيف للمراجعة — غير منشور'); VIEWS.commerce(v);
+  }});
+
+  $('#add-queue').onclick=()=>{
+    if (qRes.error) { toast('نفّذ migration 025'); return; }
+    crudModal({title:'إضافة إلى طابور الاستيراد',fields:[
+      {k:'supplier_id',t:'المورد',type:'select',options:[{v:'',t:'—'}].concat(suppliers.map(s=>({v:s.id,t:s.display_name})))},
+      {k:'source_url',t:'الرابط',dir:'ltr'},
+      {k:'external_product_id',t:'المعرف الخارجي',dir:'ltr'},
+      {k:'proposed_name_ar',t:'الاسم العربي المقترح',req:1},
+      {k:'proposed_price',t:'سعر البيع المقترح',type:'number'},
+      {k:'proposed_cost',t:'التكلفة',type:'number'},
+      {k:'profit_margin_pct',t:'هامش٪',type:'number'},
+      {k:'proposed_description_ar',t:'وصف مقترح',full:1},
+    ],onSave:async d=>{
+      if(!d.supplier_id) delete d.supplier_id;
+      d.status='pending_review';
+      d.created_by=me.id;
+      const cost=Number(d.proposed_cost)||0, price=Number(d.proposed_price)||0;
+      if(price>0 && d.profit_margin_pct==null) d.profit_margin_pct=Number((((price-cost)/price)*100).toFixed(2));
+      await db.from('product_import_queue').insert(d);
+      toast('في الطابور — بانتظار اعتماد المشرف'); VIEWS.commerce(v);
+    }});
+  };
 };
 
 /* ---------- Brands ---------- */
