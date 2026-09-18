@@ -401,6 +401,8 @@ VIEWS.products = async v => {
         <option value="ai_review">مراجعة AI للمنتجات المحددة</option>
         <option value="ai_verify">تحقق AI للمنتجات المحددة</option>
         <option value="ai_market">تحليل سوق للمنتجات المحددة</option>
+        <option value="ai_pricing">تحليل تسعير للمنتجات المحددة</option>
+        <option value="ai_suppliers">مقارنة موردين للمنتجات المحددة</option>
       </select>
       <button class="btn-primary" id="bulk-run">تنفيذ</button>
     </div>
@@ -681,6 +683,55 @@ VIEWS.products = async v => {
         toast(`تحليل سوق: ${n} · ADD ${add} · REVIEW ${rev} · REJECT ${rej}`);
         VIEWS.products(v); return;
       }
+      } else if (payload.action === 'ai_pricing') {
+        let n = 0;
+        for (const id of ids.slice(0, 50)) {
+          const row = rows.find(r => r.id === id);
+          if (!row) continue;
+          try {
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+              mode: 'dynamic_pricing', product_id: id, product_name: row.name_ar, cost: row.cost_price,
+              shipping: 0, current_price: row.price, category: row.categories?.name_ar
+            })});
+            const j = await r.json();
+            if (j.error || !j.recommended_price) continue;
+            try {
+              await db.from('product_price_reports').insert({
+                product_id: id, cost_price: j.cost_price, shipping_cost: j.shipping_cost, vat_amount: j.vat_amount,
+                recommended_price: j.recommended_price, minimum_price: j.minimum_price,
+                expected_profit: j.expected_profit, profit_margin: j.profit_margin,
+                pricing_strategy: j.pricing_strategy, analysis: j.analysis || {}
+              });
+            } catch(_) {}
+            n++;
+          } catch(_) {}
+        }
+        toast('تقارير تسعير: ' + n + ' (بدون تغيير أسعار تلقائي)');
+        VIEWS.products(v); return;
+      } else if (payload.action === 'ai_suppliers') {
+        let n = 0;
+        for (const id of ids.slice(0, 50)) {
+          const row = rows.find(r => r.id === id);
+          if (!row) continue;
+          try {
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+              mode: 'supplier_compare', product_id: id, product_name: row.name_ar, cost: row.cost_price || 200
+            })});
+            const j = await r.json();
+            if (j.error) continue;
+            try {
+              await db.from('supplier_comparison_reports').insert({
+                product_id: id, product_name: j.product_name, suppliers: j.suppliers||[],
+                recommended_supplier: j.recommended_supplier, comparison_score: j.comparison_score,
+                analysis: j.analysis||{}
+              });
+            } catch(_) {}
+            n++;
+          } catch(_) {}
+        }
+        toast('مقارنات موردين: ' + n + ' (بدون طلب شراء تلقائي)');
+        VIEWS.products(v); return;
+      }
       // Also notify API when session available (audit path)
       try {
         const { data: sess } = await db.auth.getSession();
@@ -722,7 +773,7 @@ VIEWS.products = async v => {
 
     const labels = {
       publish: 'نشر', unpublish: 'إلغاء النشر', update_category: 'تغيير التصنيف',
-      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI', ai_verify: 'تحقق AI', ai_market: 'تحليل سوق'
+      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI', ai_verify: 'تحقق AI', ai_market: 'تحليل سوق', ai_pricing: 'تسعير', ai_suppliers: 'موردين'
     };
     if (!confirm(`تأكيد: ${labels[action] || action} على ${ids.length} منتج؟\nلا يمكن التراجع بسهولة.`)) return;
     runBulk(payload);
@@ -1039,6 +1090,38 @@ VIEWS.commerce = async v => {
     <div id="mi-list"></div>
   </div>
 
+  <div class="card"><h2>Dynamic Pricing — تسعير ديناميكي</h2>
+    <p class="card-desc">توصية سعر فقط — <b>لا تغيير تلقائي للأسعار</b>.</p>
+    <div class="grid-2" style="gap:10px">
+      <label>اسم المنتج<input id="dp-name" placeholder="Android POS Terminal"></label>
+      <label>التصنيف<input id="dp-cat" placeholder="pos-systems"></label>
+      <label>تكلفة المورد ر.س<input type="number" id="dp-cost" step="0.01" value="650"></label>
+      <label>الشحن ر.س<input type="number" id="dp-ship" step="0.01" value="50"></label>
+      <label>سعر منافس (اختياري)<input type="number" id="dp-comp" step="0.01" placeholder="1200"></label>
+      <label>السعر الحالي<input type="number" id="dp-current" step="0.01" placeholder="—"></label>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn-primary" id="dp-run">احسب التسعير</button>
+      <button class="btn-sm" id="dp-save">حفظ التقرير</button>
+    </div>
+    <pre id="dp-out" style="white-space:pre-wrap;margin-top:10px;max-height:240px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    <div id="dp-list" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card"><h2>Supplier Comparison — مقارنة الموردين</h2>
+    <p class="card-desc">أفضل مورد استرشادي — <b>لا طلب شراء تلقائي</b>.</p>
+    <div class="grid-2" style="gap:10px">
+      <label>اسم المنتج<input id="scmp-name" placeholder="Hikvision Camera"></label>
+      <label>تكلفة مرجعية ر.س<input type="number" id="scmp-cost" step="0.01" value="200"></label>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn-primary" id="scmp-run">قارن الموردين</button>
+      <button class="btn-sm" id="scmp-save">حفظ المقارنة</button>
+    </div>
+    <pre id="scmp-out" style="white-space:pre-wrap;margin-top:10px;max-height:280px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    <div id="scmp-list" style="margin-top:12px"></div>
+  </div>
+
   <div class="card"><h2>بحث AI للمنتجات</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <select id="ai-mode"><option value="research">بحث منتج</option><option value="profit">تحليل ربح</option><option value="market_compare">مقارنة سوق</option><option value="import_brief">موجز استيراد</option><option value="content">وصف SEO</option><option value="trend">ترند</option></select>
@@ -1319,6 +1402,111 @@ VIEWS.commerce = async v => {
       $('#mi-out').textContent = 'Decision: ' + j.ai_decision + ' · Margin: ' + j.profit_margin + '%';
       await saveReport(j);
     } catch (e) { toast(e.message || 'فشل'); }
+  };
+
+  // Dynamic Pricing
+  const renderDpList = async () => {
+    try {
+      const { data, error } = await db.from('product_price_reports').select('id,recommended_price,profit_margin,pricing_strategy,cost_price,created_at').order('created_at',{ascending:false}).limit(15);
+      if (error) { $('#dp-list').innerHTML = '<p style="color:var(--muted)">نفّذ migration 033</p>'; return; }
+      $('#dp-list').innerHTML = tbl(['تكلفة','موصى','هامش٪','استراتيجية','وقت'], (data||[]).map(r=>`<tr>
+        <td>${r.cost_price??'—'}</td><td><b>${r.recommended_price??'—'}</b></td><td>${r.profit_margin??'—'}</td>
+        <td>${esc(r.pricing_strategy||'—')}</td><td dir="ltr">${esc(String(r.created_at||'').slice(0,19))}</td>
+      </tr>`).join('')) || '';
+    } catch(_) {}
+  };
+  renderDpList();
+  $('#dp-run').onclick = async () => {
+    const payload = {
+      mode: 'dynamic_pricing',
+      product_name: ($('#dp-name').value||'').trim(),
+      category: ($('#dp-cat').value||'').trim(),
+      cost: Number($('#dp-cost').value)||0,
+      shipping: Number($('#dp-ship').value)||0,
+      competitor_price: Number($('#dp-comp').value)||0,
+      current_price: Number($('#dp-current').value)||0
+    };
+    if (!payload.cost && !payload.current_price) return toast('أدخل التكلفة');
+    $('#dp-out').textContent = 'جارٍ الحساب…';
+    try {
+      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j.error) { $('#dp-out').textContent = j.error; return; }
+      window.__lastDp = j;
+      $('#dp-out').textContent = [
+        'التكلفة الإجمالية: ' + j.total_cost + ' ر.س (تكلفة ' + j.cost_price + ' + شحن ' + j.shipping_cost + ')',
+        'ضريبة تقديرية ضمن السعر: ' + j.vat_amount + ' ر.س',
+        'السعر الموصى: ' + j.recommended_price + ' ر.س',
+        'الحد الأدنى: ' + j.minimum_price + ' ر.س',
+        'الربح المتوقع: ' + j.expected_profit + ' · الهامش: ' + j.profit_margin + '%',
+        'الاستراتيجية: ' + j.pricing_strategy,
+        'سلم الأسعار: أرخص ' + (j.price_ladder&&j.price_ladder.cheapest) + ' · تنافسي ' + (j.price_ladder&&j.price_ladder.competitive) + ' · فاخر ' + (j.price_ladder&&j.price_ladder.premium),
+        '— لا تغيير سعر تلقائي —'
+      ].join('\n');
+    } catch(e) { $('#dp-out').textContent = e.message || 'فشل'; }
+  };
+  $('#dp-save').onclick = async () => {
+    let j = window.__lastDp;
+    if (!j) { await $('#dp-run').onclick(); j = window.__lastDp; }
+    if (!j || j.error) return toast('حلّل أولاً');
+    try {
+      const { error } = await db.from('product_price_reports').insert({
+        cost_price: j.cost_price, shipping_cost: j.shipping_cost, vat_amount: j.vat_amount,
+        recommended_price: j.recommended_price, minimum_price: j.minimum_price,
+        expected_profit: j.expected_profit, profit_margin: j.profit_margin,
+        pricing_strategy: j.pricing_strategy, analysis: j.analysis || {}
+      });
+      if (error) toast(error.message || 'فشل الحفظ — migration 033');
+      else { toast('حُفظ تقرير التسعير'); renderDpList(); }
+    } catch(e) { toast(e.message); }
+  };
+
+  // Supplier Compare
+  const renderScmpList = async () => {
+    try {
+      const { data, error } = await db.from('supplier_comparison_reports').select('id,product_name,recommended_supplier,comparison_score,created_at').order('created_at',{ascending:false}).limit(15);
+      if (error) { $('#scmp-list').innerHTML = '<p style="color:var(--muted)">نفّذ migration 033</p>'; return; }
+      $('#scmp-list').innerHTML = tbl(['منتج','أفضل مورد','درجة','وقت'], (data||[]).map(r=>`<tr>
+        <td>${esc(r.product_name||'—')}</td><td><b>${esc(r.recommended_supplier||'—')}</b></td>
+        <td>${r.comparison_score??'—'}</td><td dir="ltr">${esc(String(r.created_at||'').slice(0,19))}</td>
+      </tr>`).join('')) || '';
+    } catch(_) {}
+  };
+  renderScmpList();
+  $('#scmp-run').onclick = async () => {
+    const payload = {
+      mode: 'supplier_compare',
+      product_name: ($('#scmp-name').value||'').trim() || 'Product',
+      cost: Number($('#scmp-cost').value)||200
+    };
+    $('#scmp-out').textContent = 'جارٍ المقارنة…';
+    try {
+      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j.error) { $('#scmp-out').textContent = j.error; return; }
+      window.__lastScmp = j;
+      const lines = (j.suppliers||[]).map(s => `${s.name}: landed ${s.landed_cost} · ${s.delivery_days}d · score ${s.score}${s.warranty?' · warranty':''}`);
+      $('#scmp-out').textContent = [
+        'Best: ' + j.recommended_supplier + ' (score ' + j.comparison_score + ')',
+        'Reasons: ' + (j.reasons||[]).join(' · '),
+        ...lines,
+        '— لا طلب شراء تلقائي —'
+      ].join('\n');
+    } catch(e) { $('#scmp-out').textContent = e.message || 'فشل'; }
+  };
+  $('#scmp-save').onclick = async () => {
+    let j = window.__lastScmp;
+    if (!j) { await $('#scmp-run').onclick(); j = window.__lastScmp; }
+    if (!j || j.error) return toast('قارن أولاً');
+    try {
+      const { error } = await db.from('supplier_comparison_reports').insert({
+        product_name: j.product_name, suppliers: j.suppliers||[],
+        recommended_supplier: j.recommended_supplier, comparison_score: j.comparison_score,
+        analysis: j.analysis || {}
+      });
+      if (error) toast(error.message || 'فشل الحفظ — migration 033');
+      else { toast('حُفظت المقارنة'); renderScmpList(); }
+    } catch(e) { toast(e.message); }
   };
 
   // AI agent

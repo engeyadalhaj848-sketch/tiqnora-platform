@@ -632,6 +632,197 @@ function handleMarketResearch(body) {
   };
 }
 
+
+function handleDynamicPricing(body) {
+  const productName = String(body.product_name || body.name || body.name_ar || '').trim();
+  const cost = num(body.cost ?? body.cost_price ?? body.supplier_cost ?? body.purchase_cost, 0);
+  const shipping = num(body.shipping ?? body.shipping_cost, cost > 0 ? Math.max(10, cost * 0.06) : 0);
+  const extraFees = num(body.extra_fees ?? body.fees, 0);
+  const competitorPrice = num(body.competitor_price ?? body.market_price, 0);
+  const category = String(body.category || '').toLowerCase();
+  const currentPrice = num(body.current_price ?? body.price ?? body.selling_price, 0);
+
+  // Base landed (pre-VAT display model: VAT shown as component of consumer price)
+  const baseLanded = cost + shipping + extraFees;
+  // If cost already tax-exclusive, VAT on margin/sale is typical; estimate VAT portion of retail
+  // Total cost basis for margin = landed; VAT amount estimated on recommended price * 15/115
+  if (cost <= 0 && currentPrice <= 0) {
+    return { status: 400, payload: { error: 'cost or current_price required' } };
+  }
+
+  // Market band heuristics
+  let marketLow = competitorPrice > 0 ? competitorPrice * 0.9 : 0;
+  let marketHigh = competitorPrice > 0 ? competitorPrice * 1.15 : 0;
+  if (competitorPrice <= 0 && baseLanded > 0) {
+    marketLow = baseLanded * 1.9;
+    marketHigh = baseLanded * 2.7;
+  }
+
+  // Strategy multipliers by category competition intensity
+  let multCompetitive = 2.25;
+  let multPremium = 2.65;
+  let multCheapest = 1.85;
+  if (/pos|كاشير/.test(category + productName)) { multCompetitive = 2.15; multPremium = 2.5; }
+  if (/cctv|كاميرا|مراقبة/.test(category + productName)) { multCompetitive = 2.2; multPremium = 2.55; }
+  if (/network|سويتش|راوتر/.test(category + productName)) { multCompetitive = 2.1; multPremium = 2.4; }
+
+  const priceCheapest = baseLanded > 0 ? Number((baseLanded * multCheapest).toFixed(2)) : 0;
+  const priceCompetitive = baseLanded > 0 ? Number((baseLanded * multCompetitive).toFixed(2)) : 0;
+  const pricePremium = baseLanded > 0 ? Number((baseLanded * multPremium).toFixed(2)) : 0;
+
+  // Recommended: competitive, pulled toward market midpoint if available
+  let recommended = priceCompetitive;
+  if (competitorPrice > 0) {
+    const mid = (marketLow + marketHigh) / 2;
+    recommended = Number(((priceCompetitive * 0.45) + (mid * 0.55)).toFixed(2));
+  }
+  // Floor: min acceptable = landed * 1.35 or cost recovery + 20%
+  const minimumPrice = baseLanded > 0 ? Number((baseLanded * 1.35).toFixed(2)) : 0;
+  if (recommended < minimumPrice) recommended = minimumPrice;
+  if (recommended > 0 && recommended < priceCheapest * 0.95) recommended = priceCheapest;
+
+  // Position
+  let strategy = 'competitive';
+  if (competitorPrice > 0) {
+    if (recommended <= competitorPrice * 0.92) strategy = 'cheapest';
+    else if (recommended >= competitorPrice * 1.12) strategy = 'premium';
+    else strategy = 'competitive';
+  } else {
+    if (recommended <= priceCheapest * 1.05) strategy = 'cheapest';
+    else if (recommended >= pricePremium * 0.95) strategy = 'premium';
+    else strategy = 'competitive';
+  }
+
+  const expectedProfit = recommended > 0 ? Number((recommended - baseLanded).toFixed(2)) : 0;
+  const profitMargin = recommended > 0 ? Number((((recommended - baseLanded) / recommended) * 100).toFixed(1)) : 0;
+  const vatAmount = recommended > 0 ? Number(((recommended * 0.15) / 1.15).toFixed(2)) : 0;
+
+  return {
+    status: 200,
+    payload: {
+      product_name: productName || null,
+      product_id: body.product_id || null,
+      cost_price: cost,
+      shipping_cost: shipping,
+      extra_fees: extraFees,
+      total_cost: Number(baseLanded.toFixed(2)),
+      vat_rate: 0.15,
+      vat_amount: vatAmount,
+      recommended_price: recommended,
+      minimum_price: minimumPrice,
+      current_price: currentPrice || null,
+      expected_profit: expectedProfit,
+      profit_margin: profitMargin,
+      pricing_strategy: strategy,
+      price_ladder: {
+        cheapest: priceCheapest,
+        competitive: priceCompetitive,
+        premium: pricePremium,
+      },
+      market_band: competitorPrice > 0 ? { low: Number(marketLow.toFixed(2)), high: Number(marketHigh.toFixed(2)), competitor: competitorPrice } : null,
+      analysis: {
+        note: 'توصية تسعير فقط — لا تغيير تلقائي للسعر',
+        category: category || null,
+        healthy_margin: profitMargin >= 25,
+      },
+      auto_price_change: false,
+      agent: 'tiqnora_dynamic_pricing_agent',
+      disclaimer: 'لا تغيير أسعار تلقائي. اعتماد المشرف مطلوب.',
+    },
+  };
+}
+
+function handleSupplierCompare(body) {
+  const productName = String(body.product_name || body.name || body.name_ar || '').trim();
+  let suppliers = Array.isArray(body.suppliers) ? body.suppliers : [];
+
+  // Default demo set if none provided (admin can pass real quotes)
+  if (!suppliers.length) {
+    const baseCost = num(body.cost ?? body.cost_price, 200);
+    suppliers = [
+      { name: 'AliExpress', type: 'international', cost: Number((baseCost * 0.92).toFixed(2)), shipping: 45, delivery_days: 18, rating: 3.8, warranty: false },
+      { name: 'CJ Dropshipping', type: 'international', cost: Number((baseCost * 1.0).toFixed(2)), shipping: 35, delivery_days: 14, rating: 4.0, warranty: false },
+      { name: 'Alibaba (MOQ)', type: 'international', cost: Number((baseCost * 0.75).toFixed(2)), shipping: 80, delivery_days: 25, rating: 4.1, warranty: false },
+      { name: 'Saudi Local Distributor', type: 'local', cost: Number((baseCost * 1.15).toFixed(2)), shipping: 25, delivery_days: 3, rating: 4.4, warranty: true },
+      { name: 'KSA Regional Supplier', type: 'local', cost: Number((baseCost * 1.08).toFixed(2)), shipping: 30, delivery_days: 5, rating: 4.2, warranty: true },
+    ];
+  }
+
+  const scored = suppliers.map((s) => {
+    const cost = num(s.cost ?? s.cost_price, 0);
+    const shipping = num(s.shipping ?? s.shipping_cost, 0);
+    const delivery = num(s.delivery_days ?? s.delivery, 14);
+    const rating = num(s.rating, 3.5);
+    const warranty = !!(s.warranty || s.has_warranty);
+    const type = String(s.type || (/saudi|local|ksa|محلي/i.test(String(s.name || '')) ? 'local' : 'international')).toLowerCase();
+    const landed = cost + shipping;
+    // Score 0-100
+    let score = 50;
+    // lower landed better (up to 30 pts)
+    const minLanded = Math.min(...suppliers.map(x => num(x.cost, 0) + num(x.shipping, 0)).filter(x => x > 0).concat([landed]));
+    if (landed > 0 && minLanded > 0) {
+      score += Math.max(0, 30 - ((landed - minLanded) / minLanded) * 40);
+    }
+    // delivery
+    if (delivery <= 5) score += 15;
+    else if (delivery <= 10) score += 10;
+    else if (delivery <= 18) score += 5;
+    else score -= 5;
+    // rating
+    score += (rating - 3) * 8;
+    // warranty + local trust
+    if (warranty) score += 10;
+    if (type === 'local') score += 8;
+    score = Math.max(5, Math.min(100, Math.round(score)));
+    const sellAt = landed > 0 ? Number((landed * 2.2).toFixed(2)) : 0;
+    const profit = sellAt > 0 ? Number((sellAt - landed).toFixed(2)) : 0;
+    const margin = sellAt > 0 ? Number((((sellAt - landed) / sellAt) * 100).toFixed(1)) : 0;
+    return {
+      name: s.name || 'Unknown',
+      type,
+      cost,
+      shipping,
+      landed_cost: Number(landed.toFixed(2)),
+      delivery_days: delivery,
+      rating,
+      warranty,
+      score,
+      estimated_profit_at_2_2x: profit,
+      estimated_margin_pct: margin,
+    };
+  }).sort((a, b) => b.score - a.score);
+
+  const best = scored[0] || null;
+  const reasons = [];
+  if (best) {
+    if (best.type === 'local') reasons.push('توريد محلي أسرع وثقة أعلى للعميل');
+    if (best.warranty) reasons.push('توفر ضمان');
+    if (best.delivery_days <= 5) reasons.push('مدة توصيل قصيرة');
+    if (best.score >= 70) reasons.push('أفضل توازن تكلفة/سرعة/موثوقية');
+    if (!reasons.length) reasons.push('أعلى درجة مقارنة بين الخيارات المتاحة');
+  }
+
+  return {
+    status: 200,
+    payload: {
+      product_name: productName || null,
+      product_id: body.product_id || null,
+      suppliers: scored,
+      recommended_supplier: best ? best.name : null,
+      comparison_score: best ? best.score : null,
+      reasons,
+      analysis: {
+        count: scored.length,
+        best_landed: best ? best.landed_cost : null,
+        note: 'مقارنة استرشادية — لا طلب شراء تلقائي من المورد',
+      },
+      auto_order: false,
+      agent: 'tiqnora_supplier_comparison_agent',
+      disclaimer: 'لا طلب مورد تلقائي. اعتماد المشرف مطلوب.',
+    },
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -663,7 +854,7 @@ export default async function handler(req, res) {
   const mode = String(body.mode || body.action || 'research').toLowerCase();
 
   // Product Scout
-  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review' && mode !== 'product_verification' && mode !== 'verify' && mode !== 'market_research' && mode !== 'market_intelligence' && mode !== 'product_intelligence')) {
+  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review' && mode !== 'product_verification' && mode !== 'verify' && mode !== 'market_research' && mode !== 'market_intelligence' && mode !== 'product_intelligence' && mode !== 'dynamic_pricing' && mode !== 'pricing' && mode !== 'supplier_compare' && mode !== 'supplier_comparison')) {
     try {
       const out = await handleScout(body);
       return json(res, out.status, out.payload);
@@ -706,6 +897,24 @@ export default async function handler(req, res) {
   if (mode === 'market_research' || mode === 'market_intelligence' || mode === 'product_intelligence') {
     try {
       const out = handleMarketResearch(body);
+      return json(res, out.status, out.payload);
+    } catch (e) {
+      return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
+    }
+  }
+
+  if (mode === 'dynamic_pricing' || mode === 'pricing') {
+    try {
+      const out = handleDynamicPricing(body);
+      return json(res, out.status, out.payload);
+    } catch (e) {
+      return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
+    }
+  }
+
+  if (mode === 'supplier_compare' || mode === 'supplier_comparison') {
+    try {
+      const out = handleSupplierCompare(body);
       return json(res, out.status, out.payload);
     } catch (e) {
       return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
