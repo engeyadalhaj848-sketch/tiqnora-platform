@@ -1,193 +1,261 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://www.tiqnora.com/</loc>
-    <xhtml:link rel="alternate" hreflang="ar" href="https://www.tiqnora.com/"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://www.tiqnora.com/?lang=en"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://www.tiqnora.com/"/>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
-    <lastmod>2026-09-16</lastmod>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/shop</loc>
     <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-    <lastmod>2026-09-16</lastmod>
+    <priority>0.95</priority>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
-    <loc>https://www.tiqnora.com/shop.html</loc>
+    <loc>https://www.tiqnora.com/national-day</loc>
     <changefreq>daily</changefreq>
-    <priority>0.85</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/product.html</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/track</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.4</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/track.html</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.35</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/checkout.html</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.3</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/customer.html</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/#packages</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/#services</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.85</priority>
-    <lastmod>2026-09-16</lastmod>
+    <priority>0.95</priority>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/blog</loc>
     <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
+    <priority>0.8</priority>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/compare</loc>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/it-support</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/networks</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/cybersecurity</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/web-development</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/digital-marketing</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/seo</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/automation</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/services/ai-solutions</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/blog/how-to-choose-it-partner-saudi</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/blog/ai-for-saudi-smes</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
-  </url>
-  <url>
-    <loc>https://www.tiqnora.com/blog/seo-basics-for-local-business</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.75</priority>
-    <lastmod>2026-09-16</lastmod>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/sales</loc>
     <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <lastmod>2026-09-16</lastmod>
+    <priority>0.7</priority>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
-    <loc>https://www.tiqnora.com/national-day</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-
-  <url>
-    <loc>https://www.tiqnora.com/national-day</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-    <lastmod>2026-09-17</lastmod>
+    <loc>https://www.tiqnora.com/faq</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/shipping-policy</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
-    <lastmod>2026-09-17</lastmod>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/return-policy</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
-    <lastmod>2026-09-17</lastmod>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/privacy-policy</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
-    <lastmod>2026-09-17</lastmod>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
     <loc>https://www.tiqnora.com/terms</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
-    <lastmod>2026-09-17</lastmod>
+    <lastmod>2026-09-18</lastmod>
   </url>
   <url>
-    <loc>https://www.tiqnora.com/faq</loc>
+    <loc>https://www.tiqnora.com/services/it-support</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <lastmod>2026-09-17</lastmod>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/networks</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/cybersecurity</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/web-development</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/digital-marketing</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/seo</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/automation</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/services/ai-solutions</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/blog/how-to-choose-it-partner-saudi</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/blog/ai-for-saudi-smes</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/blog/seo-basics-for-local-business</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=Dahua</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-14</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-saudi-map-frame</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-cable-6in1</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-led-strip-smart</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-car-mag-holder</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-tws-earbuds</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-sport-watch</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-powerbank-20k</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-wifi-extender</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-mini-wifi-cam</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-desk-organizer</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-usbc-hub-7</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-neck-fan</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-desk-lamp-led</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-steel-bottle</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-massage-gun</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-mini-projector</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-mech-keyboard</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-clean-kit</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-laptop-bag</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tiqnora.com/product?slug=nd96-laptop-stand</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.65</priority>
+    <lastmod>2026-09-18</lastmod>
   </url>
 </urlset>

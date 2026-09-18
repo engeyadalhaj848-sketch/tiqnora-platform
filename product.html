@@ -2,9 +2,10 @@
 <html lang="ar" dir="rtl" data-theme="midnight">
 <head>
   <meta charset="UTF-8" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="تفاصيل المنتج — متجر Tiqnora AI." />
-  <link rel="canonical" href="https://www.tiqnora.com/product.html" />
+  <meta name="description" id="meta-desc" content="منتجات متجر Tiqnora AI في السعودية — تفاصيل المنتج، الشحن، والدعم." />
+  <link rel="canonical" id="canonical-link" href="https://www.tiqnora.com/shop" />
   <title>المنتج | Tiqnora AI</title>
   <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" /><link rel="stylesheet" href="styles.css" />
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-XW3K04YQMH"></script>
@@ -71,6 +72,11 @@
       const waText = encodeURIComponent(`مرحباً، أريد الاستفسار عن هذا المنتج: ${p.name_ar}`);
 
       document.title = `${p.name_ar} | Tiqnora AI`;
+      const canon = document.getElementById('canonical-link');
+      if (canon) canon.setAttribute('href', 'https://www.tiqnora.com/product?slug=' + encodeURIComponent(p.slug));
+      const md = document.getElementById('meta-desc');
+      if (md && p.description_ar) md.setAttribute('content', p.description_ar.slice(0, 155));
+
       window.TiqnoraAnalytics?.productView?.(p.slug, p.name_ar, final);
 
       wrap.innerHTML = `

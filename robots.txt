@@ -1,7 +1,15 @@
 User-agent: *
 Allow: /
+
+# Private / transactional (do not index)
 Disallow: /api/
 Disallow: /admin/
 Disallow: /admin.html
+Disallow: /checkout
 Disallow: /checkout.html
+Disallow: /track
+Disallow: /track.html
+Disallow: /customer
+Disallow: /customer.html
+
 Sitemap: https://www.tiqnora.com/sitemap.xml
