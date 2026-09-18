@@ -234,6 +234,22 @@
     {
       "source": "/blog",
       "destination": "/blog.html"
+    },
+    {
+      "source": "/products/:slug",
+      "destination": "/products/:slug.html"
+    },
+    {
+      "source": "/products/:slug/",
+      "destination": "/products/:slug.html"
+    },
+    {
+      "source": "/solutions/:slug",
+      "destination": "/solutions/:slug.html"
+    },
+    {
+      "source": "/solutions/:slug/",
+      "destination": "/solutions/:slug.html"
     }
   ]
 }
