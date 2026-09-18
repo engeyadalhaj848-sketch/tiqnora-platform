@@ -1,42 +1,51 @@
-/** Commerce AI — research, profit, trends, campaign, content. No auto-purchase. */
+/** Commerce AI + Product Scout (single serverless function for Hobby plan limit) */
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
 
 function json(res, status, payload) {
-  res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   return res.end(JSON.stringify(payload));
 }
 
 const MODE_PROMPTS = {
-  research: `You are Tiqnora AI Commerce Agent for Saudi Arabia dropshipping MVP.
-Help with product research for the Saudi market (National Day seasonal offers).
-Suggest product ideas, niches, and sourcing angles (AliExpress/Alibaba/CJ as future options only).
-Never claim you placed an order. Never invent live supplier stock. Mark ideas as candidates for owner approval.
-Reply in Arabic unless the user writes in English. Be concise and practical.`,
-  profit: `You are Tiqnora AI profit analyst for SAR-priced dropshipping.
-Given cost, shipping, fees, and target margin, estimate selling price and margin %.
-Assume payment fee ~2.5% optional, VAT awareness for SA if relevant, shipping separate.
-Never authorize a purchase. Reply in Arabic unless user uses English. Show clear numbers.`,
-  trend: `You are Tiqnora AI trends advisor for Saudi e-commerce seasonal campaigns (National Day, Ramadan, back-to-school).
-Suggest trending product themes suitable for SA with short rationale. No auto-buy. Arabic preferred.`,
-  campaign: `You are Tiqnora AI Marketing Agent.
-Draft a short National Day campaign: headline, offer angle, WhatsApp/Instagram caption, CTA.
-Saudi cultural tone, respectful, commercial. No purchase execution. Arabic primary.`,
-  market_compare: `You are Tiqnora market comparison analyst for Saudi e-commerce.
-Compare product positioning, rough price bands in SAR, and risks (shipping time, returns, competition).
-Never invent live competitor stock or certified rankings. Output structured bullets in Arabic.
-No supplier order placement.`,
-  import_brief: `You prepare a product import brief for Tiqnora admin review.
-Given a supplier product idea, produce: Arabic title, English title, short sales description, 3 benefits, SEO keywords, suggested retail SAR vs cost, margin %, and risks.
-Never publish. Never place orders. Mark as candidate for owner approval.`,
-  content: `You are Tiqnora AI Content Agent for product catalog.
-Write Arabic product title + short description + 3 bullet benefits + SEO keywords for a dropshipping product.
-Honest claims only. No fake certifications. Owner will review before publish.`,
+  research: `You are Tiqnora AI Commerce Agent for Saudi Arabia. Product research only. No auto-buy. Arabic preferred.`,
+  profit: `You are Tiqnora AI profit analyst for SAR. Estimate margin. No purchase. Arabic preferred.`,
+  trend: `You are Tiqnora AI trends advisor for Saudi e-commerce. No auto-buy. Arabic preferred.`,
+  campaign: `You are Tiqnora AI Marketing Agent. Campaign drafts only. Arabic primary.`,
+  market_compare: `You are Tiqnora market comparison analyst. No live stock claims. Arabic.`,
+  import_brief: `Prepare product import brief for admin review. Never publish.`,
+  content: `Write Arabic sales copy for product listing. No supplier disclosure.`,
 };
 
-async function callGemini(system, message) {
+function num(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+
+function decide({ cost, ship, price, demand, competition }) {
+  const totalCost = cost + ship;
+  const profit = price - totalCost;
+  const margin = price > 0 ? (profit / price) * 100 : 0;
+  let recommendation = 'marginal';
+  let reason = 'يحتاج مراجعة هامش وطلب السوق.';
+  if (margin >= 35 && demand !== 'low' && competition !== 'high') {
+    recommendation = 'suitable';
+    reason = 'هامش جيد مع طلب مقبول — مرشّح بعد اعتماد المشرف.';
+  } else if (margin < 15 || (demand === 'low' && competition === 'high')) {
+    recommendation = 'not_suitable';
+    reason = 'هامش ضعيف أو طلب منخفض مع منافسة عالية.';
+  } else if (margin >= 25) {
+    recommendation = 'suitable';
+    reason = 'هامش مقبول للسوق السعودي مع مراجعة الشحن.';
+  }
+  return { profit: Number(profit.toFixed(2)), margin_pct: Number(margin.toFixed(2)), recommendation, reason };
+}
+
+async function callGemini(system, message, temperature = 0.45) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY'), { status: 503 });
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -48,7 +57,7 @@ async function callGemini(system, message) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: message }] }],
-        generationConfig: { temperature: 0.45, maxOutputTokens: 1400 },
+        generationConfig: { temperature, maxOutputTokens: 1400 },
       }),
     }
   );
@@ -59,20 +68,97 @@ async function callGemini(system, message) {
   return (payload.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('\n');
 }
 
+async function handleScout(body) {
+  const productName = String(body.product_name || body.name || body.message || '').trim();
+  if (!productName || productName.length > 200) {
+    return { status: 400, payload: { error: 'product_name required' } };
+  }
+  const purchaseCost = num(body.purchase_cost ?? body.cost, 0);
+  const shippingCost = num(body.shipping_cost ?? body.shipping, 0);
+  let suggestedPrice = num(body.suggested_price ?? body.selling_price, 0);
+  if (suggestedPrice <= 0 && purchaseCost > 0) {
+    suggestedPrice = Number(((purchaseCost + shippingCost) * 2.2).toFixed(2));
+  }
+
+  let ai = null;
+  try {
+    const text = await callGemini(
+      `You are Tiqnora AI Product Scout for Saudi tech marketplace.
+Reply STRICT JSON only keys: seo_title_ar, seo_description_ar, seo_keywords, product_category,
+market_demand (low|medium|high), competition_level (low|medium|high), suggested_price_sar, notes_ar.
+Never place orders.`,
+      `Name: ${productName}\nSupplier: ${body.supplier || 'unknown'}\nCost SAR: ${purchaseCost}\nShipping: ${shippingCost}\nPrice: ${suggestedPrice}\nCategory: ${body.category || ''}`,
+      0.3
+    );
+    try {
+      ai = JSON.parse(text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim());
+    } catch {
+      ai = { notes_ar: text.slice(0, 500) };
+    }
+  } catch (_) {
+    ai = null;
+  }
+
+  if (ai?.suggested_price_sar && num(ai.suggested_price_sar) > 0 && body.suggested_price == null) {
+    suggestedPrice = num(ai.suggested_price_sar);
+  }
+  const demand = ['low', 'medium', 'high'].includes(ai?.market_demand) ? ai.market_demand : 'medium';
+  const competition = ['low', 'medium', 'high'].includes(ai?.competition_level) ? ai.competition_level : 'medium';
+  const calc = decide({ cost: purchaseCost, ship: shippingCost, price: suggestedPrice, demand, competition });
+
+  return {
+    status: 200,
+    payload: {
+      product_name: productName,
+      supplier: body.supplier || null,
+      purchase_cost: purchaseCost,
+      shipping_cost: shippingCost,
+      suggested_selling_price: suggestedPrice,
+      expected_profit: calc.profit,
+      margin_pct: calc.margin_pct,
+      market_demand: demand,
+      competition_level: competition,
+      seo_title_ar: ai?.seo_title_ar || `${productName} | متجر Tiqnora AI`,
+      seo_description_ar: ai?.seo_description_ar || `اشتر ${productName} عبر Tiqnora AI.`,
+      seo_keywords: ai?.seo_keywords || productName,
+      product_category: ai?.product_category || body.category || null,
+      recommendation: calc.recommendation,
+      recommendation_reason: calc.reason,
+      notes_ar: ai?.notes_ar || null,
+      auto_publish: false,
+      disclaimer: 'تحليل للمراجعة فقط — لا نشر تلقائي ولا شراء من المورد.',
+    },
+  };
+}
+
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).end();
+  }
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
-  const mode = String(req.body?.mode || 'research').toLowerCase();
-  const message = String(req.body?.message || '').trim();
-  if (!message || message.length > 4000) return json(res, 400, { error: 'رسالة غير صالحة' });
+  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  const mode = String(body.mode || 'research').toLowerCase();
 
+  // Product Scout (was /api/commerce/scout)
+  if (mode === 'scout' || body.product_name) {
+    try {
+      const out = await handleScout(body);
+      return json(res, out.status, out.payload);
+    } catch (e) {
+      return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
+    }
+  }
+
+  const message = String(body.message || '').trim();
+  if (!message || message.length > 4000) return json(res, 400, { error: 'رسالة غير صالحة' });
   const system = MODE_PROMPTS[mode] || MODE_PROMPTS.research;
 
   try {
     const reply = await callGemini(system, message);
-
-    // best-effort log if service role available
     if (SERVICE) {
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/analytics_events`, {
@@ -85,13 +171,12 @@ export default async function handler(req, res) {
           },
           body: JSON.stringify({
             event_name: 'commerce_ai',
-            page_path: '/national-day',
+            page_path: '/admin',
             metadata: { mode, len: message.length },
           }),
         });
       } catch (_) {}
     }
-
     return json(res, 200, {
       reply,
       mode,

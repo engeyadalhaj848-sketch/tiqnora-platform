@@ -148,6 +148,22 @@
   ],
   "rewrites": [
     {
+      "source": "/api/mobile/app-version",
+      "destination": "/api/mobile/app-version?action=app-version"
+    },
+    {
+      "source": "/api/mobile/register-device",
+      "destination": "/api/mobile/register-device?action=register-device"
+    },
+    {
+      "source": "/api/commerce/scout",
+      "destination": "/api/commerce/ai"
+    },
+    {
+      "source": "/api/commerce/suppliers",
+      "destination": "/api/commerce/ai"
+    },
+    {
       "source": "/blog/:slug",
       "destination": "/blog/:slug.html"
     },

@@ -560,6 +560,7 @@ VIEWS.commerce = async v => {
   // Product Scout
   $('#scout-run').onclick = async () => {
     const payload = {
+      mode: 'scout',
       product_name: ($('#sc-name').value||'').trim(),
       supplier: ($('#sc-sup').value||'').trim(),
       purchase_cost: Number($('#sc-cost').value)||0,
@@ -571,7 +572,7 @@ VIEWS.commerce = async v => {
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     $('#scout-out').textContent = 'جارٍ تحليل Scout…';
     try {
-      const r = await fetch('/api/commerce/scout', {
+      const r = await fetch('/api/commerce/ai', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
