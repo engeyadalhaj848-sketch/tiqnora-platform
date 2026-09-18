@@ -1135,9 +1135,11 @@ VIEWS.commerce = async v => {
       <button class="btn-sm" id="sc-test">اختبار الاتصال</button>
       <button class="btn-primary" id="sc-sync">مزامنة الآن</button>
       <button class="btn-sm" id="sc-inv">فحص المخزون/الأسعار</button>
+      <button class="btn-primary" id="sc-import" style="background:var(--accent,#0d9488)">استيراد منتج تجريبي (CJ)</button>
       <button class="btn-sm" id="sc-logs">عرض السجلات</button>
     </div>
     <pre id="sc-out" style="white-space:pre-wrap;max-height:260px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    <div id="sc-import-report" style="margin-top:12px"></div>
     <div id="sc-log-table" style="margin-top:12px"></div>
   </div>
 
@@ -1562,9 +1564,44 @@ VIEWS.commerce = async v => {
   };
   $('#sc-inv').onclick = async () => {
     $('#sc-out').textContent = 'فحص مخزون/أسعار…';
-    const j = await scApi({ action: 'sync_inventory' });
+    const j = await scApi({ action: 'sync_inventory', provider: $('#sc-provider').value });
     $('#sc-out').textContent = JSON.stringify(j, null, 2);
     toast('تنبيهات: ' + ((j.alerts&&j.alerts.length)||0) + ' (بدون تغيير أسعار البيع)');
+  };
+  $('#sc-import').onclick = async () => {
+    if (!confirm('استيراد منتج واحد فقط إلى طابور المراجعة؟\nلن يُنشر تلقائياً (is_active=false).')) return;
+    const provider = $('#sc-provider').value || 'cj_dropshipping';
+    $('#sc-out').textContent = 'استيراد منتج تجريبي من ' + provider + '…';
+    $('#sc-import-report').innerHTML = '';
+    try {
+      const j = await scApi({ action: 'import_test', provider, query: 'magnetic power bank' });
+      $('#sc-out').textContent = JSON.stringify(j, null, 2);
+      if (j.ok) {
+        const s = j.product_summary || {};
+        $('#sc-import-report').innerHTML = `<div class="card" style="border:1px solid var(--line);padding:12px;border-radius:12px">
+          <b>تقرير الاستيراد</b>
+          <ul style="margin:8px 0;padding-right:18px">
+            <li>المنتجات المستوردة: <b>${j.imported || 1}</b></li>
+            <li>AI Score: <b>${j.ai_score != null ? j.ai_score + '/100' : '—'}</b></li>
+            <li>التوصية: <b>${esc(j.recommendation || '—')}</b></li>
+            <li>السبب: ${esc(j.reason || '—')}</li>
+            <li>الاسم: ${esc(s.name_ar || s.name_en || '—')}</li>
+            <li>SKU: <span dir="ltr">${esc(s.sku || '—')}</span></li>
+            <li>التكلفة التقريبية: ${s.cost_sar != null ? s.cost_sar + ' ر.س' : '—'}</li>
+            <li>سعر مقترح: ${s.suggested_price_sar != null ? s.suggested_price_sar + ' ر.س' : '—'}</li>
+            <li>الحالة: <b>pending_review</b> · is_active=<b>false</b></li>
+            <li>Queue ID: <span dir="ltr">${esc(j.queue_id || '—')}</span></li>
+          </ul>
+          <p style="color:var(--muted);margin:0">لا شراء تلقائي · لا نشر تلقائي — بانتظار اعتماد المشرف</p>
+        </div>`;
+        toast('تم الاستيراد للمراجعة — AI ' + (j.ai_score || '—') + '/100');
+      } else {
+        toast(j.error || j.message || 'فشل الاستيراد');
+      }
+    } catch (e) {
+      $('#sc-out').textContent = e.message || 'فشل';
+      toast(e.message || 'فشل الاستيراد');
+    }
   };
   $('#sc-logs').onclick = async () => {
     const j = await scApi({ action: 'logs' });

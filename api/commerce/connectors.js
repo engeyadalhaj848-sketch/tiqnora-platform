@@ -1,7 +1,11 @@
 /**
  * Tiqnora supplier connectors — secrets only from process.env
  * No auto-purchase. No auto-publish.
+ *
+ * CJ uses live client in lib/suppliers/cj.js (falls back safely when key missing).
  */
+
+import * as cj from '../../lib/suppliers/cj.js';
 
 function env(name) {
   const v = process.env[name];
@@ -28,7 +32,6 @@ function baseConnector(provider, envKeys) {
           auto_purchase: false,
         };
       }
-      // Live ping reserved for when credentials + official API client are wired
       return {
         ok: true,
         status: 'connected',
@@ -42,7 +45,6 @@ function baseConnector(provider, envKeys) {
       if (!configured) {
         return { ok: false, status: 'not_configured', products: [], provider };
       }
-      // Structured mock catalog for admin testing until live API is enabled
       const q = String(query || 'tech').slice(0, 80);
       const products = Array.from({ length: Math.min(limit, 5) }).map((_, i) => ({
         supplier_product_id: `${provider}-demo-${i + 1}`,
@@ -50,7 +52,7 @@ function baseConnector(provider, envKeys) {
         cost: 50 + i * 25,
         currency: 'USD',
         stock: 10 + i * 3,
-        shipping_estimate: provider === 'cj_dropshipping' ? '7-15 days' : '10-25 days',
+        shipping_estimate: '10-25 days',
         images: [],
         mock: true,
       }));
@@ -106,8 +108,60 @@ function baseConnector(provider, envKeys) {
   };
 }
 
+/** Real CJ Dropshipping connector (lib/suppliers/cj.js) */
+function cjConnector() {
+  const configured = cj.isConfigured();
+  return {
+    provider: 'cj_dropshipping',
+    envKeys: ['CJ_API_KEY'],
+    configured,
+    status: configured ? 'connected' : 'not_configured',
+    async connect() {
+      return this.testConnection();
+    },
+    async testConnection() {
+      return cj.testConnection();
+    },
+    async searchProducts(query = '', limit = 10) {
+      if (!configured) {
+        // Safe demo list so admin UI still works offline
+        return {
+          ok: true,
+          status: 'not_configured',
+          provider: 'cj_dropshipping',
+          products: cj.getDemoCatalog(Math.min(limit, 3)),
+          mock: true,
+          message: 'CJ_API_KEY missing — returning demo catalog for UI testing only',
+          auto_purchase: false,
+        };
+      }
+      const live = await cj.searchProducts(query, limit);
+      if (live.ok && live.products?.length) return live;
+      // Soft fallback
+      return {
+        ...live,
+        products: live.products?.length ? live.products : cj.getDemoCatalog(Math.min(limit, 2)),
+        mock: !live.ok || !!live.mock,
+        fallback_demo: !live.ok,
+      };
+    },
+    async getProduct(supplierProductId) {
+      return cj.getProductDetails(supplierProductId);
+    },
+    async getPrice(supplierProductId) {
+      return cj.getProductPrice(supplierProductId);
+    },
+    async getInventory(supplierProductId) {
+      return cj.getProductInventory(supplierProductId);
+    },
+    async getShippingInfo(supplierProductId) {
+      return cj.getShippingInfo(supplierProductId);
+    },
+  };
+}
+
 export const CONNECTORS = {
-  cj_dropshipping: () => baseConnector('cj_dropshipping', ['CJ_API_KEY']),
+  cj_dropshipping: () => cjConnector(),
   aliexpress: () => baseConnector('aliexpress', ['ALIEXPRESS_API_KEY']),
   alibaba: () => baseConnector('alibaba', ['ALIBABA_API_KEY']),
   dsers: () => baseConnector('dsers', ['DSERS_API_KEY']),

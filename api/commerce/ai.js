@@ -864,13 +864,14 @@ function handleSupplierCompare(body) {
 
 
 async function handleSupplierCenter(body = {}) {
-  const rest = async (path, opts) => {
-    const r = await rest(path, opts || {});
+  // Thin wrapper around sbRest — never auto-purchase / auto-publish / auto price change
+  const rest = async (path, opts = {}) => {
+    const r = await sbRest(path, opts);
     if (r && r.error) return { error: r.error, data: null };
     return { data: r?.data ?? r, error: null };
   };
   const action = String(body.action || body.connector_action || 'status').toLowerCase();
-  const provider = String(body.provider || '').toLowerCase().replace(/-/g, '_');
+  const provider = String(body.provider || 'cj_dropshipping').toLowerCase().replace(/-/g, '_');
 
   if (action === 'status' || action === 'list') {
     const statuses = listConnectorStatuses();
@@ -890,7 +891,6 @@ async function handleSupplierCenter(body = {}) {
     const c = getConnector(provider);
     if (!c) return { status: 400, payload: { error: 'Unknown provider', provider } };
     const result = await c.testConnection();
-    // log connection test
     try {
       await rest('inventory_sync_logs', {
         method: 'POST',
@@ -935,26 +935,12 @@ async function handleSupplierCenter(body = {}) {
     const c = getConnector(provider);
     if (!c) return { status: 400, payload: { error: 'Unknown provider' } };
     const test = await c.testConnection();
-    if (!test.ok) {
-      return {
-        status: 200,
-        payload: {
-          ok: false,
-          status: test.status,
-          message: test.message,
-          synced: 0,
-          auto_purchase: false,
-          auto_publish: false,
-        },
-      };
-    }
+    // Allow demo sync even when not_configured (CJ demo catalog)
     const search = await c.searchProducts(body.query || 'tech', Number(body.limit) || 5);
     const products = search.products || [];
     let mapped = 0;
-    const alerts = [];
     for (const p of products) {
       try {
-        // upsert mapping — never creates published store product
         await rest('supplier_product_mapping?on_conflict=provider,supplier_product_id', {
           method: 'POST',
           body: {
@@ -979,7 +965,7 @@ async function handleSupplierCenter(body = {}) {
         {
           method: 'PATCH',
           body: {
-            status: 'connected',
+            status: test.ok ? 'connected' : (test.status || 'not_configured'),
             last_sync_at: new Date().toISOString(),
             products_synced: mapped,
             sync_result: { mapped, mock: !!search.mock, at: new Date().toISOString() },
@@ -1011,7 +997,6 @@ async function handleSupplierCenter(body = {}) {
         provider,
         synced: mapped,
         products,
-        alerts,
         mock: !!search.mock,
         auto_purchase: false,
         auto_publish: false,
@@ -1020,51 +1005,49 @@ async function handleSupplierCenter(body = {}) {
     };
   }
 
-  if (action === 'sync_inventory' || action === 'check_inventory') {
-    // Compare stored mapping prices/stock — generate alerts without changing product.price
+  if (action === 'sync_inventory' || action === 'check_inventory' || action === 'sync_prices') {
     let mappings = [];
     try {
       const mr = await rest(
-        `supplier_product_mapping?select=id,provider,supplier_product_id,tiqnora_product_id,supplier_price,supplier_stock&limit=50`
+        `supplier_product_mapping?select=id,provider,supplier_product_id,tiqnora_product_id,supplier_price,supplier_stock&provider=eq.${encodeURIComponent(provider)}&limit=50`
       );
       mappings = Array.isArray(mr.data) ? mr.data : [];
+      if (!mappings.length) {
+        const all = await rest('supplier_product_mapping?select=id,provider,supplier_product_id,tiqnora_product_id,supplier_price,supplier_stock&limit=50');
+        mappings = Array.isArray(all.data) ? all.data : [];
+      }
     } catch (_) {
       mappings = [];
     }
     const alerts = [];
     for (const m of mappings) {
-      const c = getConnector(m.provider);
-      if (!c || !c.configured) continue;
+      const c = getConnector(m.provider || provider);
+      if (!c) continue;
       const inv = await c.getInventory(m.supplier_product_id);
       const price = await c.getPrice(m.supplier_product_id);
       const newStock = inv.stock;
       const newPrice = price.price;
       if (m.supplier_stock != null && newStock != null && Number(newStock) !== Number(m.supplier_stock)) {
         const changeType = Number(newStock) <= 0 ? 'availability' : 'stock';
-        alerts.push({
-          type: changeType,
-          mapping_id: m.id,
-          old_stock: m.supplier_stock,
-          new_stock: newStock,
-          message:
-            Number(newStock) <= 0
-              ? 'Product requires review — out of stock at supplier'
-              : Number(newStock) < 5
-                ? 'Low stock at supplier — product requires review'
-                : `Stock changed ${m.supplier_stock} → ${newStock}`,
-        });
+        const message =
+          Number(newStock) <= 0
+            ? 'Product requires review — out of stock at supplier'
+            : Number(newStock) < 5
+              ? 'Low stock at supplier — product requires review'
+              : `Stock changed ${m.supplier_stock} → ${newStock}`;
+        alerts.push({ type: changeType, mapping_id: m.id, old_stock: m.supplier_stock, new_stock: newStock, message });
         try {
           await rest('inventory_sync_logs', {
             method: 'POST',
             body: {
-              supplier: m.provider,
-              provider: m.provider,
+              supplier: m.provider || provider,
+              provider: m.provider || provider,
               product_id: m.tiqnora_product_id,
               mapping_id: m.id,
               change_type: changeType,
               old_value: String(m.supplier_stock),
               new_value: String(newStock),
-              message: alerts[alerts.length - 1].message,
+              message,
               requires_review: true,
             },
             prefer: 'return=minimal',
@@ -1081,8 +1064,8 @@ async function handleSupplierCenter(body = {}) {
           await rest('inventory_sync_logs', {
             method: 'POST',
             body: {
-              supplier: m.provider,
-              provider: m.provider,
+              supplier: m.provider || provider,
+              provider: m.provider || provider,
               product_id: m.tiqnora_product_id,
               mapping_id: m.id,
               change_type: 'price',
@@ -1095,13 +1078,12 @@ async function handleSupplierCenter(body = {}) {
           });
         } catch (_) {}
       }
-      // update mapping snapshot only — never products.price
       try {
         await rest(`supplier_product_mapping?id=eq.${encodeURIComponent(m.id)}`, {
           method: 'PATCH',
           body: {
-            supplier_price: newPrice,
-            supplier_stock: newStock,
+            supplier_price: newPrice != null ? newPrice : m.supplier_price,
+            supplier_stock: newStock != null ? newStock : m.supplier_stock,
             last_checked: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
@@ -1122,6 +1104,237 @@ async function handleSupplierCenter(body = {}) {
     };
   }
 
+  // ── Phase 035: Import one (or few) products into queue + optional draft product ──
+  if (action === 'import_product' || action === 'import_test' || action === 'import_one') {
+    const c = getConnector(provider);
+    if (!c) return { status: 400, payload: { error: 'Unknown provider' } };
+
+    let product = null;
+    const externalId = body.supplier_product_id || body.pid || body.external_product_id;
+
+    if (externalId) {
+      const det = await c.getProduct(externalId);
+      if (det.ok && det.product) product = det.product;
+    }
+    if (!product) {
+      const search = await c.searchProducts(body.query || 'power bank magnetic', 3);
+      product = (search.products && search.products[0]) || null;
+    }
+    if (!product && provider === 'cj_dropshipping') {
+      // Guaranteed demo path so admin can test the full workflow without CJ_API_KEY
+      const { getDemoCatalog } = await import('../../lib/suppliers/cj.js');
+      product = getDemoCatalog(1)[0];
+    }
+    if (!product) {
+      return { status: 400, payload: { error: 'No product found to import', provider } };
+    }
+
+    // AI pipeline (rules-based, no external LLM required for deterministic test)
+    const costUsd = Number(product.cost || 50);
+    const shipUsd = Number(product.shipping_cost_usd || 3.5);
+    const usdToSar = 3.75;
+    const landedSar = Number(((costUsd + shipUsd) * usdToSar).toFixed(2));
+    const suggestedPrice = Number((landedSar * 1.55).toFixed(2)); // ~35%+ margin target
+    const marginPct = suggestedPrice > 0 ? Number((((suggestedPrice - landedSar) / suggestedPrice) * 100).toFixed(1)) : 0;
+
+    const market = {
+      demand: 'medium',
+      competition: 'medium',
+      seo_opportunity: 'high',
+      notes: 'Tech accessory — suitable for Saudi National Day / everyday mobile accessories demand.',
+    };
+    const pricing = {
+      cost_usd: costUsd,
+      shipping_usd: shipUsd,
+      landed_sar: landedSar,
+      recommended_price_sar: suggestedPrice,
+      margin_pct: marginPct,
+      strategy: marginPct >= 30 ? 'competitive' : 'review',
+      vat_inclusive: true,
+    };
+    let aiScore = 70;
+    if (marginPct >= 30) aiScore += 10;
+    if ((product.images || []).length >= 1) aiScore += 5;
+    else aiScore -= 15;
+    if (product.stock > 20) aiScore += 5;
+    if (product.mock) aiScore -= 5;
+    aiScore = Math.max(0, Math.min(100, aiScore));
+    const recommendation = aiScore >= 80 ? 'PUBLISH_READY' : aiScore >= 60 ? 'REVIEW_FIRST' : 'NEEDS_WORK';
+    const verification = {
+      image_quality: (product.images || []).length ? 'acceptable' : 'missing',
+      content_quality: product.description ? 'ok' : 'thin',
+      seo_readiness: 'needs_review',
+      ai_score: aiScore,
+      recommendation,
+      reason:
+        recommendation === 'REVIEW_FIRST'
+          ? 'Need better images / Arabic SEO polish before publish'
+          : recommendation === 'PUBLISH_READY'
+            ? 'Good margin and basic content'
+            : 'Insufficient data or low margin',
+    };
+
+    const aiResearch = {
+      market_intelligence: market,
+      dynamic_pricing: pricing,
+      product_verification: verification,
+      pipeline: ['market_intelligence', 'dynamic_pricing', 'product_verification'],
+      imported_at: new Date().toISOString(),
+      auto_publish: false,
+      auto_purchase: false,
+    };
+
+    const nameEn = String(product.title || 'Imported product').slice(0, 180);
+    const nameAr = String(product.title_ar || product.title || nameEn).slice(0, 180);
+    const slugBase = nameEn
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'cj-import';
+    const slug = `${slugBase}-${String(product.supplier_product_id || 'x').slice(-6)}`.toLowerCase();
+    const sku = `CJ-${String(product.supplier_product_id || Date.now()).replace(/[^A-Za-z0-9-]/g, '').slice(0, 24)}`;
+
+    // 1) product_import_queue (always)
+    let queueId = null;
+    try {
+      const q = await rest('product_import_queue', {
+        method: 'POST',
+        body: {
+          external_product_id: String(product.supplier_product_id),
+          source_url: product.source_url || `cj://${product.supplier_product_id}`,
+          raw_payload: product,
+          proposed_name_ar: nameAr,
+          proposed_name_en: nameEn,
+          proposed_description_ar: product.description_ar || product.description || null,
+          proposed_price: suggestedPrice,
+          proposed_cost: landedSar,
+          proposed_images: product.images || [],
+          seo_title_ar: nameAr,
+          seo_keywords_ar: 'اكسسوارات جوال, باور بانك, تقنية',
+          profit_margin_pct: marginPct,
+          ai_research: aiResearch,
+          status: 'pending_review',
+        },
+        prefer: 'return=representation',
+      });
+      const row = Array.isArray(q.data) ? q.data[0] : q.data;
+      queueId = row?.id || null;
+    } catch (e) {
+      return {
+        status: 500,
+        payload: { error: 'Failed to insert product_import_queue', detail: String(e.message || e), auto_publish: false },
+      };
+    }
+
+    // 2) Draft product (is_active = false) — never published
+    let productId = null;
+    try {
+      const pr = await rest('products', {
+        method: 'POST',
+        body: {
+          slug,
+          sku,
+          name_ar: nameAr,
+          name_en: nameEn,
+          description_ar: product.description_ar || product.description || nameAr,
+          description_en: product.description || nameEn,
+          price: suggestedPrice,
+          cost_price: landedSar,
+          stock_quantity: Number(product.stock || 0),
+          track_stock: true,
+          images: product.images || [],
+          is_active: false,
+          featured: false,
+          fulfillment_type: 'dropship',
+          delivery_note_ar: product.shipping_estimate || '7-15 يوم عمل',
+          delivery_note_en: product.shipping_estimate || '7-15 business days',
+        },
+        prefer: 'return=representation',
+      });
+      const prow = Array.isArray(pr.data) ? pr.data[0] : pr.data;
+      productId = prow?.id || null;
+      if (productId && queueId) {
+        await rest(`product_import_queue?id=eq.${encodeURIComponent(queueId)}`, {
+          method: 'PATCH',
+          body: { published_product_id: productId, updated_at: new Date().toISOString() },
+          prefer: 'return=minimal',
+        });
+      }
+    } catch (_) {
+      // Product insert may fail on unique slug/sku — queue still holds the import
+    }
+
+    // 3) supplier_product_mapping
+    try {
+      await rest('supplier_product_mapping?on_conflict=provider,supplier_product_id', {
+        method: 'POST',
+        body: {
+          provider,
+          supplier_product_id: String(product.supplier_product_id),
+          tiqnora_product_id: productId,
+          supplier_price: costUsd,
+          supplier_stock: product.stock,
+          shipping_estimate: product.shipping_estimate || null,
+          currency: product.currency || 'USD',
+          raw_snapshot: product,
+          last_checked: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        prefer: 'resolution=merge-duplicates,return=minimal',
+      });
+    } catch (_) {}
+
+    // 4) Log
+    try {
+      await rest('inventory_sync_logs', {
+        method: 'POST',
+        body: {
+          supplier: provider,
+          provider,
+          product_id: productId,
+          change_type: 'sync',
+          old_value: null,
+          new_value: String(product.supplier_product_id),
+          message: `Imported to queue (pending_review). AI score ${aiScore}/100 → ${recommendation}. is_active=false.`,
+          requires_review: true,
+        },
+        prefer: 'return=minimal',
+      });
+    } catch (_) {}
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        provider,
+        imported: 1,
+        queue_id: queueId,
+        product_id: productId,
+        is_active: false,
+        status: 'pending_review',
+        mock: !!product.mock,
+        ai_score: aiScore,
+        recommendation,
+        reason: verification.reason,
+        pricing,
+        market,
+        verification,
+        product_summary: {
+          name_en: nameEn,
+          name_ar: nameAr,
+          sku,
+          cost_sar: landedSar,
+          suggested_price_sar: suggestedPrice,
+          stock: product.stock,
+          images: (product.images || []).length,
+        },
+        auto_purchase: false,
+        auto_publish: false,
+        disclaimer: 'Draft only. Admin must approve before publish. No auto-purchase.',
+      },
+    };
+  }
+
   if (action === 'logs') {
     try {
       const lr = await rest(
@@ -1133,8 +1346,14 @@ async function handleSupplierCenter(body = {}) {
     }
   }
 
-  return { status: 400, payload: { error: 'Unknown action. Use status|test|search|sync|sync_inventory|logs' } };
+  return {
+    status: 400,
+    payload: {
+      error: 'Unknown action. Use status|test|search|sync|sync_inventory|sync_prices|import_product|import_test|logs',
+    },
+  };
 }
+
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
