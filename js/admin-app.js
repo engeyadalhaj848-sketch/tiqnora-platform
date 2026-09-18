@@ -1440,6 +1440,9 @@ VIEWS.commerce = async v => {
         'الحد الأدنى: ' + j.minimum_price + ' ر.س',
         'الربح المتوقع: ' + j.expected_profit + ' · الهامش: ' + j.profit_margin + '%',
         'الاستراتيجية: ' + j.pricing_strategy,
+        'القرار: ' + (j.decision||'—'),
+        'هامش عند السوق: ' + (j.margin_at_market!=null?j.margin_at_market+'%':'—'),
+        (j.warnings&&j.warnings.length?('تحذيرات: ' + j.warnings.join(' · ')):''),
         'سلم الأسعار: أرخص ' + (j.price_ladder&&j.price_ladder.cheapest) + ' · تنافسي ' + (j.price_ladder&&j.price_ladder.competitive) + ' · فاخر ' + (j.price_ladder&&j.price_ladder.premium),
         '— لا تغيير سعر تلقائي —'
       ].join('\n');

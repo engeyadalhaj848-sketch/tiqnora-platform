@@ -637,20 +637,16 @@ function handleDynamicPricing(body) {
   const productName = String(body.product_name || body.name || body.name_ar || '').trim();
   const cost = num(body.cost ?? body.cost_price ?? body.supplier_cost ?? body.purchase_cost, 0);
   const shipping = num(body.shipping ?? body.shipping_cost, cost > 0 ? Math.max(10, cost * 0.06) : 0);
-  const extraFees = num(body.extra_fees ?? body.fees, 0);
+  const extraFees = num(body.extra_fees ?? body.additional_fees ?? body.fees, 0);
   const competitorPrice = num(body.competitor_price ?? body.market_price, 0);
   const category = String(body.category || '').toLowerCase();
   const currentPrice = num(body.current_price ?? body.price ?? body.selling_price, 0);
 
-  // Base landed (pre-VAT display model: VAT shown as component of consumer price)
   const baseLanded = cost + shipping + extraFees;
-  // If cost already tax-exclusive, VAT on margin/sale is typical; estimate VAT portion of retail
-  // Total cost basis for margin = landed; VAT amount estimated on recommended price * 15/115
   if (cost <= 0 && currentPrice <= 0) {
     return { status: 400, payload: { error: 'cost or current_price required' } };
   }
 
-  // Market band heuristics
   let marketLow = competitorPrice > 0 ? competitorPrice * 0.9 : 0;
   let marketHigh = competitorPrice > 0 ? competitorPrice * 1.15 : 0;
   if (competitorPrice <= 0 && baseLanded > 0) {
@@ -658,36 +654,64 @@ function handleDynamicPricing(body) {
     marketHigh = baseLanded * 2.7;
   }
 
-  // Strategy multipliers by category competition intensity
   let multCompetitive = 2.25;
   let multPremium = 2.65;
   let multCheapest = 1.85;
   if (/pos|كاشير/.test(category + productName)) { multCompetitive = 2.15; multPremium = 2.5; }
   if (/cctv|كاميرا|مراقبة/.test(category + productName)) { multCompetitive = 2.2; multPremium = 2.55; }
-  if (/network|سويتش|راوتر/.test(category + productName)) { multCompetitive = 2.1; multPremium = 2.4; }
+  if (/network|سويتش|راوتر|wifi|hotel/.test(category + productName)) { multCompetitive = 2.1; multPremium = 2.4; }
 
   const priceCheapest = baseLanded > 0 ? Number((baseLanded * multCheapest).toFixed(2)) : 0;
   const priceCompetitive = baseLanded > 0 ? Number((baseLanded * multCompetitive).toFixed(2)) : 0;
   const pricePremium = baseLanded > 0 ? Number((baseLanded * multPremium).toFixed(2)) : 0;
 
-  // Recommended: competitive, pulled toward market midpoint if available
-  let recommended = priceCompetitive;
-  if (competitorPrice > 0) {
-    const mid = (marketLow + marketHigh) / 2;
-    recommended = Number(((priceCompetitive * 0.45) + (mid * 0.55)).toFixed(2));
-  }
-  // Floor: min acceptable = landed * 1.35 or cost recovery + 20%
-  const minimumPrice = baseLanded > 0 ? Number((baseLanded * 1.35).toFixed(2)) : 0;
-  if (recommended < minimumPrice) recommended = minimumPrice;
-  if (recommended > 0 && recommended < priceCheapest * 0.95) recommended = priceCheapest;
+  const minimumPrice = baseLanded > 0 ? Number((baseLanded * 1.2).toFixed(2)) : 0; // min viable ~20% over landed
 
-  // Position
+  // Margin at market (if known)
+  const marginAtMarket = competitorPrice > 0 && competitorPrice > 0
+    ? Number((((competitorPrice - baseLanded) / competitorPrice) * 100).toFixed(1))
+    : null;
+  const profitAtMarket = competitorPrice > 0 ? Number((competitorPrice - baseLanded).toFixed(2)) : null;
+  const marketBelowCost = competitorPrice > 0 && competitorPrice < baseLanded;
+  const marketLowMargin = marginAtMarket != null && marginAtMarket < 20;
+
+  let recommended = priceCompetitive;
   let strategy = 'competitive';
+  const warnings = [];
+  let decision = 'OK';
+
   if (competitorPrice > 0) {
-    if (recommended <= competitorPrice * 0.92) strategy = 'cheapest';
-    else if (recommended >= competitorPrice * 1.12) strategy = 'premium';
-    else strategy = 'competitive';
+    // Anchor to market: stay inside band when possible while protecting margin
+    const mid = (marketLow + marketHigh) / 2;
+    if (marketBelowCost) {
+      // Cannot sell profitably at market
+      recommended = minimumPrice;
+      strategy = 'premium'; // would need above-market
+      decision = 'NOT_RECOMMENDED';
+      warnings.push('سعر السوق أقل من التكلفة الإجمالية — خسارة عند البيع بسعر السوق');
+      warnings.push('لا يُنصح بإدراج المنتج بهذا العرض');
+    } else if (marketLowMargin) {
+      // Market exists but margin thin — recommend near market high if still viable, else flag
+      recommended = Number(Math.max(minimumPrice, Math.min(marketHigh, competitorPrice * 1.05)).toFixed(2));
+      strategy = recommended >= competitorPrice * 1.08 ? 'premium' : 'competitive';
+      decision = marginAtMarket < 10 ? 'NOT_RECOMMENDED' : 'REVIEW_FIRST';
+      warnings.push('هامش الربح عند سعر السوق منخفض (' + marginAtMarket + '%)');
+      if (decision === 'NOT_RECOMMENDED') warnings.push('لا يُنصح بتسعير عدواني — راجع المورد أو الفئة');
+    } else {
+      // Healthy market: blend cost-based competitive with market mid, clamp to band
+      recommended = Number(((priceCompetitive * 0.35) + (mid * 0.65)).toFixed(2));
+      if (recommended < marketLow) recommended = Number(marketLow.toFixed(2));
+      if (recommended > marketHigh) recommended = Number(marketHigh.toFixed(2));
+      if (recommended < minimumPrice) recommended = minimumPrice;
+      if (recommended <= competitorPrice * 0.92) strategy = 'cheapest';
+      else if (recommended >= competitorPrice * 1.1) strategy = 'premium';
+      else strategy = 'competitive';
+      decision = 'OK';
+    }
   } else {
+    // No market data: cost-based ladder
+    recommended = priceCompetitive;
+    if (recommended < minimumPrice) recommended = minimumPrice;
     if (recommended <= priceCheapest * 1.05) strategy = 'cheapest';
     else if (recommended >= pricePremium * 0.95) strategy = 'premium';
     else strategy = 'competitive';
@@ -696,6 +720,12 @@ function handleDynamicPricing(body) {
   const expectedProfit = recommended > 0 ? Number((recommended - baseLanded).toFixed(2)) : 0;
   const profitMargin = recommended > 0 ? Number((((recommended - baseLanded) / recommended) * 100).toFixed(1)) : 0;
   const vatAmount = recommended > 0 ? Number(((recommended * 0.15) / 1.15).toFixed(2)) : 0;
+  const healthyMargin = profitMargin >= 25 && decision !== 'NOT_RECOMMENDED';
+
+  if (profitMargin < 15 && decision === 'OK') {
+    decision = 'REVIEW_FIRST';
+    warnings.push('الهامش عند السعر الموصى منخفض');
+  }
 
   return {
     status: 200,
@@ -714,6 +744,10 @@ function handleDynamicPricing(body) {
       expected_profit: expectedProfit,
       profit_margin: profitMargin,
       pricing_strategy: strategy,
+      decision,
+      warnings,
+      margin_at_market: marginAtMarket,
+      profit_at_market: profitAtMarket,
       price_ladder: {
         cheapest: priceCheapest,
         competitive: priceCompetitive,
@@ -723,7 +757,11 @@ function handleDynamicPricing(body) {
       analysis: {
         note: 'توصية تسعير فقط — لا تغيير تلقائي للسعر',
         category: category || null,
-        healthy_margin: profitMargin >= 25,
+        healthy_margin: healthyMargin,
+        market_below_cost: marketBelowCost,
+        market_low_margin: marketLowMargin,
+        decision,
+        warnings,
       },
       auto_price_change: false,
       agent: 'tiqnora_dynamic_pricing_agent',
