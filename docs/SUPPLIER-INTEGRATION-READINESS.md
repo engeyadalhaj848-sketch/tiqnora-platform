@@ -56,3 +56,4 @@ Admin → **Tiqnora Commerce AI**:
 ## Official API wiring (next)
 
 Connect provider SDKs server-side only after credentials + legal agreements. Keep `fulfillment_mode = approval_required` until explicitly changed.
+
