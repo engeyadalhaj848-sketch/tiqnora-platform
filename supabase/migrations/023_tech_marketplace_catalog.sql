@@ -3,7 +3,7 @@
 
 -- Brands
 insert into public.brands (slug, name, status, sort_order)
-select v.slug, v.name, 'published', v.sort_order
+select v.slug, v.name, 'published'::public.content_status, v.sort_order
 from (values
   ('tiqnora', 'Tiqnora', 1),
   ('tp-link', 'TP-Link', 2),
@@ -19,7 +19,11 @@ insert into public.categories (
   slug, type, name_ar, name_en, description_ar, description_en,
   sort_order, status, seo_title_ar, seo_title_en, seo_description_ar, seo_description_en, keywords_ar, keywords_en
 )
-select * from (values
+select
+  v.slug, v.type, v.name_ar, v.name_en, v.description_ar, v.description_en,
+  v.sort_order, v.status::public.content_status, v.seo_title_ar, v.seo_title_en,
+  v.seo_description_ar, v.seo_description_en, v.keywords_ar, v.keywords_en
+from (values
   ('computers-laptops', 'product', 'أجهزة الكمبيوتر واللابتوب', 'Computers & Laptops',
    'لابتوبات وأجهزة مكتبية للأعمال والمنازل.', 'Laptops and desktops for business and home.',
    10, 'published',
@@ -63,7 +67,7 @@ where not exists (select 1 from public.categories c where c.slug = v.slug);
 -- Update SEO on existing matching categories
 update public.categories set
   name_ar = coalesce(nullif(name_ar,''), name_ar),
-  status = 'published',
+  status = 'published'::public.content_status,
   updated_at = now()
 where slug in ('computers','computers-laptops','networking-equipment','cctv-cameras','cctv-security','printers','printers-accessories');
 
@@ -71,18 +75,18 @@ where slug in ('computers','computers-laptops','networking-equipment','cctv-came
 update public.categories set
   seo_title_ar = coalesce(seo_title_ar, 'أجهزة الكمبيوتر | متجر Tiqnora AI'),
   seo_description_ar = coalesce(seo_description_ar, 'أجهزة كمبيوتر ولابتوب للأعمال في السعودية.'),
-  status = 'published'
+  status = 'published'::public.content_status
 where slug = 'computers';
 
 update public.categories set
   seo_title_ar = coalesce(seo_title_ar, 'كاميرات المراقبة | متجر Tiqnora AI'),
   seo_description_ar = coalesce(seo_description_ar, 'كاميرات وأنظمة مراقبة في السعودية.'),
-  status = 'published'
+  status = 'published'::public.content_status
 where slug = 'cctv-cameras';
 
 update public.categories set
   seo_title_ar = coalesce(seo_title_ar, 'الطابعات | متجر Tiqnora AI'),
-  status = 'published'
+  status = 'published'::public.content_status
 where slug = 'printers';
 
 do $$
