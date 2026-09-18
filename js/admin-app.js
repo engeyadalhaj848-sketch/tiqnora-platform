@@ -350,16 +350,71 @@ VIEWS.categories = async v => {
 
 /* ---------- Products ---------- */
 VIEWS.products = async v => {
-  v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>منتجات المتجر — مدير الكتالوج</h2><p class="card-desc">إدارة المخزون والأسعار والمواصفات. المسودات (غير مفعّلة) تحتاج اعتماد قبل الظهور في المتجر — لا نشر تلقائي.</p></div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn-sm" id="filter-all">الكل</button>
-    <button class="btn-sm" id="filter-draft">مسودات فقط</button>
-    <button class="btn-sm" id="filter-live">منشور فقط</button>
-    <button class="btn-primary" id="add">+ منتج جديد</button>
-  </div></div><div id="prod-stats" class="grid-stats" style="margin-bottom:12px"></div><div id="tbl"></div></div>`;
+  const f = window.__prodFilters || { mode: 'all', category_id: '', brand_id: '', q: '' };
+  window.__prodFilters = f;
+
+  v.innerHTML = dbBanner() + `
+  <div class="card"><div class="card-head"><div>
+    <h2>منتجات المتجر — إدارة جماعية</h2>
+    <p class="card-desc">تحديد متعدد + نشر/إخفاء جماعي + تصنيف ومورد ووسوم. لا نشر تلقائي — كل إجراء يتطلب تأكيدك.</p>
+  </div>
+  <button class="btn-primary" id="add">+ منتج جديد</button>
+  </div>
+
+  <div class="grid-2" style="gap:10px;margin-bottom:12px;align-items:end">
+    <label>بحث<input id="pf-q" placeholder="اسم / SKU" value="${esc(f.q||'')}"></label>
+    <label>التصنيف<select id="pf-cat"><option value="">الكل</option></select></label>
+    <label>الماركة<select id="pf-brand"><option value="">الكل</option></select></label>
+    <label>الحالة<select id="pf-mode">
+      <option value="all" ${f.mode==='all'?'selected':''}>الكل</option>
+      <option value="draft" ${f.mode==='draft'?'selected':''}>مسودات فقط</option>
+      <option value="live" ${f.mode==='live'?'selected':''}>منشور فقط</option>
+      <option value="missing_images" ${f.mode==='missing_images'?'selected':''}>بدون صور كافية</option>
+      <option value="missing_seo" ${f.mode==='missing_seo'?'selected':''}>ناقص SEO</option>
+    </select></label>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <button class="btn-sm" id="pf-apply">تطبيق الفلاتر</button>
+    <button class="btn-sm" id="pf-reset">إعادة تعيين</button>
+  </div>
+  <div id="prod-stats" class="grid-stats" style="margin-bottom:12px"></div>
+
+  <div class="card" style="background:var(--bg2);margin-bottom:12px;padding:12px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <label class="check-row" style="margin:0"><input type="checkbox" id="sel-all"> تحديد الكل (المعروض)</label>
+      <span id="sel-count" style="color:var(--muted)">0 محدد</span>
+      <select id="bulk-action" style="min-width:180px">
+        <option value="">— إجراء جماعي —</option>
+        <option value="publish">نشر المحدد</option>
+        <option value="unpublish">إلغاء نشر المحدد</option>
+        <option value="update_category">تغيير التصنيف</option>
+        <option value="assign_supplier">تعيين مورد</option>
+        <option value="add_tags">إضافة وسوم</option>
+        <option value="change_status">تغيير الحالة</option>
+      </select>
+      <button class="btn-primary" id="bulk-run">تنفيذ</button>
+    </div>
+    <div id="bulk-extra" style="margin-top:10px;display:none" class="grid-2"></div>
+  </div>
+  <div id="tbl"></div></div>`;
+
   const [{ data: cats }, { data: brands }] = await Promise.all([
     db.from('categories').select('*').eq('type', 'product').order('sort_order'),
-    db.from('brands').select('*').order('name')]);
+    db.from('brands').select('*').order('name')
+  ]);
+  (cats||[]).forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.id; o.textContent = c.name_ar;
+    if (f.category_id === c.id) o.selected = true;
+    $('#pf-cat').appendChild(o);
+  });
+  (brands||[]).forEach(b => {
+    const o = document.createElement('option');
+    o.value = b.id; o.textContent = b.name;
+    if (f.brand_id === b.id) o.selected = true;
+    $('#pf-brand').appendChild(o);
+  });
+
   const F = [
     { k: 'name_ar', t: 'اسم المنتج (عربي)', req: 1 }, { k: 'name_en', t: 'Name (EN)', req: 1, dir: 'ltr' },
     { k: 'slug', t: 'المعرّف', req: 1, dir: 'ltr', ph: 'cisco-switch-24port' },
@@ -384,42 +439,173 @@ VIEWS.products = async v => {
     { k: 'description_en', t: 'Description (EN)', type: 'textarea', full: 1, dir: 'ltr' },
     { k: 'seo_title_ar', t: 'SEO عنوان' }, { k: 'seo_description_ar', t: 'SEO وصف', type: 'textarea' },
   ];
-  const filterMode = window.__prodFilter || 'all';
+
   let q = db.from('products').select('*, categories(name_ar), brands(name)').order('sort_order');
-  if (filterMode === 'draft') q = q.eq('is_active', false);
-  if (filterMode === 'live') q = q.eq('is_active', true);
-  const { data: rows } = await q;
+  if (f.mode === 'draft') q = q.eq('is_active', false);
+  if (f.mode === 'live') q = q.eq('is_active', true);
+  if (f.category_id) q = q.eq('category_id', f.category_id);
+  if (f.brand_id) q = q.eq('brand_id', f.brand_id);
+  const { data: rawRows } = await q;
+  let rows = rawRows || [];
+  if (f.q) {
+    const qq = f.q.trim().toLowerCase();
+    rows = rows.filter(p => (p.name_ar||'').toLowerCase().includes(qq) || (p.name_en||'').toLowerCase().includes(qq) || (p.sku||'').toLowerCase().includes(qq) || (p.slug||'').toLowerCase().includes(qq));
+  }
+  if (f.mode === 'missing_images') {
+    rows = rows.filter(p => !p.images || !p.images.length || (p.specifications && p.specifications.image_status === 'placeholder_reuse_pending_official'));
+  }
+  if (f.mode === 'missing_seo') {
+    rows = rows.filter(p => !p.seo_title_ar || !p.seo_description_ar);
+  }
+
   const allCount = (await db.from('products').select('id', { count: 'exact', head: true })).count;
   const draftCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', false)).count;
   const liveCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true)).count;
-  $('#prod-stats').innerHTML = `<div class="stat"><b>${allCount??'—'}</b><span>الكل</span></div><div class="stat"><b>${draftCount??'—'}</b><span>مسودات</span></div><div class="stat"><b>${liveCount??'—'}</b><span>منشور</span></div>`;
-  $('#filter-all').onclick = () => { window.__prodFilter = 'all'; VIEWS.products(v); };
-  $('#filter-draft').onclick = () => { window.__prodFilter = 'draft'; VIEWS.products(v); };
-  $('#filter-live').onclick = () => { window.__prodFilter = 'live'; VIEWS.products(v); };
+  $('#prod-stats').innerHTML = `<div class="stat"><b>${allCount??'—'}</b><span>الكل</span></div><div class="stat"><b>${draftCount??'—'}</b><span>مسودات</span></div><div class="stat"><b>${liveCount??'—'}</b><span>منشور</span></div><div class="stat"><b>${rows.length}</b><span>المعروض</span></div>`;
+
+  $('#pf-apply').onclick = () => {
+    window.__prodFilters = {
+      mode: $('#pf-mode').value,
+      category_id: $('#pf-cat').value,
+      brand_id: $('#pf-brand').value,
+      q: ($('#pf-q').value||'').trim()
+    };
+    VIEWS.products(v);
+  };
+  $('#pf-reset').onclick = () => { window.__prodFilters = { mode: 'all', category_id: '', brand_id: '', q: '' }; VIEWS.products(v); };
+
   const margin = (p) => {
     const cost = Number(p.cost_price);
     const price = Number(p.price);
     if (!cost || !price || cost <= 0) return '—';
-    const m = ((price - cost) / price) * 100;
-    return m.toFixed(0) + '%';
+    return (((price - cost) / price) * 100).toFixed(0) + '%';
   };
-  $('#tbl').innerHTML = tbl(['المنتج', 'المورد', 'بيع', 'تكلفة', 'هامش', 'المخزون', 'الحالة', 'إجراءات'], (rows || []).map(p =>
-    `<tr><td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}${p.fulfillment_type==='dropship'?' <span class="pill warn">DS</span>':''}${(p.campaign_tags||[]).includes('national-day')?' <span class="pill ok">وطني</span>':''}</td>
-     <td>${esc(p.supplier_name || '—')}</td>
-     <td>${money(p.price)}${p.discount_percent > 0 ? ` <span class="pill warn">-${p.discount_percent}%</span>` : ''}</td>
-     <td>${p.cost_price != null ? money(p.cost_price) : '—'}</td>
-     <td><b>${margin(p)}</b></td>
-     <td>${p.track_stock ? (p.stock_quantity > 3 ? `<span class="pill ok">${p.stock_quantity}</span>` : `<span class="pill danger">${p.stock_quantity}</span>`) : '—'}</td>
-     <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مخفي'}</span></td>
-     <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد نشر</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إلغاء نشر</button>`}<button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td></tr>`).join(''));
+
+  $('#tbl').innerHTML = tbl(
+    ['', 'المنتج', 'تصنيف', 'المورد', 'بيع', 'هامش', 'الحالة', 'إجراءات'],
+    rows.map(p => `<tr>
+      <td><input type="checkbox" class="prod-check" value="${p.id}"></td>
+      <td><b>${esc(p.name_ar)}</b>${p.sku ? `<br><small style="color:var(--muted)" dir="ltr">${esc(p.sku)}</small>` : ''}${p.fulfillment_type==='dropship'?' <span class="pill warn">DS</span>':''}${(p.campaign_tags||[]).includes('national-day')?' <span class="pill ok">وطني</span>':''}</td>
+      <td>${esc(p.categories?.name_ar||'—')}</td>
+      <td>${esc(p.supplier_name || '—')}</td>
+      <td>${money(p.price)}${p.discount_percent > 0 ? ` <span class="pill warn">-${p.discount_percent}%</span>` : ''}</td>
+      <td><b>${margin(p)}</b></td>
+      <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مسودة'}</span></td>
+      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
+    </tr>`).join('')
+  );
+
+  const updateSelCount = () => {
+    const n = $$('.prod-check:checked').length;
+    $('#sel-count').textContent = n + ' محدد';
+  };
+  $$('.prod-check').forEach(c => c.onchange = updateSelCount);
+  $('#sel-all').onchange = () => {
+    $$('.prod-check').forEach(c => { c.checked = $('#sel-all').checked; });
+    updateSelCount();
+  };
+
+  const showBulkExtra = () => {
+    const a = $('#bulk-action').value;
+    const box = $('#bulk-extra');
+    if (!a || a === 'publish' || a === 'unpublish') { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'grid';
+    if (a === 'update_category') {
+      box.innerHTML = `<label>التصنيف الجديد<select id="bulk-cat">${(cats||[]).map(c=>`<option value="${c.id}">${esc(c.name_ar)}</option>`).join('')}</select></label>`;
+    } else if (a === 'assign_supplier') {
+      box.innerHTML = `<label>اسم المورد<input id="bulk-sup" placeholder="محلي / CJ / AliExpress"></label>`;
+    } else if (a === 'add_tags') {
+      box.innerHTML = `<label>وسوم (مفصولة بفاصلة)<input id="bulk-tags" placeholder="tech-marketplace, featured" dir="ltr"></label>`;
+    } else if (a === 'change_status') {
+      box.innerHTML = `<label>الحالة<select id="bulk-status"><option value="published">منشور</option><option value="draft">مسودة</option></select></label>`;
+    }
+  };
+  $('#bulk-action').onchange = showBulkExtra;
+
+  const selectedIds = () => $$('.prod-check:checked').map(c => c.value);
+
+  const runBulk = async (payload) => {
+    // Prefer client-side admin RLS (matches existing product workflow); API as secondary
+    const ids = payload.product_ids;
+    if (!ids.length) return toast('حدّد منتجات أولاً');
+    try {
+      if (payload.action === 'publish' || (payload.action === 'change_status' && payload.status === 'published')) {
+        const { error } = await db.from('products').update({ is_active: true }).in('id', ids);
+        if (error) throw error;
+      } else if (payload.action === 'unpublish' || (payload.action === 'change_status' && payload.status === 'draft')) {
+        const { error } = await db.from('products').update({ is_active: false }).in('id', ids);
+        if (error) throw error;
+      } else if (payload.action === 'update_category') {
+        const { error } = await db.from('products').update({ category_id: payload.category_id }).in('id', ids);
+        if (error) throw error;
+      } else if (payload.action === 'assign_supplier') {
+        const { error } = await db.from('products').update({ supplier_name: payload.supplier_name }).in('id', ids);
+        if (error) throw error;
+      } else if (payload.action === 'add_tags') {
+        // merge tags per product
+        for (const id of ids) {
+          const row = rows.find(r => r.id === id);
+          const cur = Array.isArray(row?.campaign_tags) ? row.campaign_tags : [];
+          const merged = Array.from(new Set([...cur, ...payload.campaign_tags]));
+          const { error } = await db.from('products').update({ campaign_tags: merged }).eq('id', id);
+          if (error) throw error;
+        }
+      }
+      // Also notify API when session available (audit path)
+      try {
+        const { data: sess } = await db.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (token) {
+          await fetch('/api/products/bulk-action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+            body: JSON.stringify(payload)
+          });
+        }
+      } catch (_) {}
+      toast('تم تنفيذ الإجراء على ' + ids.length + ' منتج');
+      VIEWS.products(v);
+    } catch (e) {
+      toast(e.message || 'فشل الإجراء الجماعي');
+    }
+  };
+
+  $('#bulk-run').onclick = () => {
+    const action = $('#bulk-action').value;
+    const ids = selectedIds();
+    if (!action) return toast('اختر إجراءً');
+    if (!ids.length) return toast('حدّد منتجاً واحداً على الأقل');
+    const payload = { action, product_ids: ids };
+    if (action === 'update_category') {
+      payload.category_id = $('#bulk-cat')?.value;
+      if (!payload.category_id) return toast('اختر التصنيف');
+    }
+    if (action === 'assign_supplier') {
+      payload.supplier_name = ($('#bulk-sup')?.value || '').trim();
+      if (!payload.supplier_name) return toast('أدخل اسم المورد');
+    }
+    if (action === 'add_tags') {
+      payload.campaign_tags = ($('#bulk-tags')?.value || '').split(/[,،\n]+/).map(s => s.trim()).filter(Boolean);
+      if (!payload.campaign_tags.length) return toast('أدخل وسوماً');
+    }
+    if (action === 'change_status') payload.status = $('#bulk-status')?.value || 'draft';
+
+    const labels = {
+      publish: 'نشر', unpublish: 'إلغاء النشر', update_category: 'تغيير التصنيف',
+      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة'
+    };
+    if (!confirm(`تأكيد: ${labels[action] || action} على ${ids.length} منتج؟\nلا يمكن التراجع بسهولة.`)) return;
+    runBulk(payload);
+  };
+
   const fixImgs = d => {
-    if (typeof d.images === 'string') d.images = d.images.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-    if (typeof d.campaign_tags === 'string') d.campaign_tags = d.campaign_tags.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+    if (typeof d.images === 'string') d.images = d.images.split(/\\n+/).map(s=>s.trim()).filter(Boolean);
+    if (typeof d.campaign_tags === 'string') d.campaign_tags = d.campaign_tags.split(/[\\n,]+/).map(s=>s.trim()).filter(Boolean);
     if (Array.isArray(d.campaign_tags) === false && d.campaign_tags) d.campaign_tags = [String(d.campaign_tags)];
     return d;
   };
   $('#add').onclick = () => crudModal({ title: 'منتج جديد', fields: F, onSave: async d => { await db.from('products').insert(fixImgs(d)); log('product.create', 'products'); toast('تمت إضافة المنتج'); VIEWS.products(v); } });
-  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\n') }, onSave: async d => { await db.from('products').update(d).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
+  $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\\n') }, onSave: async d => { await db.from('products').update(fixImgs(d)).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
   $$('[data-publish]').forEach(b => b.onclick = async () => {
     if (!confirm('اعتماد نشر هذا المنتج في المتجر؟ تأكد من الصورة الرسمية والمواصفات.')) return;
@@ -433,7 +619,7 @@ VIEWS.products = async v => {
   });
 };
 
-/* ---------- Tiqnora Commerce AI ---------- */
+
 VIEWS.commerce = async v => {
   v.innerHTML = dbBanner() + `
   <div class="card"><div class="card-head"><div>
