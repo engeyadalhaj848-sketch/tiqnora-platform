@@ -374,6 +374,8 @@ VIEWS.products = async v => {
       <option value="needs_review" ${f.mode==='needs_review'?'selected':''}>صور تحتاج مراجعة</option>
       <option value="ready" ${f.mode==='ready'?'selected':''}>جاهز للنشر (جودة ≥75)</option>
       <option value="low_quality" ${f.mode==='low_quality'?'selected':''}>جودة منخفضة</option>
+      <option value="blocked" ${f.mode==='blocked'?'selected':''}>محظور / BLOCKED</option>
+      <option value="ready_verify" ${f.mode==='ready_verify'?'selected':''}>READY_TO_PUBLISH</option>
     </select></label>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -397,6 +399,7 @@ VIEWS.products = async v => {
         <option value="generate_seo">توليد محتوى SEO (AI)</option>
         <option value="quality_score">حساب درجة الجودة</option>
         <option value="ai_review">مراجعة AI للمنتجات المحددة</option>
+        <option value="ai_verify">تحقق AI للمنتجات المحددة</option>
       </select>
       <button class="btn-primary" id="bulk-run">تنفيذ</button>
     </div>
@@ -472,6 +475,12 @@ VIEWS.products = async v => {
   if (f.mode === 'low_quality') {
     rows = rows.filter(p => p.quality_score != null && p.quality_score < 60);
   }
+  if (f.mode === 'blocked') {
+    rows = rows.filter(p => (p.last_verification_status === 'BLOCKED') || (p.last_review_status === 'not_ready') || (p.quality_score != null && p.quality_score < 50));
+  }
+  if (f.mode === 'ready_verify') {
+    rows = rows.filter(p => p.last_verification_status === 'READY_TO_PUBLISH' || (p.quality_score != null && p.quality_score >= 90));
+  }
 
   const allCount = (await db.from('products').select('id', { count: 'exact', head: true })).count;
   const draftCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', false)).count;
@@ -512,7 +521,7 @@ VIEWS.products = async v => {
       <td>${money(p.price)}</td>
       <td>${(p.images||[]).length} ${p.media_status?`<small>${esc(p.media_status)}</small>`:''}</td>
       <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مسودة'}</span></td>
-      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-review="${p.id}">مراجعة AI</button><button class="btn-sm" data-media="${p.id}">وسائط</button><button class="btn-sm" data-seo="${p.id}">SEO AI</button><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
+      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-review="${p.id}">تحقق AI</button><button class="btn-sm" data-media="${p.id}">وسائط</button><button class="btn-sm" data-seo="${p.id}">SEO AI</button><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
     </tr>`).join('')
   );
 
@@ -605,33 +614,39 @@ VIEWS.products = async v => {
         }
         toast(`SEO: نجح ${ok} · فشل ${fail} (حد 25/مرة)`);
         VIEWS.products(v); return;
-      } else if (payload.action === 'quality_score' || payload.action === 'ai_review') {
-        let n = 0;
+      } else if (payload.action === 'quality_score' || payload.action === 'ai_review' || payload.action === 'ai_verify') {
+        let n = 0, ready = 0, needs = 0;
         for (const id of ids.slice(0, 100)) {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_review', product: row })});
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
             const j = await r.json();
-            if (j.score == null) continue;
+            const overall = j.overall_score != null ? j.overall_score : j.score;
+            if (overall == null) continue;
+            const st = j.status || 'BLOCKED';
             await db.from('products').update({
-              quality_score: j.score,
-              last_review_score: j.score,
-              last_review_status: j.status,
+              quality_score: overall, last_review_score: overall,
+              last_review_status: j.legacy_status || st,
               last_reviewed_at: new Date().toISOString(),
-              quality_notes: { issues: j.issues, recommendations: j.recommendations, checks: j.checks, ready: j.ready_to_publish, status: j.status }
+              last_verification_score: overall, last_verification_status: st,
+              quality_notes: { issues: j.issues, recommendations: j.recommendations, checks: j.checks, ready: j.ready_to_publish, status: st, sections: j.sections }
             }).eq('id', id);
             try {
-              await db.from('product_quality_reviews').insert({
-                product_id: id, score: j.score, status: j.status,
+              await db.from('product_verification_reports').insert({
+                product_id: id, overall_score: overall,
+                image_score: j.image_score, content_score: j.content_score,
+                specification_score: j.specification_score, seo_score: j.seo_score, business_score: j.business_score,
                 issues: j.issues || [], recommendations: j.recommendations || [],
-                checks: j.checks || {}, reviewer_label: 'ai_agent'
+                status: ['READY_TO_PUBLISH','MINOR_FIXES','NEEDS_IMPROVEMENT','BLOCKED'].includes(st) ? st : 'BLOCKED',
+                checks: j.checks || {}
               });
             } catch (_) {}
             n++;
+            if (j.ready_to_publish) ready++; else needs++;
           } catch (_) {}
         }
-        toast('مراجعة AI: ' + n + ' منتج');
+        toast(`تحقق AI: مكتمل ${n} · جاهز ${ready} · يحتاج إصلاح ${needs}`);
         VIEWS.products(v); return;
       }
       // Also notify API when session available (audit path)
@@ -675,7 +690,7 @@ VIEWS.products = async v => {
 
     const labels = {
       publish: 'نشر', unpublish: 'إلغاء النشر', update_category: 'تغيير التصنيف',
-      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI'
+      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI', ai_verify: 'تحقق AI'
     };
     if (!confirm(`تأكيد: ${labels[action] || action} على ${ids.length} منتج؟\nلا يمكن التراجع بسهولة.`)) return;
     runBulk(payload);
@@ -691,34 +706,62 @@ VIEWS.products = async v => {
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\\n') }, onSave: async d => { await db.from('products').update(fixImgs(d)).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
   const runReviewAndSave = async (row) => {
-    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_review', product: row })});
+    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
     const j = await r.json();
-    if (j.score == null) throw new Error(j.error || 'فشل المراجعة');
+    if (j.score == null && j.overall_score == null) throw new Error(j.error || 'فشل التحقق');
+    const overall = j.overall_score != null ? j.overall_score : j.score;
+    const st = j.status || j.legacy_status || 'BLOCKED';
     await db.from('products').update({
-      quality_score: j.score,
-      last_review_score: j.score,
-      last_review_status: j.status,
+      quality_score: overall,
+      last_review_score: overall,
+      last_review_status: j.legacy_status || st,
       last_reviewed_at: new Date().toISOString(),
-      quality_notes: { issues: j.issues, recommendations: j.recommendations, checks: j.checks, ready: j.ready_to_publish, status: j.status }
+      last_verification_score: overall,
+      last_verification_status: st,
+      quality_notes: {
+        issues: j.issues, recommendations: j.recommendations, checks: j.checks,
+        ready: j.ready_to_publish, status: st, sections: j.sections
+      }
     }).eq('id', row.id);
     try {
       await db.from('product_quality_reviews').insert({
-        product_id: row.id, score: j.score, status: j.status,
+        product_id: row.id, score: overall, status: j.legacy_status || 'not_ready',
         issues: j.issues || [], recommendations: j.recommendations || [],
-        checks: j.checks || {}, reviewer_label: 'ai_agent'
+        checks: j.checks || {}, reviewer_label: 'verification_agent'
+      });
+    } catch (_) {}
+    try {
+      await db.from('product_verification_reports').insert({
+        product_id: row.id,
+        overall_score: overall,
+        image_score: j.image_score, content_score: j.content_score,
+        specification_score: j.specification_score, seo_score: j.seo_score,
+        business_score: j.business_score,
+        issues: j.issues || [], recommendations: j.recommendations || [],
+        status: ['READY_TO_PUBLISH','MINOR_FIXES','NEEDS_IMPROVEMENT','BLOCKED'].includes(st) ? st : 'BLOCKED',
+        checks: j.checks || {}, agent: 'tiqnora_product_verification_agent'
       });
     } catch (_) {}
     return j;
   };
 
   const showReviewModal = (row, j) => {
+    const overall = j.overall_score != null ? j.overall_score : j.score;
     const issues = (j.issues || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>لا مشاكل حرجة</li>';
     const recs = (j.recommendations || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>—</li>';
+    const sec = j.sections || {};
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-    ov.innerHTML = `<div class="card" style="width:min(520px,100%);max-height:90vh;overflow:auto">
-      <div class="card-head"><h2>مراجعة AI — ${esc(row.name_ar)}</h2><button class="btn-sm" id="rv-close">إغلاق</button></div>
-      <p><b>Score:</b> ${j.score}/100 · <span class="pill ${j.ready_to_publish?'ok':'warn'}">${esc(j.status||'')}</span></p>
+    ov.innerHTML = `<div class="card" style="width:min(560px,100%);max-height:90vh;overflow:auto">
+      <div class="card-head"><h2>AI Verification — ${esc(row.name_ar)}</h2><button class="btn-sm" id="rv-close">إغلاق</button></div>
+      <p><b>Overall Score:</b> ${overall}/100 · <span class="pill ${j.ready_to_publish?'ok':'warn'}">${esc(j.status||'')}</span></p>
+      <div class="grid-stats" style="margin:12px 0">
+        <div class="stat"><b>${j.image_score??sec.images??'—'}</b><span>Images</span></div>
+        <div class="stat"><b>${j.content_score??sec.content??'—'}</b><span>Content</span></div>
+        <div class="stat"><b>${j.specification_score??sec.specifications??'—'}</b><span>Specs</span></div>
+        <div class="stat"><b>${j.seo_score??sec.seo??'—'}</b><span>SEO</span></div>
+        <div class="stat"><b>${j.business_score??sec.business??'—'}</b><span>Business</span></div>
+      </div>
       <p><b>Ready to publish:</b> ${j.ready_to_publish ? 'YES' : 'NO'}</p>
       <h3>Issues</h3><ul>${issues}</ul>
       <h3>Recommendations</h3><ul>${recs}</ul>
@@ -738,7 +781,7 @@ VIEWS.products = async v => {
       return toast(e.message || 'فشلت المراجعة');
     }
     if (!j.ready_to_publish || (j.score != null && j.score < 75)) {
-      const msg = `المنتج يحتاج تحسين قبل النشر (Score: ${j.score}/100).\n\nالمشاكل:\n- ${(j.issues||[]).slice(0,5).join('\n- ') || 'جودة منخفضة'}\n\nهل تريد التجاوز يدوياً مع تسجيل التدقيق؟`;
+      const msg = `Product requires AI verification improvement — المنتج يحتاج تحسين قبل النشر (Score: ${j.score}/100).\n\nالمشاكل:\n- ${(j.issues||[]).slice(0,5).join('\n- ') || 'جودة منخفضة'}\n\nهل تريد التجاوز يدوياً مع تسجيل التدقيق؟`;
       if (!confirm(msg)) {
         showReviewModal(row, j);
         return;
