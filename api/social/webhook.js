@@ -16,9 +16,13 @@ function safeEqualText(a, b) {
 }
 
 function validMetaSignature(req, rawBody) {
-  if (!process.env.META_APP_SECRET) return false;
-  const supplied = String(req.headers['x-hub-signature-256'] || '');
-  const expected = `sha256=${createHmac('sha256', process.env.META_APP_SECRET).update(rawBody).digest('hex')}`;
+  // Environment-variable editors can accidentally preserve a trailing newline
+  // or surrounding whitespace. Meta app secrets themselves do not contain
+  // whitespace, so normalize only the secret — never the signed request body.
+  const secret = String(process.env.META_APP_SECRET || '').trim();
+  if (!secret) return false;
+  const supplied = String(req.headers['x-hub-signature-256'] || '').trim();
+  const expected = `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
   return safeEqualText(supplied, expected);
 }
 
@@ -536,9 +540,19 @@ export default async function handler(req, res) {
   }
   if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
 
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const rawBody = Buffer.concat(chunks);
+  // HMAC verification must use the exact bytes Meta sent. Prefer a runtime-
+  // supplied rawBody when available; otherwise read the untouched request
+  // stream because bodyParser is disabled above.
+  let rawBody;
+  if (Buffer.isBuffer(req.rawBody)) {
+    rawBody = req.rawBody;
+  } else if (typeof req.rawBody === 'string') {
+    rawBody = Buffer.from(req.rawBody);
+  } else {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    rawBody = Buffer.concat(chunks);
+  }
   const adapter = getAdapter(platform);
   const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody) : adapter.verify(req);
   if (!verified) {
