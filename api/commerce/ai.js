@@ -286,30 +286,108 @@ async function handleSuppliersGet(action) {
 
 
 function computeQualityScore(p) {
+  const issues = [];
+  const recommendations = [];
+  const checks = {};
   let score = 0;
-  const notes = [];
+
+  // —— 1. Images (max 25)
   const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : [];
-  if (imgs.length >= 1) score += 15; else notes.push('no_images');
-  if (imgs.length >= 2) score += 10;
-  if (imgs.length >= 3) score += 5;
-  if (p.image_source && p.image_source !== 'placeholder') score += 5;
-  if ((p.description_ar || '').length >= 80) score += 15; else notes.push('short_description');
-  if ((p.description_en || '').length >= 40) score += 5;
+  checks.main_image = imgs.length >= 1;
+  checks.gallery_min = imgs.length >= 2;
+  checks.image_source = !!(p.image_source && String(p.image_source).toLowerCase() !== 'placeholder');
+  checks.media_approved = p.media_status === 'ready' || p.media_status === 'approved';
+  checks.not_placeholder_meta = !(p.specifications && p.specifications.image_status === 'placeholder_reuse_pending_official');
+  if (checks.main_image) score += 12; else { issues.push('لا توجد صورة رئيسية'); recommendations.push('أضف صورة رسمية من المصنّع أو المورد'); }
+  if (checks.gallery_min) score += 6; else if (imgs.length === 1) { recommendations.push('أضف صورتين إضافيتين على الأقل للمعرض'); }
+  else score += 0;
+  if (imgs.length >= 3) score += 3;
+  if (checks.image_source) score += 2; else { issues.push('مصدر الصورة غير محدد أو placeholder'); recommendations.push('حدّد image_source: manufacturer / supplier / admin'); }
+  if (checks.not_placeholder_meta) score += 2; else { issues.push('الصورة ما زالت placeholder'); recommendations.push('استبدل بصور رسمية واعتمدها في مدير الوسائط'); }
+
+  // —— 2. Product information (max 25)
+  checks.title_ar = !!(p.name_ar && String(p.name_ar).trim().length >= 3);
+  checks.title_en = !!(p.name_en && String(p.name_en).trim().length >= 2);
+  checks.desc_ar = (p.description_ar || '').length >= 80;
+  checks.desc_en = (p.description_en || '').length >= 40;
+  checks.brand = !!(p.brand_id || p.brand);
+  checks.category = !!(p.category_id || p.category);
+  checks.sku = !!(p.sku && String(p.sku).trim());
+  if (checks.title_ar) score += 5; else issues.push('عنوان عربي ناقص');
+  if (checks.title_en) score += 3; else issues.push('عنوان إنجليزي ناقص');
+  if (checks.desc_ar) score += 7; else { issues.push('الوصف العربي قصير أو فارغ'); recommendations.push('اكتب وصفاً ≥80 حرفاً أو استخدم SEO AI'); }
+  if (checks.desc_en) score += 3; else recommendations.push('أضف وصفاً إنجليزياً');
+  if (checks.brand) score += 3; else issues.push('لم تُحدد الماركة');
+  if (checks.category) score += 2; else issues.push('لم يُحدد التصنيف');
+  if (checks.sku) score += 2; else issues.push('SKU مفقود');
+
+  // —— 3. Specs (max 15)
   const specs = p.specifications || {};
   const hasSpecs = specs.specs && typeof specs.specs === 'object' && Object.keys(specs.specs).length > 0;
   const hasBenefits = Array.isArray(specs.benefits_ar) && specs.benefits_ar.length > 0;
-  const hasFaq = Array.isArray(specs.faq) && specs.faq.length > 0;
-  if (hasSpecs) score += 15; else notes.push('missing_specs');
-  if (hasBenefits) score += 5;
-  if (hasFaq) score += 10; else notes.push('missing_faq');
-  if (p.seo_title_ar && p.seo_description_ar) score += 15; else notes.push('missing_seo');
-  if (p.keywords_ar) score += 5;
-  if (p.category_id) score += 5; else notes.push('missing_category');
-  if (p.brand_id) score += 5; else notes.push('missing_brand');
-  if (p.sku) score += 5;
+  const hasFaq = Array.isArray(specs.faq) && specs.faq.length >= 2;
+  checks.specs = !!hasSpecs;
+  checks.benefits = !!hasBenefits;
+  checks.faq = !!hasFaq;
+  if (hasSpecs) score += 8; else { issues.push('المواصفات التقنية مفقودة'); recommendations.push('أضف مواصفات تقنية واقعية للفئة'); }
+  if (hasBenefits) score += 3; else recommendations.push('أضف فوائد المنتج');
+  if (hasFaq) score += 4; else { issues.push('FAQ ناقص (يُفضّل سؤالين فأكثر)'); recommendations.push('ولّد FAQ عبر SEO AI'); }
+
+  // —— 4. SEO (max 20)
+  checks.seo_title = !!(p.seo_title_ar && String(p.seo_title_ar).length >= 10);
+  checks.seo_desc = !!(p.seo_description_ar && String(p.seo_description_ar).length >= 40);
+  checks.keywords = !!(p.keywords_ar && String(p.keywords_ar).trim());
+  checks.schema_ready = !!(checks.seo_title && checks.seo_desc && checks.title_ar && checks.main_image);
+  if (checks.seo_title) score += 7; else issues.push('SEO title مفقود');
+  if (checks.seo_desc) score += 7; else issues.push('Meta description مفقود');
+  if (checks.keywords) score += 3; else recommendations.push('أضف كلمات مفتاحية عربية');
+  if (checks.schema_ready) score += 3;
+
+  // —— 5. Commerce (max 15)
+  const price = Number(p.price) || 0;
+  const cost = Number(p.cost_price);
+  checks.price = price > 0;
+  checks.cost = Number.isFinite(cost) && cost > 0;
+  checks.margin = checks.price && checks.cost && price > cost;
+  const marginPct = checks.margin ? ((price - cost) / price) * 100 : null;
+  checks.vat_note = true; // informational
+  checks.supplier = !!(p.supplier_name && String(p.supplier_name).trim());
+  if (checks.price) score += 5; else issues.push('سعر البيع غير صالح');
+  if (checks.cost) score += 4; else { issues.push('سعر التكلفة مفقود'); recommendations.push('أدخل cost_price لحساب الهامش'); }
+  if (checks.margin) score += 3; else if (checks.price && checks.cost) issues.push('الهامش سالب أو صفر');
+  if (checks.supplier) score += 3; else recommendations.push('عيّن مورداً للمنتج');
+
   score = Math.max(0, Math.min(100, Math.round(score)));
-  const ready = score >= 75 && imgs.length >= 1 && p.seo_title_ar && p.description_ar;
-  return { score, ready_to_publish: !!ready, notes, checks: { images: imgs.length, hasSpecs, hasBenefits, hasFaq, hasSeo: !!(p.seo_title_ar && p.seo_description_ar) } };
+  let status = 'not_ready';
+  if (score >= 90) status = 'ready_to_publish';
+  else if (score >= 75) status = 'needs_minor_review';
+  else if (score >= 50) status = 'needs_improvement';
+  else status = 'not_ready';
+
+  const ready_to_publish = score >= 75 && checks.main_image && checks.title_ar && checks.seo_title;
+  return {
+    score,
+    status,
+    ready_to_publish: !!ready_to_publish,
+    publish_blocked: !ready_to_publish,
+    issues,
+    recommendations,
+    notes: issues,
+    checks: {
+      ...checks,
+      images_count: imgs.length,
+      margin_pct: marginPct != null ? Math.round(marginPct * 10) / 10 : null,
+      price,
+      cost: checks.cost ? cost : null,
+    },
+    bands: {
+      '90-100': 'Ready to Publish',
+      '75-89': 'Needs Minor Review',
+      '50-74': 'Needs Improvement',
+      '0-49': 'Not Ready',
+    },
+    auto_publish: false,
+  };
 }
 
 async function handleProductSeo(body) {
@@ -375,7 +453,7 @@ export default async function handler(req, res) {
   const mode = String(body.mode || body.action || 'research').toLowerCase();
 
   // Product Scout
-  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score')) {
+  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review')) {
     try {
       const out = await handleScout(body);
       return json(res, out.status, out.payload);
@@ -393,10 +471,15 @@ export default async function handler(req, res) {
     }
   }
 
-  if (mode === 'quality_score') {
+  if (mode === 'quality_score' || mode === 'product_review' || mode === 'ai_review') {
     const product = body.product || body;
     const result = computeQualityScore(product);
-    return json(res, 200, { ...result, auto_publish: false });
+    return json(res, 200, {
+      ...result,
+      agent: 'tiqnora_product_review_agent',
+      auto_publish: false,
+      disclaimer: 'مراجعة آلية — النشر يتطلب اعتماد مشرف. لا نشر تلقائي.',
+    });
   }
 
   // Supplier queue / log actions (lightweight, no secrets)

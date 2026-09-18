@@ -396,6 +396,7 @@ VIEWS.products = async v => {
         <option value="change_status">تغيير الحالة</option>
         <option value="generate_seo">توليد محتوى SEO (AI)</option>
         <option value="quality_score">حساب درجة الجودة</option>
+        <option value="ai_review">مراجعة AI للمنتجات المحددة</option>
       </select>
       <button class="btn-primary" id="bulk-run">تنفيذ</button>
     </div>
@@ -511,7 +512,7 @@ VIEWS.products = async v => {
       <td>${money(p.price)}</td>
       <td>${(p.images||[]).length} ${p.media_status?`<small>${esc(p.media_status)}</small>`:''}</td>
       <td><span class="pill ${p.is_active ? 'ok' : 'muted'}">${p.is_active ? 'ظاهر' : 'مسودة'}</span></td>
-      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-media="${p.id}">وسائط</button><button class="btn-sm" data-seo="${p.id}">SEO AI</button><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
+      <td class="actions">${!p.is_active?`<button class="btn-sm btn-primary" data-publish="${p.id}">اعتماد</button>`:`<button class="btn-sm" data-unpublish="${p.id}">إخفاء</button>`}<button class="btn-sm" data-review="${p.id}">مراجعة AI</button><button class="btn-sm" data-media="${p.id}">وسائط</button><button class="btn-sm" data-seo="${p.id}">SEO AI</button><button class="btn-sm" data-edit="${p.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${p.id}">حذف</button></td>
     </tr>`).join('')
   );
 
@@ -604,19 +605,33 @@ VIEWS.products = async v => {
         }
         toast(`SEO: نجح ${ok} · فشل ${fail} (حد 25/مرة)`);
         VIEWS.products(v); return;
-      } else if (payload.action === 'quality_score') {
+      } else if (payload.action === 'quality_score' || payload.action === 'ai_review') {
+        let n = 0;
         for (const id of ids.slice(0, 100)) {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: row })});
+            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_review', product: row })});
             const j = await r.json();
-            if (j.score != null) {
-              await db.from('products').update({ quality_score: j.score, quality_notes: { notes: j.notes, checks: j.checks, ready: j.ready_to_publish } }).eq('id', id);
-            }
+            if (j.score == null) continue;
+            await db.from('products').update({
+              quality_score: j.score,
+              last_review_score: j.score,
+              last_review_status: j.status,
+              last_reviewed_at: new Date().toISOString(),
+              quality_notes: { issues: j.issues, recommendations: j.recommendations, checks: j.checks, ready: j.ready_to_publish, status: j.status }
+            }).eq('id', id);
+            try {
+              await db.from('product_quality_reviews').insert({
+                product_id: id, score: j.score, status: j.status,
+                issues: j.issues || [], recommendations: j.recommendations || [],
+                checks: j.checks || {}, reviewer_label: 'ai_agent'
+              });
+            } catch (_) {}
+            n++;
           } catch (_) {}
         }
-        toast('تم تحديث درجات الجودة');
+        toast('مراجعة AI: ' + n + ' منتج');
         VIEWS.products(v); return;
       }
       // Also notify API when session available (audit path)
@@ -660,7 +675,7 @@ VIEWS.products = async v => {
 
     const labels = {
       publish: 'نشر', unpublish: 'إلغاء النشر', update_category: 'تغيير التصنيف',
-      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة'
+      assign_supplier: 'تعيين المورد', add_tags: 'إضافة وسوم', change_status: 'تغيير الحالة', generate_seo: 'SEO AI', quality_score: 'درجة الجودة', ai_review: 'مراجعة AI'
     };
     if (!confirm(`تأكيد: ${labels[action] || action} على ${ids.length} منتج؟\nلا يمكن التراجع بسهولة.`)) return;
     runBulk(payload);
@@ -675,10 +690,76 @@ VIEWS.products = async v => {
   $('#add').onclick = () => crudModal({ title: 'منتج جديد', fields: F, onSave: async d => { await db.from('products').insert(fixImgs(d)); log('product.create', 'products'); toast('تمت إضافة المنتج'); VIEWS.products(v); } });
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\\n') }, onSave: async d => { await db.from('products').update(fixImgs(d)).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
+  const runReviewAndSave = async (row) => {
+    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_review', product: row })});
+    const j = await r.json();
+    if (j.score == null) throw new Error(j.error || 'فشل المراجعة');
+    await db.from('products').update({
+      quality_score: j.score,
+      last_review_score: j.score,
+      last_review_status: j.status,
+      last_reviewed_at: new Date().toISOString(),
+      quality_notes: { issues: j.issues, recommendations: j.recommendations, checks: j.checks, ready: j.ready_to_publish, status: j.status }
+    }).eq('id', row.id);
+    try {
+      await db.from('product_quality_reviews').insert({
+        product_id: row.id, score: j.score, status: j.status,
+        issues: j.issues || [], recommendations: j.recommendations || [],
+        checks: j.checks || {}, reviewer_label: 'ai_agent'
+      });
+    } catch (_) {}
+    return j;
+  };
+
+  const showReviewModal = (row, j) => {
+    const issues = (j.issues || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>لا مشاكل حرجة</li>';
+    const recs = (j.recommendations || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>—</li>';
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = `<div class="card" style="width:min(520px,100%);max-height:90vh;overflow:auto">
+      <div class="card-head"><h2>مراجعة AI — ${esc(row.name_ar)}</h2><button class="btn-sm" id="rv-close">إغلاق</button></div>
+      <p><b>Score:</b> ${j.score}/100 · <span class="pill ${j.ready_to_publish?'ok':'warn'}">${esc(j.status||'')}</span></p>
+      <p><b>Ready to publish:</b> ${j.ready_to_publish ? 'YES' : 'NO'}</p>
+      <h3>Issues</h3><ul>${issues}</ul>
+      <h3>Recommendations</h3><ul>${recs}</ul>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#rv-close').onclick = () => ov.remove();
+  };
+
   $$('[data-publish]').forEach(b => b.onclick = async () => {
-    if (!confirm('اعتماد نشر هذا المنتج في المتجر؟ تأكد من الصورة الرسمية والمواصفات.')) return;
-    await db.from('products').update({ is_active: true }).eq('id', b.dataset.publish);
-    toast('تم النشر — ظاهر في المتجر'); VIEWS.products(v);
+    const row = rows.find(r => r.id === b.dataset.publish);
+    if (!row) return;
+    toast('جارٍ مراجعة الجودة قبل النشر…');
+    let j;
+    try {
+      j = await runReviewAndSave(row);
+    } catch (e) {
+      return toast(e.message || 'فشلت المراجعة');
+    }
+    if (!j.ready_to_publish || (j.score != null && j.score < 75)) {
+      const msg = `المنتج يحتاج تحسين قبل النشر (Score: ${j.score}/100).\n\nالمشاكل:\n- ${(j.issues||[]).slice(0,5).join('\n- ') || 'جودة منخفضة'}\n\nهل تريد التجاوز يدوياً مع تسجيل التدقيق؟`;
+      if (!confirm(msg)) {
+        showReviewModal(row, j);
+        return;
+      }
+      const note = prompt('سبب التجاوز (إلزامي للتسجيل):') || '';
+      if (!note.trim()) return toast('يلزم سبب للتجاوز');
+      try {
+        await db.from('product_quality_reviews').insert({
+          product_id: row.id, score: j.score, status: j.status || 'not_ready',
+          issues: j.issues || [], recommendations: j.recommendations || [],
+          checks: j.checks || {}, reviewer_label: 'admin_override',
+          override_publish: true, override_note: note.trim()
+        });
+      } catch (_) {}
+      try { log && log('product.publish_override', 'products', row.id); } catch (_) {}
+    } else if (!confirm(`Score ${j.score}/100 — جاهز للنشر. تأكيد الاعتماد؟`)) {
+      return;
+    }
+    await db.from('products').update({ is_active: true }).eq('id', row.id);
+    toast('تم النشر — ظاهر في المتجر');
+    VIEWS.products(v);
   });
   $$('[data-unpublish]').forEach(b => b.onclick = async () => {
     if (!confirm('إخفاء المنتج من المتجر؟')) return;
@@ -778,6 +859,16 @@ VIEWS.products = async v => {
     };
   };
 
+  $$('[data-review]').forEach(b => b.onclick = async () => {
+    const row = rows.find(r => r.id === b.dataset.review);
+    if (!row) return;
+    toast('مراجعة AI…');
+    try {
+      const j = await runReviewAndSave(row);
+      showReviewModal(row, j);
+      VIEWS.products(v);
+    } catch (e) { toast(e.message || 'فشل'); }
+  });
   $$('[data-media]').forEach(b => b.onclick = () => openMediaManager(b.dataset.media));
 
   $$('[data-seo]').forEach(b => b.onclick = async () => {
