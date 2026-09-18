@@ -541,7 +541,19 @@ export default async function handler(req, res) {
   const rawBody = Buffer.concat(chunks);
   const adapter = getAdapter(platform);
   const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody) : adapter.verify(req);
-  if (!verified) return send(res, 401, { error: 'Invalid webhook signature' });
+  if (!verified) {
+    if (['meta', 'whatsapp'].includes(platform)) {
+      const signature = String(req.headers['x-hub-signature-256'] || '');
+      console.warn('Meta webhook signature verification failed', {
+        signature_present: Boolean(signature),
+        signature_length: signature.length,
+        signature_format_ok: signature.startsWith('sha256='),
+        app_secret_present: Boolean(process.env.META_APP_SECRET),
+        raw_body_bytes: rawBody.length
+      });
+    }
+    return send(res, 401, { error: 'Invalid webhook signature' });
+  }
 
   try {
     const payload = JSON.parse(rawBody.toString('utf8') || '{}');
