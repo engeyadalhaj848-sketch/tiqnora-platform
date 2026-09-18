@@ -1,11 +1,12 @@
 -- Expand Tiqnora tech marketplace catalog (categories, brands, seed products)
+-- Fixed: avoid text→content_status cast errors (enum-safe inserts)
 -- Does not change orders/checkout/admin architecture.
 
--- Brands
+-- Brands (status cast outside VALUES)
 insert into public.brands (slug, name, status, sort_order)
 select v.slug, v.name, 'published'::public.content_status, v.sort_order
 from (values
-  ('tiqnora', 'Tiqnora', 1),
+  ('tiqnora'::text, 'Tiqnora'::text, 1),
   ('tp-link', 'TP-Link', 2),
   ('hikvision', 'Hikvision', 3),
   ('hp', 'HP', 4),
@@ -14,64 +15,125 @@ from (values
 ) as v(slug, name, sort_order)
 where not exists (select 1 from public.brands b where b.slug = v.slug);
 
--- Categories (tech marketplace)
+-- Categories: status is NOT inside VALUES — literal enum in SELECT list (same pattern as migration 020)
 insert into public.categories (
   slug, type, name_ar, name_en, description_ar, description_en,
   sort_order, status, seo_title_ar, seo_title_en, seo_description_ar, seo_description_en, keywords_ar, keywords_en
 )
 select
-  v.slug, v.type, v.name_ar, v.name_en, v.description_ar, v.description_en,
-  v.sort_order, v.status::public.content_status, v.seo_title_ar, v.seo_title_en,
-  v.seo_description_ar, v.seo_description_en, v.keywords_ar, v.keywords_en
+  v.slug,
+  'product',
+  v.name_ar,
+  v.name_en,
+  v.description_ar,
+  v.description_en,
+  v.sort_order,
+  'published'::public.content_status,
+  v.seo_title_ar,
+  v.seo_title_en,
+  v.seo_description_ar,
+  v.seo_description_en,
+  v.keywords_ar,
+  v.keywords_en
 from (values
-  ('computers-laptops', 'product', 'أجهزة الكمبيوتر واللابتوب', 'Computers & Laptops',
-   'لابتوبات وأجهزة مكتبية للأعمال والمنازل.', 'Laptops and desktops for business and home.',
-   10, 'published',
-   'أجهزة كمبيوتر ولابتوب | متجر Tiqnora AI', 'Computers & Laptops | Tiqnora AI Store',
-   'تسوق لابتوبات وأجهزة كمبيوتر للأعمال في السعودية مع شحن ودعم.', 'Shop business computers and laptops in Saudi Arabia.',
-   'لابتوب، كمبيوتر، مكتبي', 'laptop, computer, desktop'),
-  ('networking-equipment', 'product', 'معدات الشبكات', 'Networking Equipment',
-   'راوترات، سويتشات، وكابلات للشبكات المنزلية والمكتبية.', 'Routers, switches and cabling for home and office networks.',
-   20, 'published',
-   'معدات شبكات | متجر Tiqnora AI', 'Networking Equipment | Tiqnora AI Store',
-   'معدات شبكات وواي فاي للشركات والمنازل في السعودية.', 'Networking and WiFi gear for Saudi homes and offices.',
-   'سويتش، راوتر، شبكة', 'switch, router, network'),
-  ('cctv-security', 'product', 'أنظمة المراقبة والأمن', 'CCTV & Security Systems',
-   'كاميرات وأنظمة تسجيل وحلول أمن للمواقع.', 'Cameras, recorders and security solutions for sites.',
-   30, 'published',
-   'كاميرات مراقبة وأنظمة أمن | Tiqnora AI', 'CCTV & Security | Tiqnora AI Store',
-   'أنظمة مراقبة وأمن للمنازل والشركات في السعودية.', 'CCTV and security systems for Saudi homes and businesses.',
-   'كاميرا، NVR، أمن', 'cctv, nvr, security'),
-  ('printers-accessories', 'product', 'الطابعات والملحقات', 'Printers & Accessories',
-   'طابعات ليزر وحبر وملحقات مكتبية.', 'Laser and ink printers with office accessories.',
-   40, 'published',
-   'طابعات وملحقات | متجر Tiqnora AI', 'Printers & Accessories | Tiqnora AI Store',
-   'طابعات ومستلزمات طباعة للمكاتب في السعودية.', 'Printers and supplies for Saudi offices.',
-   'طابعة، حبر، تونر', 'printer, ink, toner'),
-  ('smart-office', 'product', 'تقنيات المكتب الذكي', 'Smart Office Technology',
-   'أجهزة اجتماعات وإنتاجية للمكتب الحديث.', 'Meeting and productivity devices for modern offices.',
-   50, 'published',
-   'تقنيات مكتب ذكي | Tiqnora AI', 'Smart Office Technology | Tiqnora AI Store',
-   'حلول مكتب ذكي واجتماعات عن بعد في السعودية.', 'Smart office and meeting solutions in Saudi Arabia.',
-   'مؤتمرات، مكتب، إنتاجية', 'conference, office, productivity'),
-  ('ai-digital-solutions', 'product', 'حلول رقمية بالذكاء الاصطناعي', 'AI Digital Solutions',
-   'باقات رقمية: دردشة ذكية، أتمتة، ومحتوى تسويقي.', 'Digital packages: AI chat, automation and marketing content.',
-   60, 'published',
-   'حلول AI رقمية | Tiqnora AI', 'AI Digital Solutions | Tiqnora AI',
-   'باقات ذكاء اصطناعي وأتمتة للشركات في السعودية.', 'AI and automation packages for Saudi businesses.',
-   'ذكاء اصطناعي، أتمتة، شات', 'AI, automation, chatbot')
-) as v(slug, type, name_ar, name_en, description_ar, description_en, sort_order, status,
-      seo_title_ar, seo_title_en, seo_description_ar, seo_description_en, keywords_ar, keywords_en)
+  (
+    'computers-laptops',
+    'أجهزة الكمبيوتر واللابتوب',
+    'Computers & Laptops',
+    'لابتوبات وأجهزة مكتبية للأعمال والمنازل.',
+    'Laptops and desktops for business and home.',
+    10,
+    'أجهزة كمبيوتر ولابتوب | متجر Tiqnora AI',
+    'Computers & Laptops | Tiqnora AI Store',
+    'تسوق لابتوبات وأجهزة كمبيوتر للأعمال في السعودية مع شحن ودعم.',
+    'Shop business computers and laptops in Saudi Arabia.',
+    'لابتوب، كمبيوتر، مكتبي',
+    'laptop, computer, desktop'
+  ),
+  (
+    'networking-equipment',
+    'معدات الشبكات',
+    'Networking Equipment',
+    'راوترات، سويتشات، وكابلات للشبكات المنزلية والمكتبية.',
+    'Routers, switches and cabling for home and office networks.',
+    20,
+    'معدات شبكات | متجر Tiqnora AI',
+    'Networking Equipment | Tiqnora AI Store',
+    'معدات شبكات وواي فاي للشركات والمنازل في السعودية.',
+    'Networking and WiFi gear for Saudi homes and offices.',
+    'سويتش، راوتر، شبكة',
+    'switch, router, network'
+  ),
+  (
+    'cctv-security',
+    'أنظمة المراقبة والأمن',
+    'CCTV & Security Systems',
+    'كاميرات وأنظمة تسجيل وحلول أمن للمواقع.',
+    'Cameras, recorders and security solutions for sites.',
+    30,
+    'كاميرات مراقبة وأنظمة أمن | Tiqnora AI',
+    'CCTV & Security | Tiqnora AI Store',
+    'أنظمة مراقبة وأمن للمنازل والشركات في السعودية.',
+    'CCTV and security systems for Saudi homes and businesses.',
+    'كاميرا، NVR، أمن',
+    'cctv, nvr, security'
+  ),
+  (
+    'printers-accessories',
+    'الطابعات والملحقات',
+    'Printers & Accessories',
+    'طابعات ليزر وحبر وملحقات مكتبية.',
+    'Laser and ink printers with office accessories.',
+    40,
+    'طابعات وملحقات | متجر Tiqnora AI',
+    'Printers & Accessories | Tiqnora AI Store',
+    'طابعات ومستلزمات طباعة للمكاتب في السعودية.',
+    'Printers and supplies for Saudi offices.',
+    'طابعة، حبر، تونر',
+    'printer, ink, toner'
+  ),
+  (
+    'smart-office',
+    'تقنيات المكتب الذكي',
+    'Smart Office Technology',
+    'أجهزة اجتماعات وإنتاجية للمكتب الحديث.',
+    'Meeting and productivity devices for modern offices.',
+    50,
+    'تقنيات مكتب ذكي | Tiqnora AI',
+    'Smart Office Technology | Tiqnora AI Store',
+    'حلول مكتب ذكي واجتماعات عن بعد في السعودية.',
+    'Smart office and meeting solutions in Saudi Arabia.',
+    'مؤتمرات، مكتب، إنتاجية',
+    'conference, office, productivity'
+  ),
+  (
+    'ai-digital-solutions',
+    'حلول رقمية بالذكاء الاصطناعي',
+    'AI Digital Solutions',
+    'باقات رقمية: دردشة ذكية، أتمتة، ومحتوى تسويقي.',
+    'Digital packages: AI chat, automation and marketing content.',
+    60,
+    'حلول AI رقمية | Tiqnora AI',
+    'AI Digital Solutions | Tiqnora AI',
+    'باقات ذكاء اصطناعي وأتمتة للشركات في السعودية.',
+    'AI and automation packages for Saudi businesses.',
+    'ذكاء اصطناعي، أتمتة، شات',
+    'AI, automation, chatbot'
+  )
+) as v(
+  slug, name_ar, name_en, description_ar, description_en, sort_order,
+  seo_title_ar, seo_title_en, seo_description_ar, seo_description_en, keywords_ar, keywords_en
+)
 where not exists (select 1 from public.categories c where c.slug = v.slug);
 
--- Update SEO on existing matching categories
 update public.categories set
-  name_ar = coalesce(nullif(name_ar,''), name_ar),
   status = 'published'::public.content_status,
   updated_at = now()
-where slug in ('computers','computers-laptops','networking-equipment','cctv-cameras','cctv-security','printers','printers-accessories');
+where slug in (
+  'computers','computers-laptops','networking-equipment','cctv-cameras','cctv-security',
+  'printers','printers-accessories','smart-office','ai-digital-solutions'
+);
 
--- Alias: keep old slugs published; new products use new slugs
 update public.categories set
   seo_title_ar = coalesce(seo_title_ar, 'أجهزة الكمبيوتر | متجر Tiqnora AI'),
   seo_description_ar = coalesce(seo_description_ar, 'أجهزة كمبيوتر ولابتوب للأعمال في السعودية.'),
