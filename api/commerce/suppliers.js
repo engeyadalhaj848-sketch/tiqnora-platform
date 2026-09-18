@@ -63,7 +63,7 @@ export default async function handler(req, res) {
       if (action === 'status') {
         let suppliers = [];
         try {
-          suppliers = await sb('commerce_suppliers?select=id,provider,display_name,status,fulfillment_mode,last_synced_at,metadata&order=display_name');
+          suppliers = await sb('commerce_suppliers?select=id,provider,display_name,status,fulfillment_mode,last_synced_at,metadata,country,website,category,shipping_method,delivery_time_min_days,delivery_time_max_days,payment_terms,commission_pct,notes,supplier_type,api_connection_status&order=display_name');
         } catch (e) {
           return json(res, 200, {
             suppliers: [],
