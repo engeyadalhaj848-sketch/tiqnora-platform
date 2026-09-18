@@ -1,0 +1,134 @@
+/**
+ * Tiqnora supplier connectors — secrets only from process.env
+ * No auto-purchase. No auto-publish.
+ */
+
+function env(name) {
+  const v = process.env[name];
+  return v && String(v).trim() ? String(v).trim() : null;
+}
+
+function baseConnector(provider, envKeys) {
+  const configured = envKeys.every((k) => !!env(k));
+  return {
+    provider,
+    envKeys,
+    configured,
+    status: configured ? 'connected' : 'not_configured',
+    async connect() {
+      return this.testConnection();
+    },
+    async testConnection() {
+      if (!configured) {
+        return {
+          ok: false,
+          status: 'not_configured',
+          provider,
+          message: `Missing env: ${envKeys.filter((k) => !env(k)).join(', ')}`,
+          auto_purchase: false,
+        };
+      }
+      // Live ping reserved for when credentials + official API client are wired
+      return {
+        ok: true,
+        status: 'connected',
+        provider,
+        message: 'Credentials present in Vercel env — live API call not forced (manual sync)',
+        live_api: false,
+        auto_purchase: false,
+      };
+    },
+    async searchProducts(query = '', limit = 10) {
+      if (!configured) {
+        return { ok: false, status: 'not_configured', products: [], provider };
+      }
+      // Structured mock catalog for admin testing until live API is enabled
+      const q = String(query || 'tech').slice(0, 80);
+      const products = Array.from({ length: Math.min(limit, 5) }).map((_, i) => ({
+        supplier_product_id: `${provider}-demo-${i + 1}`,
+        title: `${q} sample ${i + 1} (${provider})`,
+        cost: 50 + i * 25,
+        currency: 'USD',
+        stock: 10 + i * 3,
+        shipping_estimate: provider === 'cj_dropshipping' ? '7-15 days' : '10-25 days',
+        images: [],
+        mock: true,
+      }));
+      return { ok: true, status: 'connected', products, provider, mock: true, auto_purchase: false };
+    },
+    async getProduct(supplierProductId) {
+      if (!configured) return { ok: false, status: 'not_configured', provider };
+      return {
+        ok: true,
+        provider,
+        product: {
+          supplier_product_id: supplierProductId,
+          title: `Product ${supplierProductId}`,
+          cost: 100,
+          stock: 20,
+          shipping_estimate: '7-20 days',
+          mock: true,
+        },
+        auto_purchase: false,
+      };
+    },
+    async getPrice(supplierProductId) {
+      const p = await this.getProduct(supplierProductId);
+      return {
+        ok: p.ok,
+        provider,
+        supplier_product_id: supplierProductId,
+        price: p.product?.cost ?? null,
+        currency: 'USD',
+        mock: true,
+      };
+    },
+    async getInventory(supplierProductId) {
+      const p = await this.getProduct(supplierProductId);
+      return {
+        ok: p.ok,
+        provider,
+        supplier_product_id: supplierProductId,
+        stock: p.product?.stock ?? 0,
+        mock: true,
+      };
+    },
+    async getShippingInfo(supplierProductId) {
+      return {
+        ok: configured,
+        provider,
+        supplier_product_id: supplierProductId,
+        estimate: configured ? '7-20 business days' : null,
+        status: configured ? 'connected' : 'not_configured',
+        mock: true,
+      };
+    },
+  };
+}
+
+export const CONNECTORS = {
+  cj_dropshipping: () => baseConnector('cj_dropshipping', ['CJ_API_KEY']),
+  aliexpress: () => baseConnector('aliexpress', ['ALIEXPRESS_API_KEY']),
+  alibaba: () => baseConnector('alibaba', ['ALIBABA_API_KEY']),
+  dsers: () => baseConnector('dsers', ['DSERS_API_KEY']),
+};
+
+export function getConnector(provider) {
+  const key = String(provider || '').toLowerCase().replace(/-/g, '_');
+  const factory = CONNECTORS[key];
+  if (!factory) return null;
+  return factory();
+}
+
+export function listConnectorStatuses() {
+  return Object.keys(CONNECTORS).map((provider) => {
+    const c = CONNECTORS[provider]();
+    return {
+      provider,
+      status: c.status,
+      configured: c.configured,
+      env_keys_required: c.envKeys,
+      env_keys_present: c.envKeys.filter((k) => !!env(k)),
+    };
+  });
+}

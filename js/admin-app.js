@@ -1122,6 +1122,25 @@ VIEWS.commerce = async v => {
     <div id="scmp-list" style="margin-top:12px"></div>
   </div>
 
+  <div class="card"><h2>Supplier Center — موصلات الموردين والمزامنة</h2>
+    <p class="card-desc">مفاتيح API في Vercel فقط. <b>لا شراء تلقائي · لا نشر تلقائي · لا تحديث أسعار بيع تلقائي</b>.</p>
+    <div id="sc-status" class="grid-stats" style="margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <select id="sc-provider">
+        <option value="cj_dropshipping">CJ Dropshipping</option>
+        <option value="aliexpress">AliExpress</option>
+        <option value="alibaba">Alibaba</option>
+        <option value="dsers">DSers</option>
+      </select>
+      <button class="btn-sm" id="sc-test">اختبار الاتصال</button>
+      <button class="btn-primary" id="sc-sync">مزامنة الآن</button>
+      <button class="btn-sm" id="sc-inv">فحص المخزون/الأسعار</button>
+      <button class="btn-sm" id="sc-logs">عرض السجلات</button>
+    </div>
+    <pre id="sc-out" style="white-space:pre-wrap;max-height:260px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    <div id="sc-log-table" style="margin-top:12px"></div>
+  </div>
+
   <div class="card"><h2>بحث AI للمنتجات</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <select id="ai-mode"><option value="research">بحث منتج</option><option value="profit">تحليل ربح</option><option value="market_compare">مقارنة سوق</option><option value="import_brief">موجز استيراد</option><option value="content">وصف SEO</option><option value="trend">ترند</option></select>
@@ -1510,6 +1529,55 @@ VIEWS.commerce = async v => {
       if (error) toast(error.message || 'فشل الحفظ — migration 033');
       else { toast('حُفظت المقارنة'); renderScmpList(); }
     } catch(e) { toast(e.message); }
+  };
+
+  // Supplier Center
+  const scApi = async (payload) => {
+    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'supplier_center', ...payload }) });
+    return r.json();
+  };
+  const refreshScStatus = async () => {
+    try {
+      const j = await scApi({ action: 'status' });
+      const list = j.connectors || [];
+      $('#sc-status').innerHTML = list.map(c => `<div class="stat"><b>${esc(c.status)}</b><span>${esc(c.provider)}</span></div>`).join('') || '<div class="stat"><b>—</b><span>لا بيانات</span></div>';
+    } catch(_) {}
+  };
+  refreshScStatus();
+  $('#sc-test').onclick = async () => {
+    const provider = $('#sc-provider').value;
+    $('#sc-out').textContent = 'اختبار ' + provider + '…';
+    const j = await scApi({ action: 'test', provider });
+    $('#sc-out').textContent = JSON.stringify(j, null, 2);
+    refreshScStatus();
+  };
+  $('#sc-sync').onclick = async () => {
+    if (!confirm('مزامنة منتجات المورد إلى جدول الربط فقط؟ لن تُنشر في المتجر تلقائياً.')) return;
+    const provider = $('#sc-provider').value;
+    $('#sc-out').textContent = 'مزامنة…';
+    const j = await scApi({ action: 'sync', provider, query: 'tech', limit: 5 });
+    $('#sc-out').textContent = JSON.stringify(j, null, 2);
+    toast(j.synced != null ? ('تمت مزامنة ' + j.synced + ' (مسودة ربط)') : (j.message || j.error || 'تم'));
+    refreshScStatus();
+  };
+  $('#sc-inv').onclick = async () => {
+    $('#sc-out').textContent = 'فحص مخزون/أسعار…';
+    const j = await scApi({ action: 'sync_inventory' });
+    $('#sc-out').textContent = JSON.stringify(j, null, 2);
+    toast('تنبيهات: ' + ((j.alerts&&j.alerts.length)||0) + ' (بدون تغيير أسعار البيع)');
+  };
+  $('#sc-logs').onclick = async () => {
+    const j = await scApi({ action: 'logs' });
+    const logs = j.logs || [];
+    $('#sc-log-table').innerHTML = tbl(['مورد','نوع','قديم','جديد','رسالة','وقت'], logs.map(l => `<tr>
+      <td>${esc(l.supplier||l.provider||'—')}</td>
+      <td>${esc(l.change_type)}</td>
+      <td>${esc(l.old_value||'—')}</td>
+      <td>${esc(l.new_value||'—')}</td>
+      <td>${esc(l.message||'—')}</td>
+      <td dir="ltr">${esc(String(l.created_at||'').slice(0,19))}</td>
+    </tr>`).join('')) || '<p style="color:var(--muted)">لا سجلات — نفّذ migration 034</p>';
+    $('#sc-out').textContent = 'Logs: ' + logs.length;
   };
 
   // AI agent

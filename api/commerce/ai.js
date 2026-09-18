@@ -1,3 +1,4 @@
+import { getConnector, listConnectorStatuses } from './connectors.js';
 /** Commerce AI + Product Scout + Suppliers status (single serverless fn — Hobby 12 limit) */
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -861,6 +862,280 @@ function handleSupplierCompare(body) {
   };
 }
 
+
+async function handleSupplierCenter(body = {}) {
+  const rest = async (path, opts) => {
+    const r = await rest(path, opts || {});
+    if (r && r.error) return { error: r.error, data: null };
+    return { data: r?.data ?? r, error: null };
+  };
+  const action = String(body.action || body.connector_action || 'status').toLowerCase();
+  const provider = String(body.provider || '').toLowerCase().replace(/-/g, '_');
+
+  if (action === 'status' || action === 'list') {
+    const statuses = listConnectorStatuses();
+    return {
+      status: 200,
+      payload: {
+        connectors: statuses,
+        auto_purchase: false,
+        auto_publish: false,
+        agent: 'tiqnora_supplier_connector_engine',
+        disclaimer: 'API keys only in Vercel env. No auto-purchase / no auto-publish.',
+      },
+    };
+  }
+
+  if (action === 'test' || action === 'test_connection') {
+    const c = getConnector(provider);
+    if (!c) return { status: 400, payload: { error: 'Unknown provider', provider } };
+    const result = await c.testConnection();
+    // log connection test
+    try {
+      await rest('inventory_sync_logs', {
+        method: 'POST',
+        body: {
+          supplier: provider,
+          provider,
+          change_type: 'connection',
+          old_value: null,
+          new_value: result.status,
+          message: result.message || null,
+          requires_review: !result.ok,
+        },
+        prefer: 'return=minimal',
+      });
+    } catch (_) {}
+    try {
+      await rest(
+        `supplier_connections?provider=eq.${encodeURIComponent(provider)}`,
+        {
+          method: 'PATCH',
+          body: {
+            status: result.status === 'connected' ? 'connected' : result.status === 'not_configured' ? 'not_configured' : 'error',
+            last_test_at: new Date().toISOString(),
+            last_error: result.ok ? null : (result.message || 'test failed'),
+            updated_at: new Date().toISOString(),
+          },
+          prefer: 'return=minimal',
+        }
+      );
+    } catch (_) {}
+    return { status: 200, payload: { ...result, auto_purchase: false } };
+  }
+
+  if (action === 'search') {
+    const c = getConnector(provider);
+    if (!c) return { status: 400, payload: { error: 'Unknown provider' } };
+    const result = await c.searchProducts(body.query || body.q || '', Number(body.limit) || 10);
+    return { status: 200, payload: { ...result, auto_purchase: false, auto_publish: false } };
+  }
+
+  if (action === 'sync' || action === 'sync_products') {
+    const c = getConnector(provider);
+    if (!c) return { status: 400, payload: { error: 'Unknown provider' } };
+    const test = await c.testConnection();
+    if (!test.ok) {
+      return {
+        status: 200,
+        payload: {
+          ok: false,
+          status: test.status,
+          message: test.message,
+          synced: 0,
+          auto_purchase: false,
+          auto_publish: false,
+        },
+      };
+    }
+    const search = await c.searchProducts(body.query || 'tech', Number(body.limit) || 5);
+    const products = search.products || [];
+    let mapped = 0;
+    const alerts = [];
+    for (const p of products) {
+      try {
+        // upsert mapping — never creates published store product
+        await rest('supplier_product_mapping?on_conflict=provider,supplier_product_id', {
+          method: 'POST',
+          body: {
+            provider,
+            supplier_product_id: String(p.supplier_product_id),
+            supplier_price: p.cost,
+            supplier_stock: p.stock,
+            shipping_estimate: p.shipping_estimate || null,
+            currency: p.currency || 'USD',
+            raw_snapshot: p,
+            last_checked: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          prefer: 'resolution=merge-duplicates,return=minimal',
+        });
+        mapped += 1;
+      } catch (_) {}
+    }
+    try {
+      await rest(
+        `supplier_connections?provider=eq.${encodeURIComponent(provider)}`,
+        {
+          method: 'PATCH',
+          body: {
+            status: 'connected',
+            last_sync_at: new Date().toISOString(),
+            products_synced: mapped,
+            sync_result: { mapped, mock: !!search.mock, at: new Date().toISOString() },
+            updated_at: new Date().toISOString(),
+          },
+          prefer: 'return=minimal',
+        }
+      );
+    } catch (_) {}
+    try {
+      await rest('inventory_sync_logs', {
+        method: 'POST',
+        body: {
+          supplier: provider,
+          provider,
+          change_type: 'sync',
+          old_value: null,
+          new_value: String(mapped),
+          message: `Sync mapped ${mapped} supplier products (staging only — not published)`,
+          requires_review: true,
+        },
+        prefer: 'return=minimal',
+      });
+    } catch (_) {}
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        provider,
+        synced: mapped,
+        products,
+        alerts,
+        mock: !!search.mock,
+        auto_purchase: false,
+        auto_publish: false,
+        disclaimer: 'Products staged in mapping only — admin approval required to publish.',
+      },
+    };
+  }
+
+  if (action === 'sync_inventory' || action === 'check_inventory') {
+    // Compare stored mapping prices/stock — generate alerts without changing product.price
+    let mappings = [];
+    try {
+      const mr = await rest(
+        `supplier_product_mapping?select=id,provider,supplier_product_id,tiqnora_product_id,supplier_price,supplier_stock&limit=50`
+      );
+      mappings = Array.isArray(mr.data) ? mr.data : [];
+    } catch (_) {
+      mappings = [];
+    }
+    const alerts = [];
+    for (const m of mappings) {
+      const c = getConnector(m.provider);
+      if (!c || !c.configured) continue;
+      const inv = await c.getInventory(m.supplier_product_id);
+      const price = await c.getPrice(m.supplier_product_id);
+      const newStock = inv.stock;
+      const newPrice = price.price;
+      if (m.supplier_stock != null && newStock != null && Number(newStock) !== Number(m.supplier_stock)) {
+        const changeType = Number(newStock) <= 0 ? 'availability' : 'stock';
+        alerts.push({
+          type: changeType,
+          mapping_id: m.id,
+          old_stock: m.supplier_stock,
+          new_stock: newStock,
+          message:
+            Number(newStock) <= 0
+              ? 'Product requires review — out of stock at supplier'
+              : Number(newStock) < 5
+                ? 'Low stock at supplier — product requires review'
+                : `Stock changed ${m.supplier_stock} → ${newStock}`,
+        });
+        try {
+          await rest('inventory_sync_logs', {
+            method: 'POST',
+            body: {
+              supplier: m.provider,
+              provider: m.provider,
+              product_id: m.tiqnora_product_id,
+              mapping_id: m.id,
+              change_type: changeType,
+              old_value: String(m.supplier_stock),
+              new_value: String(newStock),
+              message: alerts[alerts.length - 1].message,
+              requires_review: true,
+            },
+            prefer: 'return=minimal',
+          });
+        } catch (_) {}
+      }
+      if (m.supplier_price != null && newPrice != null && Number(newPrice) !== Number(m.supplier_price)) {
+        const oldP = Number(m.supplier_price);
+        const newP = Number(newPrice);
+        const pct = oldP > 0 ? Math.round(((newP - oldP) / oldP) * 100) : 0;
+        const msg = `Supplier price changed ${oldP} → ${newP} (${pct > 0 ? '+' : ''}${pct}%). Review selling price.`;
+        alerts.push({ type: 'price', mapping_id: m.id, old_price: oldP, new_price: newP, pct, message: msg });
+        try {
+          await rest('inventory_sync_logs', {
+            method: 'POST',
+            body: {
+              supplier: m.provider,
+              provider: m.provider,
+              product_id: m.tiqnora_product_id,
+              mapping_id: m.id,
+              change_type: 'price',
+              old_value: String(oldP),
+              new_value: String(newP),
+              message: msg,
+              requires_review: true,
+            },
+            prefer: 'return=minimal',
+          });
+        } catch (_) {}
+      }
+      // update mapping snapshot only — never products.price
+      try {
+        await rest(`supplier_product_mapping?id=eq.${encodeURIComponent(m.id)}`, {
+          method: 'PATCH',
+          body: {
+            supplier_price: newPrice,
+            supplier_stock: newStock,
+            last_checked: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          prefer: 'return=minimal',
+        });
+      } catch (_) {}
+    }
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        checked: mappings.length,
+        alerts,
+        auto_price_change: false,
+        auto_purchase: false,
+        disclaimer: 'Alerts only — selling prices not changed automatically.',
+      },
+    };
+  }
+
+  if (action === 'logs') {
+    try {
+      const lr = await rest(
+        'inventory_sync_logs?select=*&order=created_at.desc&limit=40'
+      );
+      return { status: 200, payload: { logs: Array.isArray(lr.data) ? lr.data : [], auto_purchase: false } };
+    } catch (e) {
+      return { status: 200, payload: { logs: [], message: e.message || 'migration 034 required' } };
+    }
+  }
+
+  return { status: 400, payload: { error: 'Unknown action. Use status|test|search|sync|sync_inventory|logs' } };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -892,7 +1167,7 @@ export default async function handler(req, res) {
   const mode = String(body.mode || body.action || 'research').toLowerCase();
 
   // Product Scout
-  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review' && mode !== 'product_verification' && mode !== 'verify' && mode !== 'market_research' && mode !== 'market_intelligence' && mode !== 'product_intelligence' && mode !== 'dynamic_pricing' && mode !== 'pricing' && mode !== 'supplier_compare' && mode !== 'supplier_comparison')) {
+  if (mode === 'scout' || (body.product_name && mode !== 'product_seo' && mode !== 'quality_score' && mode !== 'product_review' && mode !== 'ai_review' && mode !== 'product_verification' && mode !== 'verify' && mode !== 'market_research' && mode !== 'market_intelligence' && mode !== 'product_intelligence' && mode !== 'dynamic_pricing' && mode !== 'pricing' && mode !== 'supplier_compare' && mode !== 'supplier_comparison' && mode !== 'supplier_center' && mode !== 'supplier_connectors' && mode !== 'supplier_sync')) {
     try {
       const out = await handleScout(body);
       return json(res, out.status, out.payload);
@@ -953,6 +1228,15 @@ export default async function handler(req, res) {
   if (mode === 'supplier_compare' || mode === 'supplier_comparison') {
     try {
       const out = handleSupplierCompare(body);
+      return json(res, out.status, out.payload);
+    } catch (e) {
+      return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
+    }
+  }
+
+  if (mode === 'supplier_center' || mode === 'supplier_connectors' || mode === 'supplier_sync') {
+    try {
+      const out = await handleSupplierCenter(body);
       return json(res, out.status, out.payload);
     } catch (e) {
       return json(res, e.status || 500, { error: e.message || 'خطأ داخلي' });
