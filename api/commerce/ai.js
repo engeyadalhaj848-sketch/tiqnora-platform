@@ -1346,6 +1346,61 @@ async function handleSupplierCenter(body = {}) {
     }
   }
 
+
+  // Phase 3: full variant → VID → inventory → SA freight audit
+  if (action === 'audit_product' || action === 'audit_pipeline' || action === 'verify_freight') {
+    const c = getConnector(provider);
+    if (!c) return { status: 400, payload: { error: 'Unknown provider' } };
+    const externalId = String(body.supplier_product_id || body.pid || body.external_product_id || '').trim();
+    if (!externalId) return { status: 400, payload: { error: 'supplier_product_id required' } };
+    if (typeof c.auditProductPipeline !== 'function') {
+      return { status: 500, payload: { error: 'auditProductPipeline not available on connector' } };
+    }
+    const audit = await c.auditProductPipeline(externalId, { countryCode: body.country || 'SA' });
+    // Pricing helper (SAR)
+    const USD_SAR = 3.75;
+    const pricing_buffer = 0.05; // 5% buffer on landed — explicit, not hidden in freight
+    const primary = audit.primary;
+    let pricing = null;
+    if (primary && primary.supplier_price != null && primary.shipping_cost_source === 'cj_live_freight') {
+      const supplier = Number(primary.supplier_price) || 0;
+      const ship = Number(primary.shipping_cost_usd) || 0;
+      const landed_usd = supplier + ship;
+      const buffer_usd = Number((landed_usd * pricing_buffer).toFixed(4));
+      const landed_with_buffer_usd = landed_usd + buffer_usd;
+      const landed_sar = Number((landed_with_buffer_usd * USD_SAR).toFixed(2));
+      // target ~32% margin on sell price for accessories
+      let sell = Number((landed_sar / 0.68).toFixed(2));
+      const targets = [19, 29, 39, 49, 59, 69, 79, 89, 99, 119, 129, 149, 179, 199, 249, 299, 349, 399];
+      sell = targets.find((t) => t >= sell) || Math.ceil(sell / 10) * 10;
+      const profit = Number((sell - landed_sar).toFixed(2));
+      const margin = sell > 0 ? Number(((profit / sell) * 100).toFixed(1)) : 0;
+      pricing = {
+        supplier_cost_usd: supplier,
+        shipping_cost_usd: ship,
+        shipping_cost_source: primary.shipping_cost_source,
+        pricing_buffer_usd: buffer_usd,
+        pricing_buffer_pct: pricing_buffer,
+        landed_cost_usd: landed_usd,
+        landed_cost_sar: landed_sar,
+        exchange_rate: USD_SAR,
+        exchange_rate_source: 'fixed_pipeline_3.75',
+        selling_price_sar: sell,
+        profit_sar: profit,
+        gross_margin_percentage: margin,
+      };
+    }
+    return {
+      status: 200,
+      payload: {
+        ...audit,
+        pricing,
+        auto_purchase: false,
+        auto_publish: false,
+      },
+    };
+  }
+
   // Live product verify (details + inventory + variants + shipping estimate)
   if (action === 'get_product' || action === 'product_details' || action === 'verify_product') {
     const c = getConnector(provider);
@@ -1486,7 +1541,7 @@ async function handleSupplierCenter(body = {}) {
   return {
     status: 400,
     payload: {
-      error: 'Unknown action. Use status|test|search|sync|sync_inventory|sync_prices|import_product|import_test|get_product|publish_product|hold_product|reject_product|logs',
+      error: 'Unknown action. Use status|test|search|sync|import_product|get_product|audit_product|publish_product|hold_product|reject_product|logs',
     },
   };
 }
