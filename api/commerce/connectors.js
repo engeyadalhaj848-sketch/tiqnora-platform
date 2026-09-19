@@ -154,8 +154,11 @@ function cjConnector() {
     async getInventory(supplierProductId) {
       return cj.getProductInventory(supplierProductId);
     },
-    async getShippingInfo(supplierProductId) {
-      return cj.getShippingInfo(supplierProductId);
+    async getShippingInfo(supplierProductId, opts) {
+      return cj.getShippingInfo(supplierProductId, opts);
+    },
+    async getVariants(supplierProductId) {
+      return cj.getVariants(supplierProductId);
     },
   };
 }
