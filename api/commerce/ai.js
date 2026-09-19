@@ -1346,10 +1346,147 @@ async function handleSupplierCenter(body = {}) {
     }
   }
 
+  // Live product verify (details + inventory + variants + shipping estimate)
+  if (action === 'get_product' || action === 'product_details' || action === 'verify_product') {
+    const c = getConnector(provider);
+    if (!c) return { status: 400, payload: { error: 'Unknown provider' } };
+    const externalId = String(body.supplier_product_id || body.pid || body.external_product_id || '').trim();
+    if (!externalId) return { status: 400, payload: { error: 'supplier_product_id required' } };
+
+    const details = await c.getProduct(externalId);
+    let inventory = null;
+    let variants = null;
+    let shipping = null;
+    try {
+      inventory = await c.getInventory(externalId);
+    } catch (_) {}
+    try {
+      if (typeof c.getVariants === 'function') variants = await c.getVariants(externalId);
+    } catch (_) {}
+    try {
+      shipping = await c.getShippingInfo(externalId, { countryCode: body.country || 'SA', quantity: Number(body.quantity) || 1 });
+    } catch (_) {}
+
+    const product = details?.product || null;
+    const stock =
+      (inventory && inventory.stock != null ? inventory.stock : null) ??
+      (product && product.stock != null ? product.stock : null);
+    const shipCost = shipping && shipping.shipping_cost_usd != null ? shipping.shipping_cost_usd : null;
+    const shippingStatus =
+      shipCost != null && Number(shipCost) >= 0
+        ? 'verified'
+        : shipping && shipping.ok
+          ? 'estimate_only'
+          : 'requires_check';
+
+    return {
+      status: 200,
+      payload: {
+        ok: !!(details && details.ok),
+        provider,
+        supplier_product_id: externalId,
+        product,
+        inventory,
+        variants: variants?.variants || variants || [],
+        shipping,
+        stock,
+        cost: product?.cost ?? null,
+        currency: product?.currency || 'USD',
+        images: product?.images || [],
+        shipping_cost_usd: shipCost,
+        shipping_status: shippingStatus,
+        shipping_estimate: shipping?.estimate || product?.shipping_estimate || null,
+        mock: !!(details && details.mock),
+        live_api: !(details && details.mock),
+        auto_purchase: false,
+        auto_publish: false,
+      },
+    };
+  }
+
+  // Publish / hold reviewed drafts (no CJ purchase)
+  if (action === 'publish_product' || action === 'hold_product' || action === 'reject_product') {
+    const productId = String(body.product_id || body.tiqnora_product_id || '').trim();
+    if (!productId) return { status: 400, payload: { error: 'product_id required' } };
+
+    const decision = action.startsWith('publish') ? 'PUBLISH' : action.startsWith('hold') ? 'HOLD' : 'REJECT';
+    const patch = {
+      updated_at: new Date().toISOString(),
+    };
+    if (decision === 'PUBLISH') {
+      patch.is_active = true;
+      if (body.price != null && Number(body.price) > 0) patch.price = Number(body.price);
+      if (body.name_ar) patch.name_ar = String(body.name_ar).slice(0, 200);
+      if (body.name_en) patch.name_en = String(body.name_en).slice(0, 200);
+      if (body.description_ar) patch.description_ar = String(body.description_ar).slice(0, 8000);
+      if (body.description_en) patch.description_en = String(body.description_en).slice(0, 8000);
+      if (body.stock != null && Number(body.stock) >= 0) patch.stock_quantity = Number(body.stock);
+      if (body.cost_price != null) patch.cost_price = Number(body.cost_price);
+      if (Array.isArray(body.images) && body.images.length) patch.images = body.images;
+    } else {
+      patch.is_active = false;
+    }
+
+    try {
+      const pr = await rest(`products?id=eq.${encodeURIComponent(productId)}`, {
+        method: 'PATCH',
+        body: patch,
+        prefer: 'return=representation',
+      });
+      const row = Array.isArray(pr.data) ? pr.data[0] : pr.data;
+      if (!row) {
+        return { status: 404, payload: { error: 'Product not found', product_id: productId } };
+      }
+      // Update queue status if present
+      try {
+        const qStatus = decision === 'PUBLISH' ? 'published' : decision === 'HOLD' ? 'pending_review' : 'rejected';
+        await rest(`product_import_queue?published_product_id=eq.${encodeURIComponent(productId)}`, {
+          method: 'PATCH',
+          body: { status: qStatus, updated_at: new Date().toISOString() },
+          prefer: 'return=minimal',
+        });
+      } catch (_) {}
+      try {
+        await rest('inventory_sync_logs', {
+          method: 'POST',
+          body: {
+            supplier: provider,
+            provider,
+            product_id: productId,
+            change_type: decision === 'PUBLISH' ? 'publish' : decision.toLowerCase(),
+            old_value: 'pending_review',
+            new_value: decision === 'PUBLISH' ? 'active' : decision.toLowerCase(),
+            message: body.reason || `Merchandising decision: ${decision}`,
+            requires_review: decision !== 'PUBLISH',
+          },
+          prefer: 'return=minimal',
+        });
+      } catch (_) {}
+      return {
+        status: 200,
+        payload: {
+          ok: true,
+          decision,
+          product_id: productId,
+          is_active: !!row.is_active,
+          slug: row.slug,
+          price: row.price,
+          name_ar: row.name_ar,
+          name_en: row.name_en,
+          stock_quantity: row.stock_quantity,
+          auto_purchase: false,
+          public_url: row.is_active && row.slug ? `https://www.tiqnora.com/product?slug=${encodeURIComponent(row.slug)}` : null,
+        },
+      };
+    } catch (e) {
+      return { status: 500, payload: { error: e.message || 'publish failed', product_id: productId } };
+    }
+  }
+
   return {
     status: 400,
     payload: {
-      error: 'Unknown action. Use status|test|search|sync|sync_inventory|sync_prices|import_product|import_test|logs',
+      error: 'Unknown action. Use status|test|search|sync|sync_inventory|sync_prices|import_product|import_test|get_product|publish_product|hold_product|reject_product|logs',
     },
   };
 }
