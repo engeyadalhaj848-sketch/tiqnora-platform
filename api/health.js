@@ -31,6 +31,7 @@ export default async function handler(req, res) {
     time: new Date().toISOString(),
     checks,
     latencyMs,
-    version: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown'
+    version: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown',
+    deploy_probe: true
   }));
 }
