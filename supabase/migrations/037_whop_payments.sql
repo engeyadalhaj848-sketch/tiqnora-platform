@@ -38,11 +38,30 @@ drop policy if exists "payment_webhook_events_admin" on public.payment_webhook_e
 create policy "payment_webhook_events_admin" on public.payment_webhook_events
   for all using (public.is_admin()) with check (public.is_admin());
 
--- Register Whop in payment_providers if table exists
+-- payment_providers.slug was locked to stripe/hyperpay/tap/mada/manual (012).
+-- Expand check constraint to allow 'whop' before insert.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'payment_providers'
+  ) then
+    alter table public.payment_providers drop constraint if exists payment_providers_slug_check;
+    alter table public.payment_providers
+      add constraint payment_providers_slug_check
+      check (slug in ('stripe','hyperpay','tap','mada','manual','whop'));
+  end if;
+end $$;
+
 insert into public.payment_providers (slug, display_name, enabled, mode, config)
 select 'whop', 'Whop', false, 'sandbox',
   '{"env_keys":["WHOP_API_KEY","WHOP_ACCOUNT_ID","WHOP_WEBHOOK_SECRET","WHOP_CURRENCY"],"checkout":"embedded","note":"Enable after sandbox tests"}'::jsonb
-where exists (select 1 from information_schema.tables where table_schema='public' and table_name='payment_providers')
-  and not exists (select 1 from public.payment_providers where slug = 'whop');
+where exists (
+  select 1 from information_schema.tables
+  where table_schema = 'public' and table_name = 'payment_providers'
+)
+and not exists (
+  select 1 from public.payment_providers where slug = 'whop'
+);
 
 comment on table public.payment_webhook_events is 'Idempotency log for payment webhooks; service-role writes only';
