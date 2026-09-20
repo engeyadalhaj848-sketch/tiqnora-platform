@@ -310,10 +310,19 @@ async function handleOrderCreate(req, res) {
     total: totalSar,
     currency: 'SAR',
     status: 'pending',
-    payment_status: 'pending',
-    payment_method: method,
+    payment_status: 'unpaid', // enum: unpaid|paid|failed|refunded
+    payment_method: method, // enum includes cod|bank_transfer
     payment_provider: 'manual',
     notes,
+    // snapshot required by schema
+    items: lineItems.map((it) => ({
+      kind: 'product',
+      ref_id: it.ref_id,
+      title_ar: it.title_ar,
+      title_en: it.title_en,
+      price: it.unit_price,
+      qty: it.quantity,
+    })),
     payment_meta: {
       source: 'tiqnora_checkout',
       method,
@@ -323,8 +332,8 @@ async function handleOrderCreate(req, res) {
 
   const ins = await sb('orders', { method: 'POST', body: orderRow, prefer: 'return=representation' });
   if (ins.error) {
-    console.error('[order_create]', String(ins.error).slice(0, 160));
-    return json(res, 500, { ok: false, error: 'order_create_failed' });
+    console.error('[order_create]', String(ins.error).slice(0, 240));
+    return json(res, 500, { ok: false, error: 'order_create_failed', message: 'تعذر حفظ الطلب. حاول مرة أخرى.' });
   }
   const order = Array.isArray(ins.data) ? ins.data[0] : ins.data;
   if (!order?.id) return json(res, 500, { ok: false, error: 'order_create_failed' });
