@@ -247,7 +247,12 @@
           });
           const data = await res.json().catch(() => ({}));
           if (!data.ok) {
-            showError(data.message || data.error || 'تعذر بدء الدفع الإلكتروني. حاول مرة أخرى أو اختر طريقة دفع أخرى.');
+            const technical = String(data.error || data.message || '');
+            const safe =
+              data.message && !/product_create|access_pass|permission|WHOP_|secret/i.test(String(data.message))
+                ? data.message
+                : 'تعذر بدء عملية الدفع الإلكتروني حاليًا. حاول مرة أخرى لاحقًا.';
+            showError(safe);
             btn.disabled = false;
             btn.textContent = 'متابعة الدفع';
             return;

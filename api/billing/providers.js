@@ -285,7 +285,31 @@ async function handleWhopCreateCheckout(req, res) {
     title: `Tiqnora ${order.order_number}`,
   });
   if (!checkout.ok) {
-    return json(res, 502, { ok: false, error: 'whop_checkout_failed', message: checkout.message, order_id: order.id, order_number: order.order_number });
+    // User-facing message stays safe; technical details are server-side only
+    const userMessage = 'تعذر بدء عملية الدفع الإلكتروني حاليًا. حاول مرة أخرى لاحقًا.';
+    console.error('[whop_create_checkout]', {
+      order_id: order.id,
+      code: checkout.code || null,
+      http_status: checkout.http_status || null,
+      message: String(checkout.message || '').slice(0, 160),
+      has_product_id: !!(checkout.details && checkout.details.has_product_id),
+      permission_hint: checkout.permission_hint || null,
+    });
+    return json(res, 502, {
+      ok: false,
+      error: 'whop_checkout_failed',
+      message: userMessage,
+      order_id: order.id,
+      order_number: order.order_number,
+      // Safe diagnostic for admin/debug — no secrets
+      diagnostic: {
+        code: checkout.code || null,
+        http_status: checkout.http_status || null,
+        has_product_id: !!(checkout.details && checkout.details.has_product_id),
+        environment: checkout.details?.environment || null,
+        permission_hint: checkout.permission_hint || null,
+      },
+    });
   }
   await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
     method: 'PATCH',
@@ -429,7 +453,7 @@ export default async function handler(req, res) {
       livePayments: false,
       providers: [
         { slug: 'manual', name: 'Manual Admin', enabled: true, envRequired: [] },
-        { slug: 'whop', name: 'Whop', enabled: !!whop.configured, mode: whop.sandbox ? 'sandbox' : 'live', configured: whop.configured, envRequired: ['WHOP_API_KEY', 'WHOP_ACCOUNT_ID', 'WHOP_WEBHOOK_SECRET'] },
+        { slug: 'whop', name: 'Whop', enabled: !!whop.configured, mode: whop.sandbox ? 'sandbox' : 'live', configured: whop.configured, has_product_id: !!whop.productId, envRequired: ['WHOP_API_KEY', 'WHOP_ACCOUNT_ID', 'WHOP_WEBHOOK_SECRET'], recommended: ['WHOP_PRODUCT_ID'] },
         { slug: 'stripe', name: 'Stripe', enabled: false, envRequired: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] },
         { slug: 'hyperpay', name: 'HyperPay', enabled: false, envRequired: ['HYPERPAY_ENTITY_ID', 'HYPERPAY_ACCESS_TOKEN'] },
         { slug: 'tap', name: 'Tap Payments', enabled: false, envRequired: ['TAP_SECRET_KEY'] },
