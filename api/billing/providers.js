@@ -2,7 +2,7 @@
  * Billing / integrations hub.
  * Hosts:
  *  - GET  (default) payment providers readiness
- *  - route=aliexpress_callback | aliexpress_status
+ *  - route=aliexpress_connect | aliexpress_callback | aliexpress_status
  *  - route=order_create | whop_create_checkout | whop_order_status | whop_webhook
  *
  * Public URLs are rewritten in vercel.json to this existing function
@@ -104,6 +104,7 @@ function resolveRoute(req) {
   const q = url.searchParams.get('route') || '';
   if (q) return { route: q, url };
   const p = url.pathname || '';
+  if (p.includes('aliexpress') && p.includes('connect')) return { route: 'aliexpress_connect', url };
   if (p.includes('aliexpress') && p.includes('callback')) return { route: 'aliexpress_callback', url };
   if (p.includes('aliexpress') && p.includes('status')) return { route: 'aliexpress_status', url };
   if (p.includes('create-checkout')) return { route: 'whop_create_checkout', url };
@@ -114,6 +115,29 @@ function resolveRoute(req) {
     return { route: 'order_create', url };
   }
   return { route: '', url };
+}
+
+async function handleAliExpressConnect(req, res) {
+  if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'Method not allowed' });
+  const cfg = getAeConfig();
+  if (!cfg.configured) {
+    return json(res, 503, {
+      ok: false,
+      error: 'not_configured',
+      message: 'AliExpress credentials are not configured.',
+      missing: cfg.missing,
+    });
+  }
+  const state = createOAuthState();
+  const auth = buildAuthorizeUrl({ state });
+  if (!auth?.ok || !auth?.url) {
+    return json(res, 500, {
+      ok: false,
+      error: 'authorize_url_failed',
+      message: auth?.message || 'Could not build AliExpress authorize URL.',
+    });
+  }
+  return redirect(res, auth.url);
 }
 
 async function handleAliExpressCallback(req, res, url) {
@@ -843,6 +867,7 @@ export default async function handler(req, res) {
       }
     }
 
+    if (route === 'aliexpress_connect') return handleAliExpressConnect(req, res);
     if (route === 'aliexpress_callback') return handleAliExpressCallback(req, res, url);
     if (route === 'aliexpress_status') return handleAliExpressStatus(req, res);
     if (route === 'order_create') return handleOrderCreate(req, res);
