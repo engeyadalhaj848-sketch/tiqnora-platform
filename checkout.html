@@ -134,7 +134,7 @@
   <script>
   document.addEventListener('DOMContentLoaded', () => {
     const y = document.getElementById('year'); if (y) y.textContent = new Date().getFullYear();
-    const money = (n) => new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(Number(n)||0);
+    const money = (n) => new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(n)||0);
     let flatRate = 25, freeThreshold = 500;
     let lastWhop = null;
     const errEl = document.getElementById('checkout-error');
@@ -169,7 +169,12 @@
         const line = i.price * i.qty; sub += line;
         return `<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span>${i.titleAr} × ${i.qty}</span><b>${money(line)}</b></div>`;
       }).join('');
-      const ship = sub >= freeThreshold ? 0 : flatRate;
+      const isLivePaymentTest = cart.length > 0 && cart.every(i =>
+        i.product_id === '39e7aea6-ea16-4b44-8427-3dc5683b4c74' ||
+        i.sku === 'TQ-LIVE-TEST-001' ||
+        i.slug === 'tiqnora-live-payment-test'
+      );
+      const ship = (sub >= freeThreshold || isLivePaymentTest) ? 0 : flatRate;
       document.getElementById('sum-shipping').textContent = ship === 0 ? 'مجاني' : money(ship);
       document.getElementById('sum-total').textContent = money(sub + ship);
     }
