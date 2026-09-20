@@ -5,7 +5,7 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 
 const files = [
-  'index.html', 'shop.html', 'product.html', 'checkout.html', 'order-complete.html', 'track.html',
+  'index.html', 'shop.html', 'product.html', 'checkout.html', 'track.html',
   'national-day.html', 'national-day.css',
   'shipping-policy.html', 'return-policy.html', 'privacy-policy.html', 'terms.html', 'faq.html',
   'admin.html', 'customer.html', 'customer.css', 'blog.html', 'blog-post.html', 'compare.html', 'sales.html', 'marketing.css', 'styles.css', 'script.js', 'admin.css',
