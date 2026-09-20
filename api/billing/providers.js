@@ -23,6 +23,33 @@ import {
   isSandbox,
 } from '../../lib/payments/whop.js';
 
+
+/** Disable automatic JSON body parsing so webhook signatures see exact raw bytes. */
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+async function readRawBody(req) {
+  // Prefer already-buffered body when present (tests / some runtimes)
+  if (typeof req.body === 'string' && req.body.length) return req.body;
+  if (Buffer.isBuffer(req.body) && req.body.length) return req.body.toString('utf8');
+  if (req.rawBody && typeof req.rawBody === 'string') return req.rawBody;
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody.toString('utf8');
+
+  // Node IncomingMessage stream
+  if (req.readable === false && req.body && typeof req.body === 'object') {
+    // Body already consumed/parsed — cannot recover original bytes
+    return null;
+  }
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
@@ -550,16 +577,26 @@ async function handleWhopOrderStatus(req, res, url) {
   });
 }
 
-async function handleWhopWebhook(req, res) {
+async function handleWhopWebhook(req, res, rawBodyInput) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Method not allowed' });
-  let rawBody = '';
-  if (typeof req.body === 'string') rawBody = req.body;
-  else if (Buffer.isBuffer(req.body)) rawBody = req.body.toString('utf8');
-  else if (req.body && typeof req.body === 'object') rawBody = JSON.stringify(req.body);
+
+  // MUST use exact raw request text — never JSON.stringify(parsedObject)
+  let rawBody = typeof rawBodyInput === 'string' ? rawBodyInput : '';
+  if (!rawBody) {
+    if (typeof req.body === 'string') rawBody = req.body;
+    else if (Buffer.isBuffer(req.body)) rawBody = req.body.toString('utf8');
+  }
+  if (!rawBody) {
+    console.error('[whop_webhook] missing raw body — cannot verify signature');
+    return json(res, 401, { ok: false, error: 'invalid_signature' });
+  }
 
   const verified = verifyWebhookSignature(rawBody, req.headers || {});
-  if (!verified.ok) return json(res, 401, { ok: false, error: 'invalid_signature' });
+  if (!verified.ok) {
+    console.error('[whop_webhook] signature failed:', verified.reason || 'invalid_signature');
+    return json(res, 401, { ok: false, error: 'invalid_signature' });
+  }
   const event = parseWebhookEvent(rawBody);
   if (!event || !event.type) return json(res, 400, { ok: false, error: 'invalid_payload' });
 
@@ -641,12 +678,31 @@ export default async function handler(req, res) {
   try {
     const { route, url } = resolveRoute(req);
 
+    // Read raw body once (bodyParser disabled). Webhook needs exact bytes.
+    let rawBody = null;
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+      try {
+        rawBody = await readRawBody(req);
+      } catch (e) {
+        console.error('[billing hub] readRawBody failed');
+        rawBody = null;
+      }
+      // Populate req.body for JSON routes without destroying rawBody variable
+      if (route !== 'whop_webhook' && rawBody) {
+        try {
+          req.body = JSON.parse(rawBody);
+        } catch {
+          req.body = {};
+        }
+      }
+    }
+
     if (route === 'aliexpress_callback') return handleAliExpressCallback(req, res, url);
     if (route === 'aliexpress_status') return handleAliExpressStatus(req, res);
     if (route === 'order_create') return handleOrderCreate(req, res);
     if (route === 'whop_create_checkout') return handleWhopCreateCheckout(req, res);
     if (route === 'whop_order_status') return handleWhopOrderStatus(req, res, url);
-    if (route === 'whop_webhook') return handleWhopWebhook(req, res);
+    if (route === 'whop_webhook') return handleWhopWebhook(req, res, rawBody);
 
     // Default: providers readiness (original behavior)
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
