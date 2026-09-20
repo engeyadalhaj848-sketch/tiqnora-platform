@@ -68,7 +68,7 @@
 
       <div class="chip-row" id="section-chips" style="margin-bottom:10px"></div>
       <div class="chip-row" id="cat-chips"></div>
-      <div class="shop-meta-row">
+      <div class="shop-meta-row"><span id="shop-result-meta"></span>
         <span id="result-count">—</span>
         <a href="faq.html" style="color:var(--accent)">الأسئلة الشائعة</a>
       </div>
@@ -93,135 +93,207 @@
     const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
     const grid = document.querySelector('#products-grid');
     const year = document.querySelector('#year'); if (year) year.textContent = new Date().getFullYear();
-    let all = [], brands = [], section = 'all';
+    const PAGE = 12;
+    let offset = 0;
+    let total = 0;
+    let loading = false;
+    let allLoaded = []; // accumulated for client filter when needed
+    let section = 'all';
+    let brands = [];
 
     const params = new URLSearchParams(location.search);
-    if (params.get('cat')) document.querySelector('#f-cat').value = params.get('cat');
+    if (params.get('cat')) {
+      const el = document.querySelector('#f-cat');
+      if (el) el.value = params.get('cat');
+    }
 
-    function renderCount(){ const c=(window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
-    function tags(p){ return Array.isArray(p.campaign_tags) ? p.campaign_tags : []; }
-    function finalPrice(p){ const d=Number(p.discount_percent)||0; return d>0 ? p.price*(1-d/100) : Number(p.price)||0; }
+    function renderCount(){
+      const c = (window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0);
+      const el = document.querySelector('#store-cart-count');
+      if (el) el.textContent = c;
+    }
+    function finalPrice(p){
+      const d = Number(p.discount_percent)||0;
+      return d > 0 ? p.price * (1 - d / 100) : Number(p.price)||0;
+    }
     function inStock(p){ return !(p.track_stock && p.stock_quantity <= 0); }
 
-    function card(p){
+    function skeleton(n = 8) {
+      return Array.from({ length: n }, () =>
+        `<div class="product-card" aria-hidden="true" style="pointer-events:none;opacity:.55">
+          <div class="product-thumb" style="background:var(--line);min-height:160px;border-radius:12px"></div>
+          <div class="product-body"><div style="height:12px;background:var(--line);border-radius:6px;margin:8px 0"></div>
+          <div style="height:16px;background:var(--line);border-radius:6px;width:70%"></div></div></div>`
+      ).join('');
+    }
+
+    function card(p, idx) {
       const hasDisc = Number(p.discount_percent) > 0;
       const final = finalPrice(p);
       const out = !inStock(p);
+      const img = (p.images && p.images[0]) ? p.images[0] : '';
+      const priority = idx < 2 ? 'fetchpriority="high"' : '';
+      const lazy = idx < 2 ? '' : 'loading="lazy"';
       return `<a class="product-card" href="product.html?slug=${encodeURIComponent(p.slug)}">
         ${out ? '<span class="badge out">غير متوفر</span>' : (hasDisc ? `<span class="badge">-${Math.round(p.discount_percent)}%</span>` : (p.featured ? '<span class="badge">مميز</span>' : ''))}
-        <div class="product-thumb">${(p.images||[])[0] ? `<img src="${esc(p.images[0])}" alt="${esc(p.name_ar)}" loading="lazy">` : '▣'}</div>
+        <div class="product-thumb">${img
+          ? `<img src="${esc(img)}" alt="${esc(p.name_ar)}" width="400" height="400" decoding="async" ${lazy} ${priority} style="width:100%;height:auto;object-fit:cover">`
+          : '▣'}</div>
         <div class="product-body">
           <span class="p-cat">${esc(p.categories?.name_ar || '')}${p.brands?.name ? ' · ' + esc(p.brands.name) : ''}</span>
           <h3>${esc(p.name_ar)}</h3>
-          <span class="stock-note">${p.delivery_note_ar || (out ? 'غير متوفر' : 'متوفر')}</span>
           <div class="product-price"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s>`:''}</div>
         </div></a>`;
     }
 
-    function filtered(){
-      const q = (document.querySelector('#f-q').value || '').trim().toLowerCase();
-      const cat = document.querySelector('#f-cat').value || null;
-      const brand = document.querySelector('#f-brand').value || null;
-      const price = document.querySelector('#f-price').value || '';
-      const status = document.querySelector('#f-status').value || '';
-      let list = all.filter(p => p.is_active);
+    function meta(shown) {
+      const el = document.querySelector('#shop-result-meta');
+      if (el) el.textContent = total
+        ? `عرض ${shown} من ${total}`
+        : (shown ? `${shown} منتج` : '');
+    }
 
-      if (section === 'national') list = list.filter(p => tags(p).includes('national-day') || p.categories?.slug === 'national-day');
-      if (section === 'featured') list = list.filter(p => !!p.featured);
-      if (section === 'best') list = list.filter(p => tags(p).includes('best-seller') || !!p.featured);
-
-      if (cat) list = list.filter(p => p.categories?.slug === cat);
-      if (brand) list = list.filter(p => p.brands?.slug === brand || String(p.brand_id||'') === brand);
-      if (q) list = list.filter(p =>
-        (p.name_ar||'').toLowerCase().includes(q) ||
-        (p.name_en||'').toLowerCase().includes(q) ||
-        (p.keywords_ar||'').toLowerCase().includes(q) ||
-        (p.sku||'').toLowerCase().includes(q)
-      );
-      if (price) {
-        const [a,b] = price.split('-').map(Number);
-        list = list.filter(p => { const f=finalPrice(p); return f>=a && f<=b; });
+    function ensureLoadMore() {
+      let btn = document.querySelector('#shop-load-more');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'shop-load-more';
+        btn.type = 'button';
+        btn.className = 'button button-ghost';
+        btn.style.cssText = 'display:block;margin:22px auto 8px;min-width:180px';
+        btn.textContent = 'عرض المزيد';
+        grid.after(btn);
+        btn.addEventListener('click', () => loadPage(false));
       }
-      if (status === 'in') list = list.filter(inStock);
-      if (status === 'out') list = list.filter(p => !inStock(p));
-      if (status === 'featured') list = list.filter(p => !!p.featured);
-      if (status === 'national') list = list.filter(p => tags(p).includes('national-day'));
+      return btn;
+    }
+
+    function applyClientSection(list) {
+      if (section === 'featured') return list.filter(p => !!p.featured);
+      if (section === 'best') return list; // tags often not on slim payload
+      if (section === 'national') return list.filter(p => p.categories?.slug === 'national-day');
       return list;
     }
 
-    function render(){
-      const list = filtered();
-      grid.innerHTML = list.length ? list.map(card).join('') : '<p style="color:var(--muted)">لا توجد منتجات مطابقة للفلتر.</p>';
-      document.querySelector('#result-count').textContent = `${list.length} منتج`;
+    async function loadPage(reset) {
+      if (loading) return;
+      loading = true;
+      const btn = ensureLoadMore();
+      btn.disabled = true;
+      btn.textContent = 'جارٍ التحميل…';
+
+      if (reset) {
+        offset = 0;
+        allLoaded = [];
+        grid.innerHTML = skeleton(8);
+      }
+
+      const q = (document.querySelector('#f-q')?.value || '').trim();
+      const cat = document.querySelector('#f-cat')?.value || null;
+      const brand = document.querySelector('#f-brand')?.value || null;
+
+      try {
+        const ok = await window.TiqnoraDB.ready();
+        if (!ok) {
+          grid.innerHTML = '<p style="color:var(--muted)">تعذر تحميل المنتجات.</p>';
+          return;
+        }
+        const page = await window.TiqnoraDB.getProductsPage({
+          limit: PAGE,
+          offset,
+          cat: cat || null,
+          brand: brand || null,
+          q: q || null,
+        });
+        if (!page || !page.items) {
+          if (reset) grid.innerHTML = '<p style="color:var(--muted)">لا توجد منتجات.</p>';
+          return;
+        }
+        total = page.total || 0;
+        let items = applyClientSection(page.items);
+        if (reset) {
+          allLoaded = items;
+          grid.innerHTML = items.map((p, i) => card(p, i)).join('') || '<p style="color:var(--muted)">لا توجد منتجات مطابقة.</p>';
+        } else {
+          allLoaded = allLoaded.concat(items);
+          const frag = document.createDocumentFragment();
+          const wrap = document.createElement('div');
+          wrap.innerHTML = items.map((p, i) => card(p, offset + i)).join('');
+          while (wrap.firstChild) frag.appendChild(wrap.firstChild);
+          grid.appendChild(frag);
+        }
+        offset += PAGE;
+        meta(allLoaded.length);
+        const hasMore = page.hasMore && allLoaded.length < (total || Infinity);
+        btn.style.display = hasMore ? 'block' : 'none';
+        btn.disabled = false;
+        btn.textContent = 'عرض المزيد';
+      } catch (e) {
+        console.warn(e);
+        if (reset) grid.innerHTML = '<p style="color:var(--muted)">تعذر تحميل المنتجات.</p>';
+        btn.disabled = false;
+        btn.textContent = 'عرض المزيد';
+      } finally {
+        loading = false;
+        renderCount();
+      }
     }
 
-    function renderSectionChips(){
-      const row = document.querySelector('#section-chips');
-      const items = [
-        {id:'all',t:'الكل'},
-        {id:'national',t:'🇸🇦 عروض اليوم الوطني'},
-        {id:'featured',t:'مميز'},
-        {id:'best',t:'الأكثر مبيعاً'}
-      ];
-      row.innerHTML = items.map((x,i)=>`<button type="button" class="chip${i===0?' active':''}" data-sec="${x.id}">${x.t}</button>`).join('');
-      row.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => {
-        row.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
-        b.classList.add('active'); section = b.dataset.sec; render();
+    async function loadBrandsAndCats() {
+      try {
+        const [brandRows, catRows] = await Promise.all([
+          window.TiqnoraDB.getBrands?.() || [],
+          window.TiqnoraDB.getCategories?.() || [],
+        ]);
+        brands = brandRows || [];
+        const brandSel = document.querySelector('#f-brand');
+        if (brandSel && brands.length) {
+          const cur = brandSel.value;
+          brandSel.innerHTML = '<option value=\"\">كل العلامات</option>' +
+            brands.map(b => `<option value=\"${esc(b.slug)}\">${esc(b.name || b.name_ar || b.slug)}</option>`).join('');
+          brandSel.value = cur;
+        }
+        const catSel = document.querySelector('#f-cat');
+        if (catSel && catRows && catRows.length) {
+          const cur = catSel.value;
+          const productCats = catRows.filter(c => !c.type || c.type === 'product' || c.type === 'products');
+          if (productCats.length) {
+            catSel.innerHTML = '<option value=\"\">كل التصنيفات</option>' +
+              productCats.map(c => `<option value=\"${esc(c.slug)}\">${esc(c.name_ar || c.slug)}</option>`).join('');
+            catSel.value = cur;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Section chips
+    document.querySelectorAll('[data-shop-section]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        section = el.getAttribute('data-shop-section') || 'all';
+        document.querySelectorAll('[data-shop-section]').forEach(x => x.classList.toggle('active', x === el));
+        loadPage(true);
       });
-    }
-
-    function fillCats(cats){
-      const preferred = ['computers-laptops','computers','networking-equipment','cctv-security','cctv-cameras','printers-accessories','printers','smart-office','ai-digital-solutions','national-day','electronics','accessories','home-office'];
-      const sorted = [...(cats||[])].sort((a,b)=> (preferred.indexOf(a.slug)+1||99) - (preferred.indexOf(b.slug)+1||99));
-      const sel = document.querySelector('#f-cat');
-      const pre = params.get('cat') || '';
-      sel.innerHTML = `<option value="">كل الأقسام</option>` + sorted.map(c =>
-        `<option value="${esc(c.slug)}" ${c.slug===pre?'selected':''}>${esc(c.name_ar)}</option>`).join('');
-      const row = document.querySelector('#cat-chips');
-      row.innerHTML = `<button type="button" class="chip${!pre?' active':''}" data-cat="">الكل</button>` + sorted.map(c =>
-        `<button type="button" class="chip${c.slug===pre?' active':''}" data-cat="${esc(c.slug)}">${esc(c.name_ar)}</button>`).join('');
-      row.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => {
-        row.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        sel.value = b.dataset.cat || '';
-        render();
-      });
-      document.querySelector('#cat-links').innerHTML = sorted.map(c =>
-        `<a class="chip" href="shop.html?cat=${encodeURIComponent(c.slug)}">${esc(c.name_ar)}</a>`).join('');
-    }
-
-    function fillBrands(list){
-      const sel = document.querySelector('#f-brand');
-      sel.innerHTML = `<option value="">كل العلامات</option>` + (list||[]).map(b =>
-        `<option value="${esc(b.slug)}">${esc(b.name)}</option>`).join('');
-    }
-
-    ['f-q','f-cat','f-brand','f-price','f-status'].forEach(id => {
-      document.querySelector('#'+id).addEventListener('input', render);
-      document.querySelector('#'+id).addEventListener('change', render);
     });
 
-    async function load(){
-      renderSectionChips();
-      const dbOk = await window.TiqnoraDB.ready();
-      if (dbOk) {
-        const [prods, cats, br] = await Promise.all([
-          window.TiqnoraDB.getProducts(),
-          window.TiqnoraDB.getCategories('product'),
-          window.TiqnoraDB.getBrands()
-        ]);
-        all = prods || [];
-        brands = br || [];
-        fillCats(cats || []);
-        fillBrands(brands);
-        render();
-        window.TiqnoraAnalytics?.track?.('shop_view', { count: all.length });
-      } else {
-        grid.innerHTML = '<p style="color:var(--muted)">تعذر تحميل المنتجات. <a href="national-day.html" style="color:var(--accent)">عروض اليوم الوطني</a></p>';
+    ['#f-q','#f-cat','#f-brand','#f-price','#f-status'].forEach(sel => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.addEventListener('change', () => loadPage(true));
+      if (el.tagName === 'INPUT') {
+        let t;
+        el.addEventListener('input', () => {
+          clearTimeout(t);
+          t = setTimeout(() => loadPage(true), 320);
+        });
       }
-      renderCount();
-    }
-    load();
+    });
+
+    // Immediate skeleton, then products first (don't block on brands)
+    grid.innerHTML = skeleton(8);
+    loadPage(true);
+    window.TiqnoraDB.ready().then(() => loadBrandsAndCats());
+    renderCount();
   });
   </script>
 </body>

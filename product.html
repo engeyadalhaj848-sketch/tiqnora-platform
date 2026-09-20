@@ -135,8 +135,16 @@
     async function load() {
       const slug = new URLSearchParams(location.search).get('slug');
       if (!slug) { wrap.innerHTML = '<p>منتج غير محدد. <a href="shop.html">العودة للمتجر</a></p>'; return; }
-      const all = await window.TiqnoraDB?.getProducts?.() || [];
-      const raw = all.find(x => x.slug === slug);
+      await window.TiqnoraDB?.ready?.();
+      let raw = null;
+      if (typeof window.TiqnoraDB?.getProductBySlug === 'function') {
+        raw = await window.TiqnoraDB.getProductBySlug(slug);
+      }
+      if (!raw) {
+        // Fallback: slim catalog search (still avoids heavy description-heavy full fetch when possible)
+        const all = await window.TiqnoraDB?.getProducts?.() || [];
+        raw = all.find(x => x.slug === slug);
+      }
       if (!raw || raw.is_active === false) { wrap.innerHTML = '<p>المنتج غير موجود. <a href="shop.html">المتجر</a></p>'; return; }
       const p = toPublicProduct(raw);
       const hasDisc = p.discount_percent > 0;
@@ -158,7 +166,7 @@
 
       wrap.innerHTML = `
         <div class="p-layout">
-          <div class="p-gallery">${img?'<img src="'+esc(img)+'" alt="'+esc(p.name_ar)+'" loading="eager" decoding="async">':'<span style="font-size:3rem;opacity:.4">▣</span>'}</div>
+          <div class="p-gallery">${img?'<img src="'+esc(img)+'" alt="'+esc(p.name_ar)+'" width="800" height="800" loading="eager" decoding="async" fetchpriority="high">':'<span style="font-size:3rem;opacity:.4">▣</span>'}</div>
           <div class="p-meta">
             <p style="color:var(--muted);margin:0 0 6px;font-size:.9rem">${esc(p.categories?.name_ar||'منتج')}</p>
             <h1>${esc(p.name_ar)}</h1>
