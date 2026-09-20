@@ -452,7 +452,7 @@ async function handleWhopCreateCheckout(req, res) {
     shipping_postal_code: shipping.postal_code || null,
     shipping_country: shipping.country,
     subtotal, discount_amount: 0, shipping_cost: shippingCost, total: totalSar,
-    currency: 'SAR', status: 'pending_payment', payment_status: 'pending', payment_provider: 'whop',
+    currency: 'SAR', status: 'pending', payment_status: 'unpaid', payment_provider: 'whop',
     notes: body.notes ? String(body.notes).slice(0, 500) : null,
     payment_meta: { environment: isSandbox() ? 'sandbox' : 'production', items_count: lineItems.length },
   };
@@ -546,7 +546,7 @@ async function handleWhopOrderStatus(req, res, url) {
   return json(res, 200, {
     ok: true, order_number: o.order_number, payment_status: o.payment_status, order_status: o.status,
     payment_provider: o.payment_provider, total: o.total, currency: o.currency || 'SAR', paid,
-    message: paid ? 'تم تأكيد الدفع' : o.payment_status === 'pending' ? 'جارٍ التحقق من عملية الدفع' : o.payment_status === 'failed' ? 'فشل الدفع' : 'جارٍ التحقق من عملية الدفع',
+    message: paid ? 'تم تأكيد الدفع' : o.payment_status === 'unpaid' ? 'بانتظار الدفع / جارٍ التحقق' : o.payment_status === 'failed' ? 'فشل الدفع' : 'جارٍ التحقق من عملية الدفع',
   });
 }
 
@@ -608,7 +608,7 @@ async function handleWhopWebhook(req, res) {
     if (!amountOk) {
       await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
         method: 'PATCH',
-        body: { payment_status: 'review_required', provider_payment_id: paymentId, updated_at: new Date().toISOString() },
+        body: { payment_status: 'unpaid', notes: 'whop_amount_mismatch_review', provider_payment_id: paymentId, updated_at: new Date().toISOString() },
         prefer: 'return=minimal',
       });
       return json(res, 200, { ok: true, review_required: true });
@@ -616,7 +616,7 @@ async function handleWhopWebhook(req, res) {
     await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
       method: 'PATCH',
       body: {
-        payment_status: 'paid', status: 'ready_for_manual_fulfillment', provider_payment_id: paymentId,
+        payment_status: 'paid', status: 'confirmed', provider_payment_id: paymentId,
         payment_meta: { ...(order.payment_meta || {}), paid_at: new Date().toISOString(), last_event: eventType, auto_purchase: false },
         updated_at: new Date().toISOString(),
       },
@@ -628,7 +628,7 @@ async function handleWhopWebhook(req, res) {
     if (order) {
       await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
         method: 'PATCH',
-        body: { payment_status: eventType === 'payment.failed' ? 'failed' : 'canceled', provider_payment_id: paymentId, updated_at: new Date().toISOString() },
+        body: { payment_status: 'failed', provider_payment_id: paymentId, updated_at: new Date().toISOString() },
         prefer: 'return=minimal',
       });
     }
