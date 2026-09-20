@@ -589,6 +589,116 @@ async function handleWhopOrderStatus(req, res, url) {
   });
 }
 
+
+async function queueFulfillmentForPaidOrder(order) {
+  // Phase 1: queue supplier fulfillment for admin approval only.
+  // This function NEVER submits or purchases from a supplier.
+  if (!order?.id) return { queued: 0, skipped: 'missing_order' };
+
+  const itemsRes = await sb(
+    `order_items?order_id=eq.${encodeURIComponent(order.id)}&item_type=eq.product&select=id,ref_id,title_ar,title_en,unit_price,quantity,line_total`
+  );
+  const orderItems = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+  if (!orderItems.length) return { queued: 0, skipped: 'no_product_items' };
+
+  const productIds = [...new Set(orderItems.map((i) => String(i.ref_id || '')).filter(Boolean))];
+  if (!productIds.length) return { queued: 0, skipped: 'no_product_ids' };
+
+  const idList = productIds.map(encodeURIComponent).join(',');
+  const mapRes = await sb(
+    `supplier_product_mapping?tiqnora_product_id=in.(${idList})&select=id,supplier_id,provider,supplier_product_id,tiqnora_product_id,supplier_price,supplier_stock,currency,raw_snapshot`
+  );
+  const mappings = Array.isArray(mapRes.data) ? mapRes.data : [];
+  if (!mappings.length) return { queued: 0, skipped: 'no_supplier_mapping' };
+
+  const mappingByProduct = new Map();
+  for (const m of mappings) {
+    const pid = String(m.tiqnora_product_id || '');
+    if (!pid || !m.supplier_id) continue;
+    // Prefer a connected CJ mapping when multiple mappings ever exist.
+    const prev = mappingByProduct.get(pid);
+    if (!prev || (m.provider === 'cj_dropshipping' && prev.provider !== 'cj_dropshipping')) {
+      mappingByProduct.set(pid, m);
+    }
+  }
+
+  const groups = new Map();
+  for (const item of orderItems) {
+    const mapping = mappingByProduct.get(String(item.ref_id || ''));
+    if (!mapping?.supplier_id) continue; // own-stock/unmapped items do not go to supplier fulfillment.
+    const key = String(mapping.supplier_id);
+    if (!groups.has(key)) groups.set(key, { supplier_id: key, provider: mapping.provider || null, items: [] });
+    groups.get(key).items.push({
+      order_item_id: item.id,
+      product_id: item.ref_id,
+      title_ar: item.title_ar,
+      title_en: item.title_en,
+      quantity: Number(item.quantity || 1),
+      unit_price: Number(item.unit_price || 0),
+      line_total: Number(item.line_total || 0),
+      supplier_mapping_id: mapping.id,
+      supplier_product_id: mapping.supplier_product_id,
+      supplier_price: mapping.supplier_price != null ? Number(mapping.supplier_price) : null,
+      supplier_stock: mapping.supplier_stock != null ? Number(mapping.supplier_stock) : null,
+      supplier_currency: mapping.currency || null,
+      // Variant is retained only as a reference for later admin review; no purchase is triggered.
+      supplier_variant_id:
+        mapping.raw_snapshot?.selected_variant_id ||
+        mapping.raw_snapshot?.variant_id ||
+        mapping.raw_snapshot?.vid ||
+        null,
+    });
+  }
+
+  let queued = 0;
+  for (const group of groups.values()) {
+    const existing = await sb(
+      `fulfillment_requests?order_id=eq.${encodeURIComponent(order.id)}&supplier_id=eq.${encodeURIComponent(group.supplier_id)}&select=id,status&limit=1`
+    );
+    if (Array.isArray(existing.data) && existing.data.length) continue;
+
+    const payload = {
+      provider: group.provider,
+      order_number: order.order_number,
+      payment_status: 'paid',
+      auto_purchase: false,
+      requires_admin_approval: true,
+      customer: {
+        name: order.customer_name || null,
+        email: order.customer_email || null,
+        phone: order.customer_phone || null,
+      },
+      shipping: {
+        address: order.shipping_address || null,
+        city: order.shipping_city || null,
+        postal_code: order.shipping_postal_code || null,
+        country: order.shipping_country || 'SA',
+      },
+      items: group.items,
+      totals: {
+        order_total: Number(order.total || 0),
+        currency: order.currency || 'SAR',
+      },
+    };
+
+    const ins = await sb('fulfillment_requests', {
+      method: 'POST',
+      body: {
+        order_id: order.id,
+        supplier_id: group.supplier_id,
+        status: 'awaiting_approval',
+        request_payload: payload,
+        response_payload: {},
+      },
+      prefer: 'return=minimal',
+    });
+    if (!ins.error) queued += 1;
+    else console.error('[fulfillment_queue] insert failed', String(ins.error).slice(0, 160));
+  }
+
+  return { queued, supplier_groups: groups.size, auto_purchase: false };
+}
+
 async function handleWhopWebhook(req, res, rawBodyInput) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Method not allowed' });
@@ -662,16 +772,40 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
       });
       return json(res, 200, { ok: true, review_required: true });
     }
+    const paidAt = new Date().toISOString();
     await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
       method: 'PATCH',
       body: {
         payment_status: 'paid', status: 'confirmed', provider_payment_id: paymentId,
-        payment_meta: { ...(order.payment_meta || {}), paid_at: new Date().toISOString(), last_event: eventType, auto_purchase: false },
-        updated_at: new Date().toISOString(),
+        payment_meta: { ...(order.payment_meta || {}), paid_at: paidAt, last_event: eventType, auto_purchase: false },
+        updated_at: paidAt,
       },
       prefer: 'return=minimal',
     });
-    return json(res, 200, { ok: true, order_id: order.id, payment_status: 'paid' });
+
+    // Queue fulfillment only after payment is verified. Supplier submission stays disabled.
+    const paidOrder = {
+      ...order,
+      payment_status: 'paid',
+      status: 'confirmed',
+      provider_payment_id: paymentId,
+      payment_meta: { ...(order.payment_meta || {}), paid_at: paidAt, last_event: eventType, auto_purchase: false },
+    };
+    let fulfillment = { queued: 0, auto_purchase: false };
+    try {
+      fulfillment = await queueFulfillmentForPaidOrder(paidOrder);
+    } catch (err) {
+      console.error('[fulfillment_queue] unexpected error', String(err?.message || err).slice(0, 160));
+      // Payment acknowledgement must not fail because fulfillment queueing failed.
+    }
+
+    return json(res, 200, {
+      ok: true,
+      order_id: order.id,
+      payment_status: 'paid',
+      fulfillment,
+      auto_purchase: false,
+    });
   }
   if (eventType === 'payment.failed' || eventType === 'payment.canceled') {
     if (order) {
