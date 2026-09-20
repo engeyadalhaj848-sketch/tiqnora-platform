@@ -148,6 +148,42 @@
   ],
   "rewrites": [
     {
+      "source": "/api/aliexpress/callback",
+      "destination": "/api/billing/providers?route=aliexpress_callback"
+    },
+    {
+      "source": "/api/aliexpress/callback/",
+      "destination": "/api/billing/providers?route=aliexpress_callback"
+    },
+    {
+      "source": "/api/aliexpress/status",
+      "destination": "/api/billing/providers?route=aliexpress_status"
+    },
+    {
+      "source": "/api/aliexpress/status/",
+      "destination": "/api/billing/providers?route=aliexpress_status"
+    },
+    {
+      "source": "/api/payments/create-checkout",
+      "destination": "/api/billing/providers?route=whop_create_checkout"
+    },
+    {
+      "source": "/api/payments/order-status",
+      "destination": "/api/billing/providers?route=whop_order_status"
+    },
+    {
+      "source": "/api/payments/whop/webhook",
+      "destination": "/api/billing/providers?route=whop_webhook"
+    },
+    {
+      "source": "/order-complete",
+      "destination": "/order-complete.html"
+    },
+    {
+      "source": "/order-complete/",
+      "destination": "/order-complete.html"
+    },
+    {
       "source": "/api/webhooks/meta",
       "destination": "/api/social/webhook?platform=meta"
     },
