@@ -93,10 +93,15 @@ async function boot() {
   }
   if (!db) { renderLogin(); return; }
   const { data: { session } } = await db.auth.getSession();
-  if (!session) { renderLogin(); return; }
-  const { data: { user } } = await db.auth.getUser();
-  let { data: profile } = await db.from('profiles').select('*').eq('id', user.id).single();
-  if (!profile) { await new Promise(r => setTimeout(r, 1200)); ({ data: profile } = await db.from('profiles').select('*').eq('id', user.id).single()); }
+  if (!session?.user) { renderLogin(); return; }
+  const user = session.user;
+  // Slim profile select — avoid select('*') and extra getUser() round-trip
+  const PROFILE_COLS = 'id,email,full_name,role,is_active,avatar_url';
+  let { data: profile } = await db.from('profiles').select(PROFILE_COLS).eq('id', user.id).maybeSingle();
+  if (!profile) {
+    await new Promise(r => setTimeout(r, 400));
+    ({ data: profile } = await db.from('profiles').select(PROFILE_COLS).eq('id', user.id).maybeSingle());
+  }
   if (!profile) { renderLogin('تعذر إنشاء الملف الشخصي — تأكد من تنفيذ schema.sql'); return; }
   if (profile.role === 'customer') {
     $('#app-root').innerHTML = `<div class="login-wrap"><div class="login-card" style="text-align:center">
@@ -238,7 +243,7 @@ VIEWS['social-inbox'] = async v => {
   v.innerHTML = dbBanner() + '<div class="grid-stats" id="social-stats"></div><div class="card"><h2>صندوق التواصل الموحد</h2><p class="card-desc">كل المنصات تدخل إلى مسار موحّد. إضافة منصة جديدة لا تغيّر بنية العملاء أو قواعد الأتمتة.</p><div class="social-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0"><select id="social-platform-filter"><option value="">كل المنصات</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="whatsapp">WhatsApp</option></select><select id="social-status-filter"><option value="">كل الحالات</option><option value="new">جديد</option><option value="matched">مطابق</option><option value="processed">تمت المعالجة</option><option value="ignored">متجاهل</option><option value="failed">فشل</option></select><select id="social-intent-filter"><option value="">كل النوايا</option><option value="business_audit">طلب تحليل</option></select></div><div id="social-events">جارٍ التحميل…</div></div>';
   const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
     db.from('social_connections').select('id,platform,status'),
-    db.from('social_events').select('*').order('received_at', { ascending: false }).limit(50)
+    db.from('social_events').select('id,platform,intent,processing_status,received_at,author_name,content').order('received_at', { ascending: false }).limit(30)
   ]);
   if (error) { $('#social-events').innerHTML = '<div class="empty">نفّذ ملف الترحيل 004_social_inbox.sql في Supabase أولًا.</div>'; return; }
   const matched = events.filter(x => x.intent === 'business_audit').length;
@@ -257,40 +262,51 @@ VIEWS.workforce = v => {
 
 /* ---------- Dashboard ---------- */
 VIEWS.dashboard = async v => {
+  v.innerHTML = `<div class="card"><p style="color:var(--muted);margin:0">جارٍ تحميل نظرة عامة…</p></div>`;
   const ym = new Date().toISOString().slice(0, 7);
-  const [
-    orders, leads, products, services, shopCustomers, portalCustomers,
-    agents, usageRows, reqs, subs, plans, invoices, notifs
-  ] = await Promise.all([
+  // Count/head for counters — never download full tables for .length
+  const settled = await Promise.allSettled([
     db.from('orders').select('id,order_number,customer_name,total,status,created_at').order('created_at',{ascending:false}).limit(8),
-    db.from('leads').select('id').limit(500),
-    db.from('products').select('id'),
-    db.from('services').select('id'),
-    db.from('customers').select('id'),
-    db.from('profiles').select('id').eq('role','customer'),
-    db.from('ai_agents').select('slug,is_enabled,status,model').eq('is_enabled', true),
-    db.from('usage_meters').select('ai_requests,organization_id,period_ym').eq('period_ym', ym).limit(500),
-    db.from('service_requests').select('id,status,title,created_at').order('created_at',{ascending:false}).limit(200),
-    db.from('subscriptions').select('id,status,saas_plans(slug,name_ar,price_monthly)'),
-    db.from('saas_plans').select('id,slug,is_public'),
-    db.from('billing_invoices').select('amount,status').eq('status','pending'),
-    db.from('notifications').select('id').eq('audience','admin').is('read_at', null).limit(100),
+    db.from('leads').select('id', { count: 'exact', head: true }),
+    db.from('products').select('id', { count: 'exact', head: true }),
+    db.from('services').select('id', { count: 'exact', head: true }),
+    db.from('customers').select('id', { count: 'exact', head: true }),
+    db.from('profiles').select('id', { count: 'exact', head: true }).eq('role','customer'),
+    db.from('ai_agents').select('slug,is_enabled,status,model').eq('is_enabled', true).limit(30),
+    db.from('usage_meters').select('ai_requests').eq('period_ym', ym).limit(100),
+    db.from('service_requests').select('id,status,title,created_at').order('created_at',{ascending:false}).limit(8),
+    db.from('subscriptions').select('id,status,saas_plans(slug,name_ar,price_monthly)').eq('status','active').limit(100),
+    db.from('billing_invoices').select('amount,status').eq('status','pending').limit(50),
+    db.from('notifications').select('id', { count: 'exact', head: true }).eq('audience','admin').is('read_at', null),
+    db.from('service_requests').select('id', { count: 'exact', head: true }).eq('status','new'),
   ]);
+  const val = (i) => settled[i].status === 'fulfilled' ? settled[i].value : { data: null, count: null };
+  const orders = val(0);
+  const portalCustomers = val(5);
+  const agents = val(6);
+  const usageRows = val(7);
+  const reqs = val(8);
+  const subs = val(9);
+  const invoices = val(10);
+  const notifs = val(11);
+  const newReqsCount = val(12);
   const aiUsed = (usageRows.data || []).reduce((s, r) => s + (r.ai_requests || 0), 0);
-  const newReqs = (reqs.data || []).filter(r => r.status === 'new').length;
-  const activeSubs = (subs.data || []).filter(s => s.status === 'active').length;
-  const mrr = (subs.data || []).filter(s => s.status === 'active').reduce((s, x) => s + Number(x.saas_plans?.price_monthly || 0), 0);
+  const newReqs = typeof newReqsCount.count === 'number' ? newReqsCount.count : (reqs.data || []).filter(r => r.status === 'new').length;
+  const activeSubs = (subs.data || []).length;
+  const mrr = (subs.data || []).reduce((s, x) => s + Number(x.saas_plans?.price_monthly || 0), 0);
   const pendingRev = (invoices.data || []).reduce((s, x) => s + Number(x.amount || 0), 0);
+  const portalCount = typeof portalCustomers.count === 'number' ? portalCustomers.count : (portalCustomers.data?.length || 0);
+  const notifCount = typeof notifs.count === 'number' ? notifs.count : (notifs.data?.length || 0);
   v.innerHTML = `
   <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
-    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">عملاء البوابة</div><div style="font-size:1.4rem;font-weight:700">${portalCustomers.data?.length||0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">عملاء البوابة</div><div style="font-size:1.4rem;font-weight:700">${portalCount}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">اشتراكات نشطة</div><div style="font-size:1.4rem;font-weight:700">${activeSubs}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">إيراد متوقع شهري</div><div style="font-size:1.25rem;font-weight:700">${money(mrr)}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">فواتير معلّقة</div><div style="font-size:1.25rem;font-weight:700">${money(pendingRev)}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">استخدام AI (${ym})</div><div style="font-size:1.4rem;font-weight:700">${aiUsed}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">طلبات خدمات جديدة</div><div style="font-size:1.4rem;font-weight:700">${newReqs}</div></div>
     <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">وكلاء نشطون</div><div style="font-size:1.4rem;font-weight:700">${agents.data?.length||0}</div></div>
-    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">إشعارات غير مقروءة</div><div style="font-size:1.4rem;font-weight:700">${notifs.data?.length||0}</div></div>
+    <div class="card" style="padding:14px"><div style="color:var(--muted);font-size:.8rem">إشعارات غير مقروءة</div><div style="font-size:1.4rem;font-weight:700">${notifCount}</div></div>
   </div>
   <div class="card"><div class="card-head"><h2 style="margin:0">آخر طلبات المتجر</h2><a class="btn-sm" href="#orders">الكل</a></div>
   <div style="overflow:auto">${tbl(['رقم','عميل','الإجمالي','حالة'], (orders.data||[]).map(o=>`<tr><td dir="ltr">${esc(o.order_number)}</td><td>${esc(o.customer_name)}</td><td>${money(o.total)}</td><td><span class="pill ${pillCls(o.status)}">${STATUS_AR[o.status]||o.status}</span></td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--muted)">لا طلبات</td></tr>')}</div></div>
@@ -411,8 +427,8 @@ VIEWS.products = async v => {
   <div id="tbl"></div></div>`;
 
   const [{ data: cats }, { data: brands }] = await Promise.all([
-    db.from('categories').select('*').eq('type', 'product').order('sort_order'),
-    db.from('brands').select('*').order('name')
+    db.from('categories').select('id,name_ar,slug,sort_order').eq('type', 'product').order('sort_order'),
+    db.from('brands').select('id,name,slug').order('name')
   ]);
   (cats||[]).forEach(c => {
     const o = document.createElement('option');
@@ -452,17 +468,31 @@ VIEWS.products = async v => {
     { k: 'seo_title_ar', t: 'SEO عنوان' }, { k: 'seo_description_ar', t: 'SEO وصف', type: 'textarea' },
   ];
 
-  let q = db.from('products').select('*, categories(name_ar), brands(name)').order('sort_order');
+  // List fields only — full description loaded on edit modal row object when needed
+  const PROD_LIST =
+    'id,slug,sku,name_ar,name_en,price,discount_percent,cost_price,stock_quantity,is_active,featured,sort_order,' +
+    'quality_score,media_status,last_verification_status,last_review_status,seo_title_ar,seo_description_ar,' +
+    'images,category_id,brand_id,supplier_name,campaign_tags,specifications,categories(name_ar),brands(name)';
+  const pageSize = 40;
+  const page = Math.max(0, Number(window.__prodPage || 0));
+  let q = db.from('products').select(PROD_LIST).order('sort_order').range(page * pageSize, page * pageSize + pageSize - 1);
   if (f.mode === 'draft') q = q.eq('is_active', false);
   if (f.mode === 'live') q = q.eq('is_active', true);
   if (f.category_id) q = q.eq('category_id', f.category_id);
   if (f.brand_id) q = q.eq('brand_id', f.brand_id);
-  const { data: rawRows } = await q;
-  let rows = rawRows || [];
   if (f.q) {
-    const qq = f.q.trim().toLowerCase();
-    rows = rows.filter(p => (p.name_ar||'').toLowerCase().includes(qq) || (p.name_en||'').toLowerCase().includes(qq) || (p.sku||'').toLowerCase().includes(qq) || (p.slug||'').toLowerCase().includes(qq));
+    // Prefer DB-side filter for common text search when possible
+    const qq = f.q.trim();
+    if (qq) q = q.or(`name_ar.ilike.%${qq}%,name_en.ilike.%${qq}%,sku.ilike.%${qq}%,slug.ilike.%${qq}%`);
   }
+  const [prodRes, allC, draftC, liveC] = await Promise.all([
+    q,
+    db.from('products').select('id', { count: 'exact', head: true }),
+    db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', false),
+    db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true),
+  ]);
+  let rows = prodRes.data || [];
+  // Client filters for quality/media modes (still limited to current page)
   if (f.mode === 'missing_images') {
     rows = rows.filter(p => !p.images || !p.images.length || (p.specifications && p.specifications.image_status === 'placeholder_reuse_pending_official'));
   }
@@ -484,10 +514,9 @@ VIEWS.products = async v => {
   if (f.mode === 'ready_verify') {
     rows = rows.filter(p => p.last_verification_status === 'READY_TO_PUBLISH' || (p.quality_score != null && p.quality_score >= 90));
   }
-
-  const allCount = (await db.from('products').select('id', { count: 'exact', head: true })).count;
-  const draftCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', false)).count;
-  const liveCount = (await db.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true)).count;
+  const allCount = allC.count;
+  const draftCount = draftC.count;
+  const liveCount = liveC.count;
   $('#prod-stats').innerHTML = `<div class="stat"><b>${allCount??'—'}</b><span>الكل</span></div><div class="stat"><b>${draftCount??'—'}</b><span>مسودات</span></div><div class="stat"><b>${liveCount??'—'}</b><span>منشور</span></div><div class="stat"><b>${rows.length}</b><span>المعروض</span></div>`;
 
   $('#pf-apply').onclick = () => {
@@ -651,7 +680,6 @@ VIEWS.products = async v => {
         }
         toast(`تحقق AI: مكتمل ${n} · جاهز ${ready} · يحتاج إصلاح ${needs}`);
         VIEWS.products(v); return;
-      }
       } else if (payload.action === 'ai_market') {
         let n = 0, add = 0, rev = 0, rej = 0;
         for (const id of ids.slice(0, 50)) {
@@ -682,7 +710,6 @@ VIEWS.products = async v => {
         }
         toast(`تحليل سوق: ${n} · ADD ${add} · REVIEW ${rev} · REJECT ${rej}`);
         VIEWS.products(v); return;
-      }
       } else if (payload.action === 'ai_pricing') {
         let n = 0;
         for (const id of ids.slice(0, 50)) {
@@ -1766,7 +1793,7 @@ VIEWS.packages = async v => {
 /* ---------- Orders ---------- */
 VIEWS.orders = async v => {
   v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>الطلبات</h2><p class="card-desc">إدارة الطلبات وتحديث حالتها وإنشاء شحنات.</p></div></div><div id="tbl"></div></div>`;
-  const { data: rows } = await db.from('orders').select('*').order('created_at', { ascending: false }).limit(200);
+  const { data: rows } = await db.from('orders').select('id,order_number,customer_name,customer_phone,customer_email,shipping_city,shipping_address,total,shipping_cost,payment_status,payment_method,status,notes,created_at').order('created_at', { ascending: false }).limit(50);
   $('#tbl').innerHTML = tbl(['رقم الطلب', 'العميل', 'الجوال', 'الإجمالي', 'الدفع', 'الحالة', 'التاريخ', 'إجراءات'], (rows || []).map(o =>
     `<tr><td dir="ltr"><b>${esc(o.order_number)}</b></td><td>${esc(o.customer_name)}<br><small style="color:var(--muted)">${esc(o.shipping_city || '')}</small></td><td dir="ltr">${esc(o.customer_phone)}</td><td>${money(o.total)}</td>
      <td><span class="pill ${pillCls(o.payment_status)}">${STATUS_AR[o.payment_status]}</span></td>
@@ -1822,7 +1849,7 @@ VIEWS.leads = async v => {
     <div class="card"><h2>أحداث Analytics (أحدث)</h2><div id="ev"></div></div>
     <div class="card"><h2>أتمتة تسويق</h2><div id="auto"></div></div>`;
   const LBL = { new: 'جديد', contacted: 'تم التواصل', qualified: 'مؤهل', converted: 'تحوّل لعميل', closed: 'مغلق' };
-  const { data: rows } = await db.from('leads').select('*').order('created_at', { ascending: false }).limit(300);
+  const { data: rows } = await db.from('leads').select('id,name,company,source,interest,message,email,phone,status,notes,created_at').order('created_at', { ascending: false }).limit(50);
   $('#tbl').innerHTML = tbl(['الاسم','المصدر','الاهتمام','البريد','الحالة','ملاحظات','تاريخ'], (rows || []).map(l =>
     `<tr>
       <td>${esc(l.name)}${l.company?`<br><small>${esc(l.company)}</small>`:''}</td>
