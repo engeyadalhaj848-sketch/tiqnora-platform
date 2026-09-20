@@ -5,8 +5,5 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs"
-  },
-  "dependencies": {
-    "@whop/sdk": "^1.1.5"
   }
 }
