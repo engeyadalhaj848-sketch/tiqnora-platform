@@ -258,6 +258,8 @@ async function buildValidatedOrderFromBody(body) {
       product_id: p.id,
       item_type: 'product',
       ref_id: p.id,
+      slug: p.slug,
+      sku: p.sku,
       title_ar: p.name_ar || p.name_en || p.slug,
       title_en: p.name_en || p.name_ar || p.slug,
       unit_price: unit,
@@ -277,7 +279,8 @@ async function buildValidatedOrderFromBody(body) {
       if (val.free_threshold != null) freeThreshold = Number(val.free_threshold) || freeThreshold;
     }
   } catch { /* defaults */ }
-  if (subtotal >= freeThreshold) shippingCost = 0;
+  const testProductFreeShipping = lineItems.length > 0 && lineItems.every((it) => it.sku === 'TQ-LIVE-TEST-001');
+  if (subtotal >= freeThreshold || testProductFreeShipping) shippingCost = 0;
   const totalSar = money2(subtotal + shippingCost);
   const orderNumber = `TQ-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   const notes = String(body.notes || '').trim().slice(0, 1000) || null;
@@ -447,6 +450,7 @@ async function handleWhopCreateCheckout(req, res) {
     subtotal = money2(subtotal + lineTotal);
     lineItems.push({
       product_id: p.id, item_type: 'product', ref_id: p.id,
+      slug: p.slug, sku: p.sku,
       title_ar: p.name_ar || p.name_en || p.slug,
       title_en: p.name_en || p.name_ar || p.slug,
       unit_price: unit, quantity: qty, line_total: lineTotal,
@@ -464,7 +468,8 @@ async function handleWhopCreateCheckout(req, res) {
       if (val.free_threshold != null) freeThreshold = Number(val.free_threshold) || freeThreshold;
     }
   } catch { /* defaults */ }
-  if (subtotal >= freeThreshold) shippingCost = 0;
+  const testProductFreeShipping = lineItems.length > 0 && lineItems.every((it) => it.sku === 'TQ-LIVE-TEST-001');
+  if (subtotal >= freeThreshold || testProductFreeShipping) shippingCost = 0;
   const totalSar = money2(subtotal + shippingCost);
   const orderNumber = `TQ-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
