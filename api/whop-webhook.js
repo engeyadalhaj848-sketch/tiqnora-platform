@@ -7,7 +7,7 @@ import {
   verifyWebhookSignature,
   parseWebhookEvent,
   isSandbox,
-} from '../../../lib/payments/whop.js';
+} from '../lib/payments/whop.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
