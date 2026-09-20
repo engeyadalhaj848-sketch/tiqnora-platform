@@ -127,9 +127,33 @@
     },
     async getProducts() {
       const cached = cacheGet('products'); if (cached) return cached;
-      const rows = await fromDb('products', '*, categories(slug, name_ar, name_en), brands(slug, name)', { col: 'sort_order' });
+      // Public catalog select — still needs is_active for storefront filter; strip internal cost fields after fetch
+      const rows = await fromDb('products', 'id,slug,sku,name_ar,name_en,description_ar,description_en,delivery_note_ar,delivery_note_en,price,discount_percent,stock_quantity,track_stock,images,is_active,featured,sort_order,specifications,categories(slug, name_ar, name_en), brands(slug, name)', { col: 'sort_order' });
       if (!rows) return null;
-      cacheSet('products', rows); return rows;
+      // Hard allowlist: never pass supplier cost / internal commerce fields to browser consumers of TiqnoraDB.getProducts
+      const publicRows = rows.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        sku: r.sku,
+        name_ar: r.name_ar,
+        name_en: r.name_en,
+        description_ar: r.description_ar,
+        description_en: r.description_en,
+        delivery_note_ar: r.delivery_note_ar,
+        delivery_note_en: r.delivery_note_en,
+        price: r.price,
+        discount_percent: r.discount_percent,
+        stock_quantity: r.stock_quantity,
+        track_stock: r.track_stock,
+        images: r.images,
+        is_active: r.is_active,
+        featured: r.featured,
+        sort_order: r.sort_order,
+        specifications: r.specifications,
+        categories: r.categories,
+        brands: r.brands,
+      }));
+      cacheSet('products', publicRows); return publicRows;
     },
     async getCategories(type) {
       const cached = cacheGet('cat-' + type); if (cached) return cached;

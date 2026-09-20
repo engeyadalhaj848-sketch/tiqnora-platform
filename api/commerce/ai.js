@@ -1246,8 +1246,8 @@ async function handleSupplierCenter(body = {}) {
           is_active: false,
           featured: false,
           fulfillment_type: 'dropship',
-          delivery_note_ar: product.shipping_estimate || '7-15 يوم عمل',
-          delivery_note_en: product.shipping_estimate || '7-15 business days',
+          delivery_note_ar: 'التوصيل المتوقع: 7–15 يومًا',
+          delivery_note_en: 'Estimated delivery: 7–15 days',
         },
         prefer: 'return=representation',
       });
@@ -1475,9 +1475,22 @@ async function handleSupplierCenter(body = {}) {
       if (body.name_en) patch.name_en = String(body.name_en).slice(0, 200);
       if (body.description_ar) patch.description_ar = String(body.description_ar).slice(0, 8000);
       if (body.description_en) patch.description_en = String(body.description_en).slice(0, 8000);
+      if (body.delivery_note_ar) patch.delivery_note_ar = String(body.delivery_note_ar).slice(0, 300);
+      if (body.delivery_note_en) patch.delivery_note_en = String(body.delivery_note_en).slice(0, 300);
       if (body.stock != null && Number(body.stock) >= 0) patch.stock_quantity = Number(body.stock);
+      // cost_price is INTERNAL — only update when explicitly passed by admin tools
       if (body.cost_price != null) patch.cost_price = Number(body.cost_price);
-      if (Array.isArray(body.images) && body.images.length) patch.images = body.images;
+      if (Array.isArray(body.images) && body.images.length) {
+        // flatten accidental nested JSON strings in image arrays
+        const imgs = [];
+        for (const im of body.images) {
+          if (typeof im === 'string' && im.startsWith('http')) imgs.push(im);
+          else if (typeof im === 'string' && im.trim().startsWith('[')) {
+            try { const parsed = JSON.parse(im); if (Array.isArray(parsed)) imgs.push(...parsed.filter((x) => typeof x === 'string' && x.startsWith('http'))); } catch (_) {}
+          }
+        }
+        if (imgs.length) patch.images = [...new Set(imgs)].slice(0, 12);
+      }
     } else {
       patch.is_active = false;
     }

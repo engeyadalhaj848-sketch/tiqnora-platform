@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" id="meta-desc" content="منتجات متجر Tiqnora AI في السعودية — تفاصيل المنتج، الشحن، والدعم." />
   <link rel="canonical" id="canonical-link" href="https://www.tiqnora.com/shop" />
   <title>المنتج | Tiqnora AI</title>
@@ -11,21 +11,38 @@
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-XW3K04YQMH"></script>
   <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-XW3K04YQMH',{anonymize_ip:true});</script>
   <style>
-    .p-layout{display:grid;grid-template-columns:1.1fr 1fr;gap:28px;align-items:start}
-    .p-gallery{background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-height:280px;display:flex;align-items:center;justify-content:center}
-    .p-gallery img{width:100%;height:100%;object-fit:contain;max-height:420px;background:#0b1220}
-    .p-meta .price-row{display:flex;align-items:baseline;gap:12px;margin:12px 0}
-    .p-meta .price-row strong{font-size:1.6rem;color:var(--accent)}
+    .p-layout{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:28px;align-items:start}
+    .p-gallery{background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-height:240px;display:flex;align-items:center;justify-content:center;padding:12px}
+    .p-gallery img{width:100%;height:auto;max-height:420px;object-fit:contain;background:#0b1220;border-radius:12px}
+    .p-meta h1{margin:0 0 10px;font-size:clamp(1.25rem,4.2vw,1.9rem);line-height:1.35}
+    .p-meta .price-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px;margin:12px 0}
+    .p-meta .price-row strong{font-size:clamp(1.35rem,4vw,1.7rem);color:var(--accent)}
     .p-meta s{color:var(--muted)}
+    .p-desc{color:var(--text);line-height:1.75;margin:12px 0 4px;font-size:1rem}
+    .p-ship{color:var(--muted);margin:0 0 8px;font-size:.95rem}
     .qty-row{display:flex;align-items:center;gap:10px;margin:16px 0}
-    .qty-row button{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text)}
+    .qty-row button{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);font-size:1.1rem}
+    .qty-row #q-val{min-width:28px;text-align:center;font-weight:700}
     .trust-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
-    .trust-item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:.85rem;text-align:center}
+    .trust-item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 10px;font-size:.82rem;text-align:center;line-height:1.45}
     .faq details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
     .faq summary{cursor:pointer;font-weight:600}
-    .wa-btn{display:inline-flex;align-items:center;gap:8px;background:#25D366;color:#062;font-weight:700;border:none;border-radius:12px;padding:12px 16px;text-decoration:none}
+    .wa-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#25D366;color:#062;font-weight:700;border:none;border-radius:12px;padding:14px 16px;text-decoration:none;box-sizing:border-box}
     .p-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
-    @media(max-width:800px){.p-layout{grid-template-columns:1fr}.trust-row{grid-template-columns:1fr}}
+    .p-actions .btn{padding:14px 16px;font-size:1rem}
+    .stock-pill{display:inline-block;font-size:.85rem;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-bottom:8px}
+    .stock-pill.ok{color:#86efac;border-color:rgba(134,239,172,.35)}
+    .stock-pill.out{color:#fca5a5;border-color:rgba(252,165,165,.35)}
+    @media (max-width:800px){
+      .p-layout{grid-template-columns:1fr;gap:16px}
+      .p-gallery{min-height:200px;border-radius:14px;padding:8px}
+      .p-gallery img{max-height:280px}
+      .trust-row{grid-template-columns:1fr;gap:8px}
+      .p-meta h1{font-size:1.35rem}
+      .p-actions{flex-direction:column}
+      .p-actions .btn,.p-actions .wa-btn{width:100%;justify-content:center;text-align:center}
+      .store-main .container{padding-left:14px;padding-right:14px}
+    }
   </style>
 </head>
 <body>
@@ -46,117 +63,152 @@
   <script src="js/db.js" defer></script>
   <script src="script.js" defer></script>
   <script src="js/analytics.js" defer></script>
-  <script src="js/whatsapp.js" defer></script>
-  <script defer>
-  window.addEventListener('DOMContentLoaded', () => {
-    const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n)||0)} ر.س`;
-    const esc = s => String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-    const slug = new URLSearchParams(location.search).get('slug');
-    const wrap = document.querySelector('#product-wrap');
-    const year = document.querySelector('#year'); if (year) year.textContent = new Date().getFullYear();
-    const WA = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) || '966551341398';
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const y = document.getElementById('year'); if (y) y.textContent = new Date().getFullYear();
+    const wrap = document.getElementById('product-wrap');
+    const money = (n) => new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(Number(n)||0);
+    const esc = (s) => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    function scrubPublicText(input) {
+      if (!input) return '';
+      let s = String(input);
+      const banned = [
+        /CJdropshipping/gi, /\bCJ\b/g, /supplier freight/gi, /verified supplier/gi,
+        /landed cost/gi, /pricing buffer/gi, /gross margin/gi,
+        /\bVID\b/g, /compliance_review/gi, /pending_review/gi, /requires_check/gi,
+        /estimate_only/gi, /inventory_source/gi, /freight_source/gi, /auto_purchase/gi,
+        /تكلفة المورد/g, /سعر المورد/g, /حسب المورد/g, /من المورد/g, /المورد الخارجي/g,
+        /شحن المورد/g, /مُتحقق/g, /متحقق/g, /\bfreight\b/gi, /\blanded\b/gi
+      ];
+      for (const re of banned) s = s.replace(re, '');
+      return s.replace(/\s{2,}/g, ' ').replace(/\s+([.،,])/g, '$1').trim();
+    }
+
+    function publicDeliveryNote(raw) {
+      const s = scrubPublicText(raw || '');
+      if (!s) return 'يتم احتساب مدة التوصيل عند إتمام الطلب';
+      const m = s.match(/(\d+)\s*[-–—]\s*(\d+)\s*(day|days|يوم|أيام)?/i);
+      if (m) return `التوصيل المتوقع: ${m[1]}–${m[2]} يومًا`;
+      if (/توصيل|شحن|يوم/.test(s)) return s;
+      return 'يتم احتساب مدة التوصيل عند إتمام الطلب';
+    }
+
+    function publicImages(p) {
+      const raw = p.images;
+      const out = [];
+      const push = (u) => { if (typeof u === 'string' && /^https?:\/\//i.test(u) && !out.includes(u)) out.push(u); };
+      if (Array.isArray(raw)) {
+        for (const item of raw) {
+          if (typeof item === 'string' && item.trim().startsWith('[')) {
+            try { JSON.parse(item).forEach(push); } catch (_) {}
+          } else push(item);
+        }
+      }
+      return out;
+    }
+
+    /** Public allowlist view-model — never expose cost_price / supplier internals to UI */
+    function toPublicProduct(p) {
+      return {
+        id: p.id,
+        slug: p.slug,
+        name_ar: scrubPublicText(p.name_ar || p.name_en || 'منتج'),
+        name_en: scrubPublicText(p.name_en || ''),
+        description_ar: scrubPublicText(p.description_ar || ''),
+        description_en: scrubPublicText(p.description_en || ''),
+        delivery_note_ar: publicDeliveryNote(p.delivery_note_ar || p.delivery_note_en || ''),
+        price: Number(p.price) || 0,
+        discount_percent: Number(p.discount_percent) || 0,
+        stock_quantity: Number(p.stock_quantity) || 0,
+        track_stock: p.track_stock !== false,
+        images: publicImages(p),
+        categories: p.categories ? { name_ar: p.categories.name_ar, slug: p.categories.slug } : null,
+        brands: p.brands ? { name: p.brands.name } : null,
+        specifications: p.specifications && typeof p.specifications === 'object' ? p.specifications : null,
+        sku: (p.sku && !/^CJ-/i.test(String(p.sku))) ? p.sku : (p.slug || ''),
+      };
+    }
 
     function renderCount(){ const c=(window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0); const el=document.querySelector('#store-cart-count'); if(el) el.textContent=c; }
 
-    async function load(){
+    async function load() {
+      const slug = new URLSearchParams(location.search).get('slug');
       if (!slug) { wrap.innerHTML = '<p>منتج غير محدد. <a href="shop.html">العودة للمتجر</a></p>'; return; }
-      await window.TiqnoraDB?.ready?.();
       const all = await window.TiqnoraDB?.getProducts?.() || [];
-      const p = all.find(x => x.slug === slug);
-      if (!p) { wrap.innerHTML = '<p>المنتج غير موجود. <a href="shop.html">المتجر</a></p>'; return; }
-
-      const hasDisc = Number(p.discount_percent) > 0;
+      const raw = all.find(x => x.slug === slug);
+      if (!raw || raw.is_active === false) { wrap.innerHTML = '<p>المنتج غير موجود. <a href="shop.html">المتجر</a></p>'; return; }
+      const p = toPublicProduct(raw);
+      const hasDisc = p.discount_percent > 0;
       const final = hasDisc ? p.price * (1 - p.discount_percent/100) : p.price;
-      const out = p.track_stock && p.stock_quantity <= 0;
-      const img = (p.images||[])[0];
-      const waText = encodeURIComponent(`مرحباً، أريد الاستفسار عن هذا المنتج: ${p.name_ar}`);
+      const isOut = p.track_stock && p.stock_quantity <= 0;
+      const img = p.images[0] || '';
+      const waText = encodeURIComponent('مرحباً، أريد الاستفسار عن هذا المنتج: ' + p.name_ar);
+      const wa = (window.TIQNORA_CONFIG && window.TIQNORA_CONFIG.whatsapp) ? window.TIQNORA_CONFIG.whatsapp : '966551341398';
 
-      document.title = `${p.name_ar} | Tiqnora AI`;
+      document.title = p.name_ar + ' | Tiqnora AI';
       const canon = document.getElementById('canonical-link');
-      if (canon) canon.setAttribute('href', 'https://www.tiqnora.com/product?slug=' + encodeURIComponent(p.slug));
+      if (canon) canon.setAttribute('href', 'https://www.tiqnora.com/product?slug=' + encodeURIComponent(raw.slug));
       const md = document.getElementById('meta-desc');
       if (md && p.description_ar) md.setAttribute('content', p.description_ar.slice(0, 155));
+      window.TiqnoraAnalytics?.productView?.(raw.slug, p.name_ar, final);
 
-      window.TiqnoraAnalytics?.productView?.(p.slug, p.name_ar, final);
+      const faqHtml = (p.specifications && Array.isArray(p.specifications.faq) ? p.specifications.faq : [])
+        .map(item => '<details><summary>'+esc(item.q||'')+'</summary><p style="color:var(--muted)">'+esc(item.a||'')+'</p></details>').join('');
 
       wrap.innerHTML = `
-      <div class="p-layout">
-        <div class="p-gallery">${img?`<img src="${esc(img)}" alt="${esc(p.name_ar)}">`:'<span style="font-size:3rem;opacity:.4">▣</span>'}</div>
-        <div class="p-meta">
-          <p style="color:var(--muted);margin:0 0 6px">${esc(p.categories?.name_ar||'منتج')}</p>
-          <h1 style="margin:0 0 8px;font-size:clamp(1.4rem,3vw,2rem)">${esc(p.name_ar)}</h1>
-          <div class="price-row"><strong>${money(final)}</strong>${hasDisc?`<s>${money(p.price)}</s> <span class="badge" style="position:static">-${Math.round(p.discount_percent)}%</span>`:''}</div>
-          <p style="color:var(--muted)">${esc(p.delivery_note_ar||'الشحن داخل المملكة')}</p>
-          <p>${esc(p.description_ar||'')}</p>
-          ${(() => {
-            const spec = p.specifications || {};
-            const benefits = spec.benefits_ar || [];
-            if (!benefits.length) return '';
-            return `<ul class="benefit-list">${benefits.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`;
-          })()}
-          <div class="trust-bar">
-            <div class="trust-pill"><b>✅ جودة المنتج</b>مطابق للوصف المعروض</div>
-            <div class="trust-pill"><b>💬 دعم واتساب</b>مساعدة سريعة قبل وبعد الطلب</div>
-            <div class="trust-pill"><b>💳 الدفع</b>عند الاستلام أو تحويل</div>
-            <div class="trust-pill"><b>🚚 الشحن</b>لكل مدن المملكة</div>
+        <div class="p-layout">
+          <div class="p-gallery">${img?'<img src="'+esc(img)+'" alt="'+esc(p.name_ar)+'" loading="eager" decoding="async">':'<span style="font-size:3rem;opacity:.4">▣</span>'}</div>
+          <div class="p-meta">
+            <p style="color:var(--muted);margin:0 0 6px;font-size:.9rem">${esc(p.categories?.name_ar||'منتج')}</p>
+            <h1>${esc(p.name_ar)}</h1>
+            <div class="stock-pill ${isOut?'out':'ok'}">${isOut?'غير متوفر حالياً':'متوفر'}</div>
+            <div class="price-row"><strong>${money(final)}</strong>${hasDisc?'<s>'+money(p.price)+'</s> <span class="badge" style="position:static">-'+Math.round(p.discount_percent)+'%</span>':''}</div>
+            <p class="p-ship">${esc(p.delivery_note_ar)}</p>
+            <p class="p-desc">${esc(p.description_ar||'')}</p>
+            ${isOut?'':'<div class="qty-row"><span>الكمية</span><button type="button" id="q-minus" aria-label="إنقاص">−</button><span id="q-val">1</span><button type="button" id="q-plus" aria-label="زيادة">+</button></div>'}
+            <div class="p-actions">
+              ${isOut?'<button class="btn" disabled>غير متوفر</button>':'<button class="btn btn-primary" id="add-btn">أضف إلى السلة</button>'}
+              <a class="wa-btn" id="wa-btn" href="https://wa.me/${esc(wa)}?text=${waText}" target="_blank" rel="noopener">استفسر عبر واتساب</a>
+            </div>
+            <div class="trust-row">
+              <div class="trust-item">دفع آمن</div>
+              <div class="trust-item">دعم فني</div>
+              <div class="trust-item"><a href="shipping-policy.html" style="color:inherit;text-decoration:none">سياسة الشحن</a></div>
+            </div>
+            <div class="faq">
+              <details open><summary>متى يصل الطلب؟</summary><p style="color:var(--muted)">${esc(p.delivery_note_ar)}</p></details>
+              <details><summary>هل يمكن الاسترجاع؟</summary><p style="color:var(--muted)">راجع <a href="return-policy.html">سياسة الإرجاع</a> للتفاصيل.</p></details>
+              ${faqHtml}
+            </div>
           </div>
-          <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
-            <a href="shipping-policy.html">سياسة الشحن</a> ·
-            <a href="return-policy.html">الاستبدال والإرجاع</a> ·
-            <a href="faq.html">الأسئلة الشائعة</a>
-          </p>
-          ${out ? '<p style="color:#f88">غير متوفر حالياً</p>' : `
-          <div class="qty-row">
-            <span>الكمية</span>
-            <button type="button" id="q-minus">−</button>
-            <b id="q-val">1</b>
-            <button type="button" id="q-plus">+</button>
-          </div>
-          <div class="p-actions">
-            <button class="button button-primary" id="add-btn" type="button">أضف إلى السلة</button>
-            <a class="wa-btn" id="wa-btn" href="https://wa.me/${WA}?text=${waText}" target="_blank" rel="noopener">واتساب</a>
-            <a class="button button-ghost" href="checkout.html">إتمام الطلب</a>
-          </div>`}
-          <section class="faq" style="margin-top:28px">
-            <h2 style="font-size:1.1rem">الأسئلة الشائعة</h2>
-            <details open><summary>متى يصل الطلب؟</summary><p style="color:var(--muted)">${esc(p.delivery_note_ar||'تجهيز 1–3 أيام عمل ثم شحن تقديري حسب المدينة.')}</p></details>
-            <details><summary>هل الدفع عند الاستلام متاح؟</summary><p style="color:var(--muted)">نعم لمعظم المدن، مع خيار التحويل البنكي عند التأكيد.</p></details>
-            <details><summary>ماذا عن الاستبدال؟</summary><p style="color:var(--muted)">تواصل عبر واتساب خلال 48 ساعة من الاستلام عند وجود تلف أو اختلاف عن الوصف. <a href="return-policy.html">سياسة الإرجاع</a></p></details>
-            ${(p.specifications && Array.isArray(p.specifications.faq) ? p.specifications.faq : []).map(item => `<details><summary>${esc(item.q||'')}</summary><p style="color:var(--muted)">${esc(item.a||'')}</p></details>`).join('')}
-          </section>
         </div>
-      </div>
-      <script type="application/ld+json">${JSON.stringify((()=>{
-        const faq = (p.specifications && Array.isArray(p.specifications.faq)) ? p.specifications.faq : [];
-        const schemas = [{
-          "@context":"https://schema.org","@type":"Product",
-          "name": p.name_ar, "description": p.description_ar||"", "sku": p.sku||p.slug,
-          "image": (p.images||[]).slice(0,5),
-          "brand": p.brands?.name ? {"@type":"Brand","name":p.brands.name} : undefined,
-          "offers": {"@type":"Offer","price":final,"priceCurrency":"SAR","availability":out?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}
-        }];
-        if (faq.length) schemas.push({"@context":"https://schema.org","@type":"FAQPage","mainEntity":faq.map(f=>({"@type":"Question","name":f.q||"","acceptedAnswer":{"@type":"Answer","text":f.a||""}}))});
-        schemas.push({"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
-          {"@type":"ListItem","position":1,"name":"الرئيسية","item":"https://www.tiqnora.com/"},
-          {"@type":"ListItem","position":2,"name":"المتجر","item":"https://www.tiqnora.com/shop"},
-          {"@type":"ListItem","position":3,"name":p.name_ar,"item":location.href}
-        ]});
-        return schemas.length===1?schemas[0]:schemas;
-      })())}<\/script>`;
+        <script type="application/ld+json">${JSON.stringify([
+          {"@context":"https://schema.org","@type":"Product","name":p.name_ar,"description":p.description_ar||"","sku":p.sku||raw.slug,"image":p.images.slice(0,5),
+           "offers":{"@type":"Offer","price":final,"priceCurrency":"SAR","availability":isOut?"https://schema.org/OutOfStock":"https://schema.org/InStock","url":location.href}},
+          {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+            {"@type":"ListItem","position":1,"name":"الرئيسية","item":"https://www.tiqnora.com/"},
+            {"@type":"ListItem","position":2,"name":"المتجر","item":"https://www.tiqnora.com/shop"},
+            {"@type":"ListItem","position":3,"name":p.name_ar,"item":location.href}
+          ]}
+        ])}<\/script>`;
 
-      if (!out) {
+      if (!isOut) {
         let qty = 1;
         const qv = () => document.querySelector('#q-val');
         document.querySelector('#q-minus').onclick = () => { if (qty > 1) { qty--; qv().textContent = qty; } };
         document.querySelector('#q-plus').onclick = () => { qty++; qv().textContent = qty; };
         document.querySelector('#add-btn').onclick = () => {
-          window.TiqnoraStore.addProduct(p, qty);
+          window.TiqnoraStore.addProduct({
+            id: raw.id, slug: raw.slug, name_ar: p.name_ar, price: final,
+            image: p.images[0] || '', stock_quantity: p.stock_quantity, track_stock: p.track_stock
+          }, qty);
           renderCount();
-          window.TiqnoraAnalytics?.addToCart?.(p.slug, p.name_ar, final, qty);
+          window.TiqnoraAnalytics?.addToCart?.(raw.slug, p.name_ar, final, qty);
           const b = document.querySelector('#add-btn'); b.textContent = '✓ تمت الإضافة'; setTimeout(() => b.textContent = 'أضف إلى السلة', 1600);
         };
         document.querySelector('#wa-btn')?.addEventListener('click', () => {
-          window.TiqnoraAnalytics?.track?.('whatsapp_click', { slug: p.slug });
+          window.TiqnoraAnalytics?.track?.('whatsapp_click', { slug: raw.slug });
         });
       }
       renderCount();
