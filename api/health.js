@@ -32,6 +32,7 @@ export default async function handler(req, res) {
     checks,
     latencyMs,
     version: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown',
-    deploy_probe: true
+    deploy_probe: true,
+    whop_fix: true
   }));
 }
