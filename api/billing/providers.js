@@ -483,9 +483,17 @@ async function handleWhopCreateCheckout(req, res) {
     shipping_postal_code: shipping.postal_code || null,
     shipping_country: shipping.country,
     subtotal, discount_amount: 0, shipping_cost: shippingCost, total: totalSar,
-    currency: 'SAR', status: 'pending', payment_status: 'unpaid', payment_provider: 'whop',
+    currency: 'SAR',
+    status: 'pending',
+    payment_status: 'unpaid',
+    payment_method: 'credit_card', // Whop card/gateway; payment_provider remains 'whop'
+    payment_provider: 'whop',
     notes: body.notes ? String(body.notes).slice(0, 500) : null,
-    payment_meta: { environment: isSandbox() ? 'sandbox' : 'production', items_count: lineItems.length },
+    payment_meta: {
+      environment: isSandbox() ? 'sandbox' : 'production',
+      items_count: lineItems.length,
+      auto_purchase: false,
+    },
   };
   const ins = await sb('orders', { method: 'POST', body: orderRow, prefer: 'return=representation' });
   if (ins.error) return json(res, 500, { ok: false, error: 'order_create_failed', detail: ins.error });
