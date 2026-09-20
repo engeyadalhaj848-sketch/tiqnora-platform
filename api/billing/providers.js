@@ -191,7 +191,8 @@ async function handleAliExpressCallback(req, res, url) {
         body: {
           access_token: token.access_token,
           refresh_token: token.refresh_token || null,
-          token_expires_at: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : null,
+          expires_at: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : null,
+          status: 'connected',
           updated_at: new Date().toISOString(),
         },
         prefer: 'return=minimal',
