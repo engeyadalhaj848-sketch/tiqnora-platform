@@ -168,6 +168,14 @@
       "destination": "/api/billing/providers?route=whop_create_checkout"
     },
     {
+      "source": "/api/orders/create",
+      "destination": "/api/billing/providers?route=order_create"
+    },
+    {
+      "source": "/api/orders/create/",
+      "destination": "/api/billing/providers?route=order_create"
+    },
+    {
       "source": "/api/payments/order-status",
       "destination": "/api/billing/providers?route=whop_order_status"
     },

@@ -3,7 +3,7 @@
  * Hosts:
  *  - GET  (default) payment providers readiness
  *  - route=aliexpress_callback | aliexpress_status
- *  - route=whop_create_checkout | whop_order_status | whop_webhook
+ *  - route=order_create | whop_create_checkout | whop_order_status | whop_webhook
  *
  * Public URLs are rewritten in vercel.json to this existing function
  * (project cannot deploy additional Serverless Function files).
@@ -83,6 +83,10 @@ function resolveRoute(req) {
   if (p.includes('create-checkout')) return { route: 'whop_create_checkout', url };
   if (p.includes('order-status')) return { route: 'whop_order_status', url };
   if (p.includes('whop') && p.includes('webhook')) return { route: 'whop_webhook', url };
+  // COD / bank_transfer server-side order create (no new serverless file)
+  if (p.includes('/orders/create') || p.includes('order_create') || p.includes('create-order')) {
+    return { route: 'order_create', url };
+  }
   return { route: '', url };
 }
 
@@ -161,6 +165,197 @@ async function handleAliExpressStatus(req, res) {
     redirect_uri: cfg.redirectUri,
     authorize_url_ready: !!(auth && auth.url && cfg.configured),
     authorize_url: auth && cfg.configured ? auth.url : null,
+  });
+}
+
+
+/**
+ * Validate cart items server-side and build order + line items.
+ * Never trusts browser prices/totals.
+ * @returns {{ ok:true, customer, shipping, lineItems, subtotal, shippingCost, totalSar, orderNumber, notes } | { ok:false, status, body }}
+ */
+async function buildValidatedOrderFromBody(body) {
+  const itemsIn = Array.isArray(body.items) ? body.items : [];
+  if (!itemsIn.length) return { ok: false, status: 400, body: { ok: false, error: 'items required' } };
+
+  const customer = {
+    name: String(body.customer_name || body.name || '').trim().slice(0, 120),
+    email: String(body.customer_email || body.email || '').trim().slice(0, 160),
+    phone: String(body.customer_phone || body.phone || '').trim().slice(0, 40),
+  };
+  const shipping = {
+    address: String(body.shipping_address || body.address || '').trim().slice(0, 500),
+    city: String(body.shipping_city || body.city || '').trim().slice(0, 80),
+    postal_code: String(body.shipping_postal_code || body.postal_code || '').trim().slice(0, 20),
+    country: String(body.shipping_country || body.country || 'SA').trim().slice(0, 2).toUpperCase() || 'SA',
+  };
+  if (!customer.name || !customer.phone || !shipping.address || !shipping.city) {
+    return {
+      ok: false,
+      status: 400,
+      body: { ok: false, error: 'customer_name, customer_phone, shipping_address, shipping_city required' },
+    };
+  }
+
+  const ids = [...new Set(itemsIn.map((i) => String(i.product_id || i.id || '')).filter(Boolean))];
+  if (!ids.length) return { ok: false, status: 400, body: { ok: false, error: 'product_id required on each item' } };
+  const idList = ids.map(encodeURIComponent).join(',');
+  const prodRes = await sb(
+    `products?id=in.(${idList})&select=id,slug,sku,name_ar,name_en,price,stock_quantity,track_stock,is_active,fulfillment_type,cost_price`
+  );
+  if (prodRes.error) return { ok: false, status: 500, body: { ok: false, error: 'Failed to load products' } };
+  const products = Array.isArray(prodRes.data) ? prodRes.data : [];
+  const byId = Object.fromEntries(products.map((p) => [p.id, p]));
+
+  const lineItems = [];
+  let subtotal = 0;
+  for (const row of itemsIn) {
+    const pid = String(row.product_id || row.id || '');
+    const qty = Math.max(1, Math.min(99, parseInt(row.quantity || row.qty || 1, 10) || 1));
+    const p = byId[pid];
+    if (!p) return { ok: false, status: 400, body: { ok: false, error: 'invalid_product', product_id: pid } };
+    if (!p.is_active) return { ok: false, status: 400, body: { ok: false, error: 'product_inactive', product_id: pid } };
+    if (p.track_stock !== false && Number(p.stock_quantity || 0) < qty) {
+      return {
+        ok: false,
+        status: 400,
+        body: { ok: false, error: 'out_of_stock', product_id: pid, available: Number(p.stock_quantity || 0) },
+      };
+    }
+    const unit = money2(p.price);
+    if (p.cost_price != null && Number(p.cost_price) > 0 && unit + 0.01 < Number(p.cost_price)) {
+      return { ok: false, status: 409, body: { ok: false, error: 'pricing_review_required', product_id: pid } };
+    }
+    const lineTotal = money2(unit * qty);
+    subtotal = money2(subtotal + lineTotal);
+    lineItems.push({
+      product_id: p.id,
+      item_type: 'product',
+      ref_id: p.id,
+      title_ar: p.name_ar || p.name_en || p.slug,
+      title_en: p.name_en || p.name_ar || p.slug,
+      unit_price: unit,
+      quantity: qty,
+      line_total: lineTotal,
+    });
+  }
+
+  let shippingCost = 25;
+  let freeThreshold = 500;
+  try {
+    const sres = await sb('site_settings?key=eq.shipping&select=value');
+    const row = Array.isArray(sres.data) ? sres.data[0] : null;
+    const val = row?.value;
+    if (val && typeof val === 'object') {
+      if (val.flat_rate != null) shippingCost = Number(val.flat_rate) || shippingCost;
+      if (val.free_threshold != null) freeThreshold = Number(val.free_threshold) || freeThreshold;
+    }
+  } catch { /* defaults */ }
+  if (subtotal >= freeThreshold) shippingCost = 0;
+  const totalSar = money2(subtotal + shippingCost);
+  const orderNumber = `TQ-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const notes = String(body.notes || '').trim().slice(0, 1000) || null;
+
+  return {
+    ok: true,
+    customer,
+    shipping,
+    lineItems,
+    subtotal,
+    shippingCost,
+    totalSar,
+    orderNumber,
+    notes,
+  };
+}
+
+/**
+ * COD / bank_transfer — server-side order create (service role).
+ * Browser must NOT insert into orders/order_items.
+ */
+async function handleOrderCreate(req, res) {
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Method not allowed' });
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body || '{}'); } catch { return json(res, 400, { ok: false, error: 'Invalid JSON' }); }
+  }
+  body = body || {};
+
+  const method = String(body.payment_method || body.method || '').toLowerCase().trim();
+  if (method !== 'cod' && method !== 'bank_transfer') {
+    return json(res, 400, { ok: false, error: 'payment_method must be cod or bank_transfer' });
+  }
+
+  const built = await buildValidatedOrderFromBody(body);
+  if (!built.ok) return json(res, built.status, built.body);
+
+  const {
+    customer, shipping, lineItems, subtotal, shippingCost, totalSar, orderNumber, notes,
+  } = built;
+
+  // COD / bank: not paid; eligible for manual fulfillment review
+  const orderRow = {
+    order_number: orderNumber,
+    customer_name: customer.name,
+    customer_phone: customer.phone,
+    customer_email: customer.email || null,
+    shipping_address: shipping.address,
+    shipping_city: shipping.city,
+    shipping_postal_code: shipping.postal_code || null,
+    shipping_country: shipping.country,
+    subtotal,
+    discount_amount: 0,
+    shipping_cost: shippingCost,
+    total: totalSar,
+    currency: 'SAR',
+    status: 'pending',
+    payment_status: 'pending',
+    payment_method: method,
+    payment_provider: 'manual',
+    notes,
+    payment_meta: {
+      source: 'tiqnora_checkout',
+      method,
+      items_count: lineItems.length,
+    },
+  };
+
+  const ins = await sb('orders', { method: 'POST', body: orderRow, prefer: 'return=representation' });
+  if (ins.error) {
+    console.error('[order_create]', String(ins.error).slice(0, 160));
+    return json(res, 500, { ok: false, error: 'order_create_failed' });
+  }
+  const order = Array.isArray(ins.data) ? ins.data[0] : ins.data;
+  if (!order?.id) return json(res, 500, { ok: false, error: 'order_create_failed' });
+
+  await sb('order_items', {
+    method: 'POST',
+    body: lineItems.map((it) => ({
+      order_id: order.id,
+      item_type: it.item_type,
+      ref_id: it.ref_id,
+      title_ar: it.title_ar,
+      title_en: it.title_en,
+      unit_price: it.unit_price,
+      quantity: it.quantity,
+      line_total: it.line_total,
+    })),
+    prefer: 'return=minimal',
+  });
+
+  return json(res, 200, {
+    ok: true,
+    order_id: order.id,
+    order_number: order.order_number,
+    subtotal,
+    shipping_cost: shippingCost,
+    total: totalSar,
+    currency: 'SAR',
+    payment_method: method,
+    payment_status: 'pending',
+    status: 'pending',
+    track_url: `https://www.tiqnora.com/track.html?order=${encodeURIComponent(order.order_number)}&new=1`,
   });
 }
 
@@ -439,6 +634,7 @@ export default async function handler(req, res) {
 
     if (route === 'aliexpress_callback') return handleAliExpressCallback(req, res, url);
     if (route === 'aliexpress_status') return handleAliExpressStatus(req, res);
+    if (route === 'order_create') return handleOrderCreate(req, res);
     if (route === 'whop_create_checkout') return handleWhopCreateCheckout(req, res);
     if (route === 'whop_order_status') return handleWhopOrderStatus(req, res, url);
     if (route === 'whop_webhook') return handleWhopWebhook(req, res);

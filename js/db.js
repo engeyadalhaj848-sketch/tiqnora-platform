@@ -320,18 +320,12 @@
       return { ok: !error, fallback: error ? 'mailto' : null };
     },
 
-    async placeOrder(order) {
-      if (!client) return { ok: false, error: 'db_not_configured' };
-      const { data: o, error } = await client.from('orders').insert(order).select('id, order_number').single();
-      if (error) return { ok: false, error: error.message };
-      const items = (order.items || []).map(it => ({
-        order_id: o.id, item_type: it.kind, ref_id: it.refId || null,
-        title_ar: it.titleAr || '', title_en: it.titleEn || '',
-        unit_price: it.price, quantity: it.qty || 1,
-        line_total: it.price * (it.qty || 1)
-      }));
-      if (items.length) await client.from('order_items').insert(items);
-      return { ok: true, order: o };
+    /**
+     * @deprecated Browser must not insert orders (RLS). Use POST /api/orders/create.
+     */
+    async placeOrder(_order) {
+      console.warn('[tiqnora] placeOrder from browser is disabled; use /api/orders/create');
+      return { ok: false, error: 'use_server_order_create' };
     },
 
     async validateCoupon(code, subtotal) {

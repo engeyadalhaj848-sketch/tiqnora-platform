@@ -282,35 +282,41 @@
         return;
       }
 
-      // COD / bank — existing client path
+      // COD / bank_transfer — server-side only (no browser Supabase insert / RLS)
       btn.textContent = 'جارٍ الإرسال…';
-      const sub = cart.reduce((a, i) => a + i.price * i.qty, 0);
-      const shippingCost = sub >= freeThreshold ? 0 : flatRate;
-      const order = {
-        order_number: 'TQ-' + Date.now().toString(36).toUpperCase(),
-        customer_name: f.get('name').trim(),
-        customer_email: f.get('email')?.trim() || null,
-        customer_phone: f.get('phone').trim(),
-        shipping_city: f.get('city').trim(),
-        shipping_address: f.get('address').trim(),
-        items: cart.map(i => ({ kind: 'product', refId: i.product_id, titleAr: i.titleAr, titleEn: i.titleAr, price: i.price, qty: i.qty })),
-        subtotal: sub, discount_amount: 0, shipping_cost: shippingCost, total: sub + shippingCost,
-        payment_method: method, notes: f.get('notes')?.trim() || null,
-      };
-      const dbOk = await window.TiqnoraDB?.ready?.();
-      if (dbOk) {
-        const res = await window.TiqnoraDB.placeOrder(order);
-        if (res.ok) {
-          window.TiqnoraStore.saveCart([]);
-          location.href = 'track.html?order=' + encodeURIComponent(res.order.order_number) + '&new=1';
+      try {
+        const res = await fetch('/api/orders/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payment_method: method,
+            items: cart.map(i => ({ product_id: i.product_id, quantity: i.qty })),
+            customer_name: f.get('name').trim(),
+            customer_phone: f.get('phone').trim(),
+            customer_email: f.get('email')?.trim() || '',
+            shipping_city: f.get('city').trim(),
+            shipping_address: f.get('address').trim(),
+            shipping_postal_code: f.get('postal_code')?.trim() || '',
+            shipping_country: 'SA',
+            notes: f.get('notes')?.trim() || '',
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!data.ok || !data.order_number) {
+          showError('تعذر حفظ الطلب. حاول مرة أخرى.');
+          btn.disabled = false;
+          btn.textContent = 'تأكيد الطلب';
           return;
         }
+        try { window.TiqnoraStore?.saveCart?.([]); } catch (_) {}
+        try { window.TiqnoraAnalytics?.purchase?.(data.order_number, data.total, cart.map(i => i.titleAr)); } catch (_) {}
+        location.href = 'track.html?order=' + encodeURIComponent(data.order_number) + '&new=1';
+        return;
+      } catch (e) {
         showError('تعذر حفظ الطلب. حاول مرة أخرى.');
-      } else {
-        showError('تعذر الاتصال بقاعدة البيانات.');
+        btn.disabled = false;
+        btn.textContent = 'تأكيد الطلب';
       }
-      btn.disabled = false;
-      btn.textContent = 'تأكيد الطلب';
     };
 
     (async () => {
