@@ -148,6 +148,14 @@
   ],
   "rewrites": [
     {
+      "source": "/api/aliexpress/connect",
+      "destination": "/api/billing/providers?route=aliexpress_connect"
+    },
+    {
+      "source": "/api/aliexpress/connect/",
+      "destination": "/api/billing/providers?route=aliexpress_connect"
+    },
+    {
       "source": "/api/aliexpress/callback",
       "destination": "/api/billing/providers?route=aliexpress_callback"
     },
