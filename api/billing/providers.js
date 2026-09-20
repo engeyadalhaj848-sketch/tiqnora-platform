@@ -429,7 +429,7 @@ export default async function handler(req, res) {
       livePayments: false,
       providers: [
         { slug: 'manual', name: 'Manual Admin', enabled: true, envRequired: [] },
-        { slug: 'whop', name: 'Whop', enabled: false, mode: 'sandbox', configured: whop.configured, envRequired: ['WHOP_API_KEY', 'WHOP_ACCOUNT_ID', 'WHOP_WEBHOOK_SECRET'] },
+        { slug: 'whop', name: 'Whop', enabled: !!whop.configured, mode: whop.sandbox ? 'sandbox' : 'live', configured: whop.configured, envRequired: ['WHOP_API_KEY', 'WHOP_ACCOUNT_ID', 'WHOP_WEBHOOK_SECRET'] },
         { slug: 'stripe', name: 'Stripe', enabled: false, envRequired: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] },
         { slug: 'hyperpay', name: 'HyperPay', enabled: false, envRequired: ['HYPERPAY_ENTITY_ID', 'HYPERPAY_ACCESS_TOKEN'] },
         { slug: 'tap', name: 'Tap Payments', enabled: false, envRequired: ['TAP_SECRET_KEY'] },
