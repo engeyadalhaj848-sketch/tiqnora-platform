@@ -18,8 +18,7 @@ import {
 import {
   getWhopConfig,
   createCheckoutConfiguration,
-  verifyWebhookSignature,
-  parseWebhookEvent,
+  verifyAndUnwrapWebhook,
   isSandbox,
 } from '../../lib/payments/whop.js';
 
@@ -592,12 +591,12 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
     return json(res, 401, { ok: false, error: 'invalid_signature' });
   }
 
-  const verified = verifyWebhookSignature(rawBody, req.headers || {});
+  const verified = verifyAndUnwrapWebhook(rawBody, req.headers || {});
   if (!verified.ok) {
     console.error('[whop_webhook] signature failed:', verified.reason || 'invalid_signature');
     return json(res, 401, { ok: false, error: 'invalid_signature' });
   }
-  const event = parseWebhookEvent(rawBody);
+  const event = verified.event;
   if (!event || !event.type) return json(res, 400, { ok: false, error: 'invalid_payload' });
 
   const eventId = verified.eventId || event.id;
