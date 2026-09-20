@@ -362,7 +362,7 @@ async function handleOrderCreate(req, res) {
     total: totalSar,
     currency: 'SAR',
     payment_method: method,
-    payment_status: 'pending',
+    payment_status: 'unpaid',
     status: 'pending',
     track_url: `https://www.tiqnora.com/track.html?order=${encodeURIComponent(order.order_number)}&new=1`,
   });
@@ -475,7 +475,7 @@ async function handleWhopCreateCheckout(req, res) {
     return json(res, 200, {
       ok: true, order_id: order.id, order_number: order.order_number,
       subtotal, shipping_cost: shippingCost, total: totalSar, currency: 'SAR',
-      payment_provider: 'whop', payment_status: 'pending',
+      payment_provider: 'whop', payment_status: 'unpaid',
       whop: { configured: false, missing: cfg.missing, message: 'Order created. Add WHOP_API_KEY + WHOP_ACCOUNT_ID in Vercel.' },
       environment: isSandbox() ? 'sandbox' : 'production',
     });
@@ -527,7 +527,7 @@ async function handleWhopCreateCheckout(req, res) {
   return json(res, 200, {
     ok: true, order_id: order.id, order_number: order.order_number,
     subtotal, shipping_cost: shippingCost, total: totalSar, currency: 'SAR',
-    payment_provider: 'whop', payment_status: 'pending',
+    payment_provider: 'whop', payment_status: 'unpaid',
     whop: { configured: true, sessionId: checkout.sessionId, planId: checkout.planId, environment: checkout.environment, charge_currency: checkout.currency, charge_amount: checkout.amount },
     return_url: `https://www.tiqnora.com/order-complete?order=${encodeURIComponent(order.order_number)}`,
     environment: checkout.environment,
