@@ -314,6 +314,14 @@
     {
       "source": "/solutions/:slug/",
       "destination": "/solutions/:slug.html"
+    },
+    {
+      "source": "/about",
+      "destination": "/about.html"
+    },
+    {
+      "source": "/about/",
+      "destination": "/about.html"
     }
   ],
   "buildCommand": "npm run build",

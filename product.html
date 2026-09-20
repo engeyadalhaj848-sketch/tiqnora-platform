@@ -44,6 +44,18 @@
       .store-main .container{padding-left:14px;padding-right:14px}
     }
   </style>
+  <script>
+  (function(){
+    try {
+      var s = new URLSearchParams(location.search).get('slug');
+      if (s) {
+        var c = document.getElementById('canonical-link') || document.querySelector('link[rel="canonical"]');
+        if (c) c.setAttribute('href', 'https://www.tiqnora.com/product?slug=' + encodeURIComponent(s));
+        document.title = document.title.replace(/^المنتج/, 'منتج');
+      }
+    } catch(e){}
+  })();
+  </script>
 </head>
 <body>
   <header class="store-header">
