@@ -58,6 +58,7 @@
       button.className = 'btn-sm';
       button.textContent = 'ربط الحساب';
       button.type = 'button';
+      button.dataset.connectPlatform = key;
       button.onclick = () => {
         button.disabled = true;
         button.textContent = 'جارٍ فتح OAuth…';
@@ -116,14 +117,33 @@
         db.from('social_events').select('*').order('received_at', { ascending: false }).limit(250)
       ]);
 
+      const connectionRows = connectionsRes.data || [];
+      const activeByPlatform = new Map();
+      connectionRows.forEach(item => {
+        const key = String(item.platform || '').toLowerCase();
+        if (!activeByPlatform.has(key) || item.status === 'active') activeByPlatform.set(key, item);
+      });
+      root.querySelectorAll('[data-connect-platform]').forEach(button => {
+        const key = String(button.dataset.connectPlatform || '').toLowerCase();
+        const connection = activeByPlatform.get(key);
+        if (connection?.status === 'active') {
+          button.textContent = `متصل ✓${connection.account_name ? ' — ' + connection.account_name : ''}`;
+          button.title = 'الحساب مرتبط بنجاح. اضغط لإعادة التفويض إذا احتجت.';
+        } else {
+          button.textContent = 'ربط الحساب';
+          button.title = '';
+        }
+        button.disabled = false;
+      });
+
       connectionTable.body.replaceChildren();
-      (connectionsRes.data || []).forEach(item => {
+      connectionRows.forEach(item => {
         const row = document.createElement('tr');
         addCell(row, item.platform); addCell(row, item.account_name); addCell(row, item.external_account_id, 'ltr');
         addCell(row, labels[item.status] || item.status); addCell(row, dateText(item.connected_at || item.created_at));
         connectionTable.body.appendChild(row);
       });
-      if (!(connectionsRes.data || []).length) { const row = document.createElement('tr'); const cell = addCell(row, 'لا توجد اتصالات محفوظة بعد.'); cell.colSpan = 5; connectionTable.body.appendChild(row); }
+      if (!connectionRows.length) { const row = document.createElement('tr'); const cell = addCell(row, 'لا توجد اتصالات محفوظة بعد.'); cell.colSpan = 5; connectionTable.body.appendChild(row); }
 
       rulesTable.body.replaceChildren();
       (rulesRes.data || []).forEach(rule => {
