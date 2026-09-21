@@ -3,7 +3,7 @@
  * Hosts:
  *  - GET  (default) payment providers readiness
  *  - route=aliexpress_connect | aliexpress_callback | aliexpress_status
- *  - route=order_create | whop_create_checkout | whop_order_status | whop_webhook
+ *  - route=supplier_fulfillment_submit | order_create | whop_create_checkout | whop_order_status | whop_webhook
  *
  * Public URLs are rewritten in vercel.json to this existing function
  * (project cannot deploy additional Serverless Function files).
@@ -15,6 +15,11 @@ import {
   buildAuthorizeUrl,
   createOAuthState,
 } from '../../lib/suppliers/aliexpress-oauth.js';
+import {
+  getProductDetails as getAliExpressProductDetails,
+  getShippingInfo as getAliExpressShippingInfo,
+  placeApprovedOrder as placeAliExpressApprovedOrder,
+} from '../../lib/suppliers/aliexpress.js';
 import {
   getWhopConfig,
   createCheckoutConfiguration,
@@ -107,6 +112,7 @@ function resolveRoute(req) {
   if (p.includes('aliexpress') && p.includes('connect')) return { route: 'aliexpress_connect', url };
   if (p.includes('aliexpress') && p.includes('callback')) return { route: 'aliexpress_callback', url };
   if (p.includes('aliexpress') && p.includes('status')) return { route: 'aliexpress_status', url };
+  if (p.includes('supplier') && p.includes('fulfillment-submit')) return { route: 'supplier_fulfillment_submit', url };
   if (p.includes('create-checkout')) return { route: 'whop_create_checkout', url };
   if (p.includes('order-status')) return { route: 'whop_order_status', url };
   if (p.includes('whop') && p.includes('webhook')) return { route: 'whop_webhook', url };
@@ -229,6 +235,316 @@ async function handleAliExpressStatus(req, res) {
   });
 }
 
+
+
+async function requireAdminUser(req) {
+  const auth = String(req.headers?.authorization || '');
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1] || '';
+  if (!token || !SERVICE) return { ok: false, status: 401, error: 'admin_auth_required' };
+
+  try {
+    const ur = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
+      method: 'GET',
+      headers: {
+        apikey: SERVICE,
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+    const user = await ur.json().catch(() => null);
+    if (!ur.ok || !user?.id) return { ok: false, status: 401, error: 'invalid_admin_session' };
+
+    const pr = await sb(
+      `profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`
+    );
+    const profile = Array.isArray(pr.data) ? pr.data[0] : null;
+    const allowed = ['admin', 'super_admin', 'owner'].includes(String(profile?.role || ''));
+    if (!profile || profile.is_active === false || !allowed) {
+      return { ok: false, status: 403, error: 'admin_permission_required' };
+    }
+    return { ok: true, user, profile };
+  } catch {
+    return { ok: false, status: 401, error: 'admin_auth_failed' };
+  }
+}
+
+async function handleSupplierFulfillmentSubmit(req, res) {
+  if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Method not allowed' });
+
+  const admin = await requireAdminUser(req);
+  if (!admin.ok) return json(res, admin.status, { ok: false, error: admin.error });
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  if (body.confirm_submit !== true) {
+    return json(res, 400, {
+      ok: false,
+      error: 'explicit_confirmation_required',
+      message: 'confirm_submit=true is required for live supplier order creation.',
+    });
+  }
+  const fulfillmentId = String(body.fulfillment_request_id || '').trim();
+  if (!fulfillmentId) return json(res, 400, { ok: false, error: 'fulfillment_request_id required' });
+
+  const frRes = await sb(
+    `fulfillment_requests?id=eq.${encodeURIComponent(fulfillmentId)}&select=id,order_id,supplier_id,status,request_payload,approved_by,approved_at,supplier_order_reference&limit=1`
+  );
+  const fulfillment = Array.isArray(frRes.data) ? frRes.data[0] : null;
+  if (!fulfillment) return json(res, 404, { ok: false, error: 'fulfillment_not_found' });
+  if (fulfillment.status !== 'approved') {
+    return json(res, 409, {
+      ok: false,
+      error: 'fulfillment_not_approved',
+      status: fulfillment.status,
+      message: 'Approve the fulfillment request in Tiqnora before submitting it to AliExpress.',
+    });
+  }
+
+  const supRes = await sb(
+    `commerce_suppliers?id=eq.${encodeURIComponent(fulfillment.supplier_id || '')}&select=id,provider,display_name,fulfillment_mode&limit=1`
+  );
+  const supplier = Array.isArray(supRes.data) ? supRes.data[0] : null;
+  if (!supplier || supplier.provider !== 'aliexpress') {
+    return json(res, 400, { ok: false, error: 'supplier_not_aliexpress' });
+  }
+  if (supplier.fulfillment_mode !== 'approval_required') {
+    return json(res, 409, { ok: false, error: 'invalid_fulfillment_mode' });
+  }
+
+  const soRes = await sb(
+    `supplier_orders?fulfillment_request_id=eq.${encodeURIComponent(fulfillment.id)}&select=*&order=created_at.desc&limit=1`
+  );
+  const supplierOrder = Array.isArray(soRes.data) ? soRes.data[0] : null;
+  if (!supplierOrder) {
+    return json(res, 409, {
+      ok: false,
+      error: 'supplier_order_not_prepared',
+      message: 'Prepare the supplier order in Tiqnora before submitting.',
+    });
+  }
+  if (supplierOrder.status === 'submitted' && supplierOrder.external_order_id) {
+    return json(res, 200, {
+      ok: true,
+      duplicate_prevented: true,
+      status: 'submitted',
+      supplier_order_id: supplierOrder.id,
+      external_order_id: supplierOrder.external_order_id,
+      auto_purchase: false,
+    });
+  }
+  if (!['ready', 'failed'].includes(String(supplierOrder.status || ''))) {
+    return json(res, 409, {
+      ok: false,
+      error: 'supplier_order_not_ready',
+      status: supplierOrder.status,
+    });
+  }
+
+  const requestPayload = fulfillment.request_payload || {};
+  const customer = requestPayload.customer || {};
+  const shipping = requestPayload.shipping || {};
+  const sourceItems = Array.isArray(requestPayload.items) ? requestPayload.items : [];
+  if (!sourceItems.length) {
+    return json(res, 400, { ok: false, error: 'no_supplier_items' });
+  }
+
+  const preparedItems = [];
+  for (const item of sourceItems) {
+    const productId = String(item.supplier_product_id || '').trim();
+    if (!/^\d+$/.test(productId)) {
+      return json(res, 400, {
+        ok: false,
+        error: 'invalid_aliexpress_product_id',
+        product_id: productId || null,
+      });
+    }
+
+    let skuAttr = '';
+    let details = null;
+    try {
+      details = await getAliExpressProductDetails(productId);
+      const variants = Array.isArray(details?.product?.variants) ? details.product.variants : [];
+      const wanted = String(item.supplier_variant_id || '');
+      const chosen =
+        (wanted && variants.find((v) => String(v.sku_id || '') === wanted)) ||
+        (variants.length === 1 ? variants[0] : null);
+      skuAttr = String(chosen?.sku_attr || '');
+    } catch { /* product can still be ordered without sku_attr when not required */ }
+
+    let freight = null;
+    try {
+      freight = await getAliExpressShippingInfo(productId, {
+        countryCode: shipping.country || 'SA',
+        quantity: Number(item.quantity || 1),
+      });
+    } catch { /* logistics_service_name is optional */ }
+
+    preparedItems.push({
+      product_id: productId,
+      product_count: Math.max(1, Number(item.quantity || 1) || 1),
+      sku_attr: skuAttr || undefined,
+      logistics_service_name: freight?.ok ? (freight.service_name || undefined) : undefined,
+      order_memo: `Tiqnora order ${requestPayload.order_number || fulfillment.order_id}`,
+      supplier_mapping_id: item.supplier_mapping_id || null,
+      supplier_price: item.supplier_price ?? null,
+      supplier_currency: item.supplier_currency || 'USD',
+    });
+  }
+
+  const phoneRaw = String(customer.phone || '').replace(/[^0-9+]/g, '');
+  const phoneCountry = phoneRaw.startsWith('+') ? ('+' + phoneRaw.slice(1).replace(/\D/g, '').slice(0, 3)) : '+966';
+  const mobileNo = phoneRaw.startsWith('+966')
+    ? phoneRaw.slice(4)
+    : phoneRaw.startsWith('966')
+      ? phoneRaw.slice(3)
+      : phoneRaw.replace(/^0+/, '');
+
+  const address = {
+    address: shipping.address,
+    city: shipping.city,
+    country: shipping.country || 'SA',
+    full_name: customer.name,
+    contact_person: customer.name,
+    mobile_no: mobileNo || customer.phone,
+    phone_country: phoneCountry || '+966',
+    postal_code: shipping.postal_code || '',
+    province: shipping.city || '',
+    locale: 'en_US',
+  };
+
+  const live = await placeAliExpressApprovedOrder({
+    approved: true,
+    address,
+    items: preparedItems,
+  });
+
+  const now = new Date().toISOString();
+  const totalCost = preparedItems.reduce(
+    (sum, x) => sum + (Number(x.supplier_price || 0) * Number(x.product_count || 1)),
+    0
+  );
+  const cleanItems = preparedItems.map((x) => ({
+    product_id: x.product_id,
+    product_count: x.product_count,
+    sku_attr: x.sku_attr || null,
+    logistics_service_name: x.logistics_service_name || null,
+    supplier_mapping_id: x.supplier_mapping_id,
+    supplier_price: x.supplier_price,
+    supplier_currency: x.supplier_currency,
+  }));
+
+  if (!live.ok) {
+    await sb(`supplier_orders?id=eq.${encodeURIComponent(supplierOrder.id)}`, {
+      method: 'PATCH',
+      body: {
+        status: 'failed',
+        line_items: cleanItems,
+        request_payload: {
+          provider: 'aliexpress',
+          fulfillment_request_id: fulfillment.id,
+          item_count: cleanItems.length,
+          explicit_admin_approval: true,
+        },
+        response_payload: {
+          ok: false,
+          error_code: live.error_code || null,
+          message: live.message || 'AliExpress submission failed',
+          transport: live.transport || null,
+        },
+        updated_at: now,
+      },
+      prefer: 'return=minimal',
+    });
+    await sb(`fulfillment_requests?id=eq.${encodeURIComponent(fulfillment.id)}`, {
+      method: 'PATCH',
+      body: {
+        error_message: String(live.message || 'AliExpress submission failed').slice(0, 500),
+        updated_at: now,
+      },
+      prefer: 'return=minimal',
+    });
+    return json(res, 502, {
+      ok: false,
+      error: 'aliexpress_order_submission_failed',
+      message: live.message || 'AliExpress submission failed',
+      error_code: live.error_code || null,
+      auto_purchase: false,
+    });
+  }
+
+  await sb(`supplier_orders?id=eq.${encodeURIComponent(supplierOrder.id)}`, {
+    method: 'PATCH',
+    body: {
+      status: 'submitted',
+      external_order_id: live.external_order_id,
+      line_items: cleanItems,
+      cost_total: totalCost || null,
+      currency: cleanItems.find((x) => x.supplier_currency)?.supplier_currency || 'USD',
+      request_payload: {
+        provider: 'aliexpress',
+        fulfillment_request_id: fulfillment.id,
+        item_count: cleanItems.length,
+        explicit_admin_approval: true,
+      },
+      response_payload: {
+        ok: true,
+        external_order_ids: live.external_order_ids,
+        payment_required_on_aliexpress: true,
+        payment_automated: false,
+      },
+      submitted_at: now,
+      updated_at: now,
+    },
+    prefer: 'return=minimal',
+  });
+
+  await sb(`fulfillment_requests?id=eq.${encodeURIComponent(fulfillment.id)}`, {
+    method: 'PATCH',
+    body: {
+      status: 'submitted',
+      supplier_order_reference: live.external_order_id,
+      response_payload: {
+        provider: 'aliexpress',
+        external_order_ids: live.external_order_ids,
+        payment_required_on_aliexpress: true,
+      },
+      submitted_at: now,
+      error_message: null,
+      updated_at: now,
+    },
+    prefer: 'return=minimal',
+  });
+
+  try {
+    await sb('commerce_audit_logs', {
+      method: 'POST',
+      body: {
+        actor_id: admin.user.id,
+        action: 'aliexpress.order.submit',
+        entity_type: 'fulfillment_requests',
+        entity_id: fulfillment.id,
+        meta: {
+          supplier_order_id: supplierOrder.id,
+          external_order_id: live.external_order_id,
+          item_count: cleanItems.length,
+          payment_automated: false,
+        },
+      },
+      prefer: 'return=minimal',
+    });
+  } catch { /* audit logging must not break successful supplier submission */ }
+
+  return json(res, 200, {
+    ok: true,
+    status: 'submitted',
+    fulfillment_request_id: fulfillment.id,
+    supplier_order_id: supplierOrder.id,
+    external_order_id: live.external_order_id,
+    payment_required_on_aliexpress: true,
+    payment_automated: false,
+    auto_purchase: false,
+  });
+}
 
 /**
  * Validate cart items server-side and build order + line items.
@@ -881,6 +1197,7 @@ export default async function handler(req, res) {
     if (route === 'aliexpress_connect') return handleAliExpressConnect(req, res);
     if (route === 'aliexpress_callback') return handleAliExpressCallback(req, res, url);
     if (route === 'aliexpress_status') return handleAliExpressStatus(req, res);
+    if (route === 'supplier_fulfillment_submit') return handleSupplierFulfillmentSubmit(req, res);
     if (route === 'order_create') return handleOrderCreate(req, res);
     if (route === 'whop_create_checkout') return handleWhopCreateCheckout(req, res);
     if (route === 'whop_order_status') return handleWhopOrderStatus(req, res, url);
