@@ -224,12 +224,29 @@ async function handleAliExpressStatus(req, res) {
   const cfg = getAeConfig();
   const state = createOAuthState();
   const auth = cfg.configured ? buildAuthorizeUrl({ state }) : null;
+  let connection = null;
+  try {
+    const cr = await sb(
+      'supplier_connections?provider=eq.aliexpress&select=status,expires_at,updated_at,last_error&limit=1'
+    );
+    connection = Array.isArray(cr.data) ? cr.data[0] : null;
+  } catch { /* status remains credential-only */ }
+
+  const expiryMs = connection?.expires_at ? Date.parse(connection.expires_at) : 0;
+  const expired = !!expiryMs && expiryMs <= Date.now();
+  const hoursRemaining = expiryMs ? Math.max(0, Math.round((expiryMs - Date.now()) / 3600000)) : null;
   return json(res, 200, {
     ok: true,
     provider: 'aliexpress',
     credentials_configured: cfg.configured,
     missing: cfg.missing,
     redirect_uri: cfg.redirectUri,
+    connected: !!(connection && connection.status === 'connected' && !expired),
+    connection_status: expired ? 'reauthorization_required' : (connection?.status || 'not_connected'),
+    expires_at: connection?.expires_at || null,
+    hours_remaining: hoursRemaining,
+    reauthorize_required: expired || (hoursRemaining != null && hoursRemaining <= 168),
+    last_error: connection?.last_error || null,
     authorize_url_ready: !!(auth && auth.url && cfg.configured),
     authorize_url: auth && cfg.configured ? auth.url : null,
   });
