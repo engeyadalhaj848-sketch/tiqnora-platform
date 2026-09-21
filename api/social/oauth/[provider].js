@@ -50,6 +50,14 @@ function verify(value) { const [a, s] = String(value || '').split('.'); if (!a |
 function send(res, status, body) { res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8'); return res.end(JSON.stringify(body)); }
 async function supa(path, options = {}) { const key = process.env.SUPABASE_SERVICE_ROLE_KEY; if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing'); const r = await fetch(`${process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co'}/rest/v1/${path}`, { ...options, headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(options.headers || {}) } }); const body = await r.json().catch(() => null); if (!r.ok) throw new Error(body?.message || `Supabase ${r.status}`); return body; }
 function encrypt(value) { const key = Buffer.from(process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || '', 'base64'); if (key.length !== 32) throw new Error('SOCIAL_TOKEN_ENCRYPTION_KEY must be a base64 32-byte key'); const iv = randomBytes(12); const c = createCipheriv('aes-256-gcm', key, iv); const ciphertext = Buffer.concat([c.update(value), c.final()]); return { ciphertext: b64(ciphertext), iv: b64(iv), tag: b64(c.getAuthTag()) }; }
+async function fetchTikTokUser(accessToken) {
+  const r = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name', {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const body = await r.json().catch(() => null);
+  if (!r.ok || body?.error?.code) throw new Error(body?.error?.message || `TikTok user info failed (${r.status})`);
+  return body?.data?.user || null;
+}
 export default async function handler(req, res) {
   const provider = String(req.query?.provider || '').toLowerCase(); const cfg = providers[provider];
   if (!cfg) return send(res, 404, { error: 'Unsupported provider' });
@@ -76,7 +84,31 @@ export default async function handler(req, res) {
     const tokenRes = await fetch(cfg.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }); const token = await tokenRes.json(); if (!tokenRes.ok || !(token.access_token || token.data?.access_token)) throw new Error(token.error_description || token.error?.message || 'Token exchange failed');
     const access = token.access_token || token.data.access_token; const encrypted = encrypt(access); const org = state.organization_id || (await supa('organizations?slug=eq.tiqnora&select=id&limit=1'))?.[0]?.id; if (!org) throw new Error('Organization is missing');
     await supa('social_provider_tokens?on_conflict=organization_id,provider', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ organization_id: org, provider, ...encrypted, scopes: token.scope || token.data?.scope || scopes, expires_at: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : null }) });
-    await supa('integration_connections?provider=eq.' + provider, { method: 'PATCH', body: JSON.stringify({ enabled: true, status: 'connected', mode: 'production', last_checked_at: new Date().toISOString(), metadata: { scopes: token.scope || scopes } }) });
+
+    let accountMetadata = null;
+    if (provider === 'tiktok') {
+      const user = await fetchTikTokUser(access);
+      if (user?.open_id) {
+        accountMetadata = { open_id: user.open_id, union_id: user.union_id || null, display_name: user.display_name || null, avatar_url: user.avatar_url || null };
+        await supa('social_connections?on_conflict=organization_id,platform,external_account_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({
+            organization_id: org,
+            platform: 'tiktok',
+            external_account_id: user.open_id,
+            account_name: user.display_name || 'TikTok',
+            status: 'active',
+            capabilities: { login: true, profile: true, publishing: false },
+            settings: { avatar_url: user.avatar_url || null, union_id: user.union_id || null },
+            connected_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        });
+      }
+    }
+
+    await supa('integration_connections?provider=eq.' + provider, { method: 'PATCH', body: JSON.stringify({ enabled: true, status: 'connected', mode: process.env.TIKTOK_MODE || 'production', last_checked_at: new Date().toISOString(), metadata: { scopes: token.scope || scopes, ...(accountMetadata || {}) } }) });
     return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
