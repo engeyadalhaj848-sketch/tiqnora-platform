@@ -172,6 +172,14 @@
       "destination": "/api/billing/providers?route=aliexpress_status"
     },
     {
+      "source": "/api/suppliers/fulfillment-submit",
+      "destination": "/api/billing/providers?route=supplier_fulfillment_submit"
+    },
+    {
+      "source": "/api/suppliers/fulfillment-submit/",
+      "destination": "/api/billing/providers?route=supplier_fulfillment_submit"
+    },
+    {
       "source": "/api/payments/create-checkout",
       "destination": "/api/billing/providers?route=whop_create_checkout"
     },
