@@ -55,7 +55,7 @@ async function fetchTikTokUser(accessToken) {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   const body = await r.json().catch(() => null);
-  if (!r.ok || body?.error?.code) throw new Error(body?.error?.message || `TikTok user info failed (${r.status})`);
+  if (!r.ok || (body?.error?.code && body.error.code !== 'ok')) throw new Error(body?.error?.message || `TikTok user info failed (${r.status})`);
   return body?.data?.user || null;
 }
 export default async function handler(req, res) {
