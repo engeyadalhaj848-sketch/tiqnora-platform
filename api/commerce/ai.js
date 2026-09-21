@@ -1428,7 +1428,7 @@ async function handleSupplierCenter(body = {}) {
       (product && product.stock != null ? product.stock : null);
     const shipCost = shipping && shipping.shipping_cost_usd != null ? shipping.shipping_cost_usd : null;
     const shippingStatus =
-      shipCost != null && Number(shipCost) >= 0
+      shipping && shipping.ok && shipCost != null && Number(shipCost) >= 0
         ? 'verified'
         : shipping && shipping.ok
           ? 'estimate_only'
