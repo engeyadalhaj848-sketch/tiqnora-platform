@@ -164,6 +164,156 @@ async function handleTikTokPosting(req, res) {
     const action = String(body.action || '').toLowerCase();
     const organizationId = await resolveOrganization(body.organization_id, admin);
 
+    if (action === 'creator_info') {
+      const token = await getTikTokAccess(organizationId);
+      if (!String(token.scopes || '').split(',').map(x => x.trim()).includes('video.publish')) {
+        return send(res, 403, { error: 'TikTok video.publish permission is not authorized.', code: 'scope_not_authorized' });
+      }
+      const api = await tiktokPost(
+        'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
+        token.accessToken,
+        {}
+      );
+      return send(res, 200, { ok: true, creator: api?.data || {} });
+    }
+
+    if (action === 'init_direct_upload') {
+      const size = Number(body.video_size);
+      const mime = String(body.mime_type || '');
+      const duration = Number(body.video_duration_sec || 0);
+      const title = String(body.title || '').slice(0, 2200);
+      const privacyLevel = String(body.privacy_level || '');
+      const allowComment = body.allow_comment === true;
+      const allowDuet = body.allow_duet === true;
+      const allowStitch = body.allow_stitch === true;
+      const brandContent = body.brand_content_toggle === true;
+      const brandOrganic = body.brand_organic_toggle === true;
+      const isAigc = body.is_aigc === true;
+      const consent = body.consent === true;
+      const commercialDisclosure = body.commercial_content === true;
+
+      if (!consent) return send(res, 400, { error: 'Explicit consent is required before posting.', code: 'consent_required' });
+      if (!Number.isFinite(size) || size <= 0) return send(res, 400, { error: 'Invalid video size' });
+      if (size > 4 * 1024 * 1024 * 1024) return send(res, 400, { error: 'TikTok video upload limit is 4GB' });
+      if (!['video/mp4','video/quicktime','video/webm'].includes(mime)) return send(res, 400, { error: 'Supported formats: MP4, MOV, WebM' });
+      if (!privacyLevel) return send(res, 400, { error: 'Privacy selection is required.', code: 'privacy_required' });
+      if (commercialDisclosure && !brandContent && !brandOrganic) {
+        return send(res, 400, { error: 'Choose whether the commercial content promotes your own business, a third party, or both.', code: 'commercial_disclosure_required' });
+      }
+      if (brandContent && privacyLevel === 'SELF_ONLY') {
+        return send(res, 400, { error: 'Branded content cannot use Only me privacy.', code: 'branded_content_private' });
+      }
+
+      let token = await getTikTokAccess(organizationId);
+      if (!String(token.scopes || '').split(',').map(x => x.trim()).includes('video.publish')) {
+        return send(res, 403, { error: 'TikTok video.publish permission is not authorized.', code: 'scope_not_authorized' });
+      }
+
+      const creatorApi = await tiktokPost(
+        'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
+        token.accessToken,
+        {}
+      );
+      const creator = creatorApi?.data || {};
+      const allowedPrivacy = Array.isArray(creator.privacy_level_options) ? creator.privacy_level_options : [];
+      if (!allowedPrivacy.includes(privacyLevel)) {
+        return send(res, 400, { error: 'Selected privacy level is not currently allowed for this TikTok account.', code: 'privacy_level_option_mismatch' });
+      }
+      if (duration > 0 && Number(creator.max_video_post_duration_sec || 0) > 0 && duration > Number(creator.max_video_post_duration_sec)) {
+        return send(res, 400, { error: `Video is longer than this creator's TikTok limit of ${creator.max_video_post_duration_sec} seconds.`, code: 'video_too_long' });
+      }
+      if (creator.comment_disabled && allowComment) return send(res, 400, { error: 'Comments are disabled in this TikTok account settings.', code: 'comment_disabled' });
+      if (creator.duet_disabled && allowDuet) return send(res, 400, { error: 'Duet is disabled in this TikTok account settings.', code: 'duet_disabled' });
+      if (creator.stitch_disabled && allowStitch) return send(res, 400, { error: 'Stitch is disabled in this TikTok account settings.', code: 'stitch_disabled' });
+
+      const { chunkSize, totalChunks } = chooseTikTokChunks(size);
+      const payload = {
+        post_info: {
+          title,
+          privacy_level: privacyLevel,
+          disable_comment: !allowComment,
+          disable_duet: !allowDuet,
+          disable_stitch: !allowStitch,
+          brand_content_toggle: brandContent,
+          brand_organic_toggle: brandOrganic,
+          is_aigc: isAigc
+        },
+        source_info: {
+          source: 'FILE_UPLOAD',
+          video_size: size,
+          chunk_size: chunkSize,
+          total_chunk_count: totalChunks
+        }
+      };
+
+      let api;
+      try {
+        api = await tiktokPost(
+          'https://open.tiktokapis.com/v2/post/publish/video/init/',
+          token.accessToken,
+          payload
+        );
+      } catch (e) {
+        if (e.code === 'access_token_invalid' && token.row?.refresh_ciphertext) {
+          token = await refreshTikTokAccess(token.row);
+          api = await tiktokPost(
+            'https://open.tiktokapis.com/v2/post/publish/video/init/',
+            token.accessToken,
+            payload
+          );
+        } else {
+          throw e;
+        }
+      }
+
+      const publishId = api?.data?.publish_id;
+      const uploadUrl = api?.data?.upload_url;
+      if (!publishId || !uploadUrl) throw new Error('TikTok did not return a Direct Post upload URL');
+
+      const connections = await supa(`social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.tiktok&status=eq.active&select=id&order=updated_at.desc&limit=1`);
+      const connectionId = Array.isArray(connections) ? connections[0]?.id : null;
+      const jobs = await supa('social_publish_jobs', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          connection_id: connectionId || null,
+          platform: 'tiktok',
+          media_type: 'video',
+          source_type: 'direct_file_upload',
+          file_name: String(body.file_name || '').slice(0, 240) || null,
+          mime_type: mime,
+          media_size: size,
+          external_publish_id: publishId,
+          status: 'uploading',
+          created_by: admin.id,
+          metadata: {
+            mode: 'direct_post',
+            chunk_size: chunkSize,
+            total_chunk_count: totalChunks,
+            title,
+            privacy_level: privacyLevel,
+            allow_comment: allowComment,
+            allow_duet: allowDuet,
+            allow_stitch: allowStitch,
+            brand_content_toggle: brandContent,
+            brand_organic_toggle: brandOrganic,
+            is_aigc: isAigc
+          }
+        })
+      });
+      const job = Array.isArray(jobs) ? jobs[0] : null;
+
+      return send(res, 200, {
+        ok: true,
+        publish_id: publishId,
+        upload_url: uploadUrl,
+        chunk_size: chunkSize,
+        total_chunk_count: totalChunks,
+        job_id: job?.id || null
+      });
+    }
+
     if (action === 'history') {
       const jobs = await supa(`social_publish_jobs?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.tiktok&select=id,file_name,media_size,external_publish_id,status,error_message,created_at,updated_at&order=created_at.desc&limit=20`);
       return send(res, 200, { ok: true, jobs: Array.isArray(jobs) ? jobs : [] });
