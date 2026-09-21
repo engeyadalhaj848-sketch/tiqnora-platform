@@ -137,7 +137,7 @@
     const api = async (payload) => {
       const { data: { session } } = await db.auth.getSession();
       if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
-      const r = await fetch('/api/social/tiktok', {
+      const r = await fetch('/api/social/oauth/tiktok', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
