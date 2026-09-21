@@ -1587,6 +1587,14 @@ export default async function handler(req, res) {
         });
         return json(res, out.status, out.payload);
       }
+      if (action === 'connector_product' || action === 'get_product') {
+        const out = await handleSupplierCenter({
+          action: 'get_product',
+          provider: url.searchParams.get('provider') || 'aliexpress',
+          supplier_product_id: url.searchParams.get('product_id') || url.searchParams.get('supplier_product_id') || '',
+        });
+        return json(res, out.status, out.payload);
+      }
       const out = await handleSuppliersGet(action);
       return json(res, out.status, out.payload);
     } catch (e) {
