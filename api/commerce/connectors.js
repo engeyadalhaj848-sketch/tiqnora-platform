@@ -6,6 +6,7 @@
  */
 
 import * as cj from '../../lib/suppliers/cj.js';
+import * as aliexpress from '../../lib/suppliers/aliexpress.js';
 
 function env(name) {
   const v = process.env[name];
@@ -172,9 +173,41 @@ function cjConnector() {
   };
 }
 
+function aliexpressConnector() {
+  const configured = aliexpress.isConfigured();
+  return {
+    provider: 'aliexpress',
+    envKeys: ['ALIEXPRESS_APP_KEY', 'ALIEXPRESS_APP_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'],
+    configured,
+    status: configured ? 'connected' : 'not_configured',
+    async connect() {
+      return this.testConnection();
+    },
+    async testConnection() {
+      return aliexpress.testConnection();
+    },
+    async searchProducts(query = '', limit = 10) {
+      return aliexpress.searchProducts(query, limit);
+    },
+    async getProduct(supplierProductId) {
+      return aliexpress.getProductDetails(supplierProductId);
+    },
+    async getPrice(supplierProductId) {
+      return aliexpress.getProductPrice(supplierProductId);
+    },
+    async getInventory(supplierProductId) {
+      return aliexpress.getProductInventory(supplierProductId);
+    },
+    async getShippingInfo(supplierProductId) {
+      return aliexpress.getShippingInfo(supplierProductId);
+    },
+  };
+}
+
+
 export const CONNECTORS = {
   cj_dropshipping: () => cjConnector(),
-  aliexpress: () => baseConnector('aliexpress', ['ALIEXPRESS_API_KEY']),
+  aliexpress: () => aliexpressConnector(),
   alibaba: () => baseConnector('alibaba', ['ALIBABA_API_KEY']),
   dsers: () => baseConnector('dsers', ['DSERS_API_KEY']),
 };
