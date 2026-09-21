@@ -59,6 +59,75 @@ async function fetchTikTokUser(accessToken) {
   return body?.data?.user || null;
 }
 
+async function graphGet(path, accessToken) {
+  const url = new URL(`https://graph.facebook.com/v22.0/${String(path || '').replace(/^\//, '')}`);
+  url.searchParams.set('access_token', accessToken);
+  const r = await fetch(url.toString(), { headers: { 'Cache-Control': 'no-cache' } });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || body?.error) throw new Error(body?.error?.message || `Meta Graph API failed (${r.status})`);
+  return body;
+}
+
+async function graphPost(path, accessToken, payload = {}) {
+  const url = new URL(`https://graph.facebook.com/v22.0/${String(path || '').replace(/^\//, '')}`);
+  url.searchParams.set('access_token', accessToken);
+  const r = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+    body: JSON.stringify(payload)
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || body?.error) throw new Error(body?.error?.message || `Meta Graph API failed (${r.status})`);
+  return body;
+}
+
+async function discoverWhatsAppAccounts(accessToken) {
+  const discovered = [];
+  const businesses = await graphGet('me/businesses?fields=id,name&limit=100', accessToken);
+  for (const business of businesses?.data || []) {
+    let wabas;
+    try {
+      wabas = await graphGet(`${business.id}/owned_whatsapp_business_accounts?fields=id,name,currency,timezone_id,message_template_namespace&limit=100`, accessToken);
+    } catch (_) {
+      continue;
+    }
+    for (const waba of wabas?.data || []) {
+      let subscribed = false;
+      try {
+        const sub = await graphPost(`${waba.id}/subscribed_apps`, accessToken, {});
+        subscribed = sub?.success === true;
+      } catch (_) {
+        subscribed = false;
+      }
+
+      let phones;
+      try {
+        phones = await graphGet(`${waba.id}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating,status,code_verification_status&limit=100`, accessToken);
+      } catch (_) {
+        phones = { data: [] };
+      }
+      for (const phone of phones?.data || []) {
+        discovered.push({
+          business_id: business.id,
+          business_name: business.name || null,
+          waba_id: waba.id,
+          waba_name: waba.name || null,
+          waba_currency: waba.currency || null,
+          waba_timezone_id: waba.timezone_id || null,
+          phone_number_id: phone.id,
+          display_phone_number: phone.display_phone_number || null,
+          verified_name: phone.verified_name || null,
+          quality_rating: phone.quality_rating || null,
+          phone_status: phone.status || null,
+          code_verification_status: phone.code_verification_status || null,
+          webhook_subscribed: subscribed
+        });
+      }
+    }
+  }
+  return discovered;
+}
+
 function decrypt(ciphertext, iv, tag) {
   if (!ciphertext || !iv || !tag) return null;
   const key = Buffer.from(process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || '', 'base64');
@@ -454,9 +523,48 @@ export default async function handler(req, res) {
           })
         });
       }
+    } else if (provider === 'whatsapp') {
+      const accounts = await discoverWhatsAppAccounts(access);
+      for (const account of accounts) {
+        await supa('social_connections?on_conflict=organization_id,platform,external_account_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({
+            organization_id: org,
+            platform: 'whatsapp',
+            external_account_id: account.phone_number_id,
+            account_name: account.verified_name || account.display_phone_number || 'WhatsApp',
+            status: 'active',
+            capabilities: { inbox: true, messaging: true, templates: true, webhooks: true },
+            settings: account,
+            connected_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        });
+      }
+      accountMetadata = {
+        accounts_found: accounts.length,
+        phone_number_ids: accounts.map(x => x.phone_number_id),
+        waba_ids: [...new Set(accounts.map(x => x.waba_id))],
+        webhook_subscribed: accounts.some(x => x.webhook_subscribed)
+      };
     }
 
-    await supa('integration_connections?provider=eq.' + provider, { method: 'PATCH', body: JSON.stringify({ enabled: true, status: 'connected', mode: process.env.TIKTOK_MODE || 'production', last_checked_at: new Date().toISOString(), metadata: { scopes: grantedScopes, ...(accountMetadata || {}) } }) });
+    const displayNames = { meta: 'Meta / Facebook / Instagram', whatsapp: 'WhatsApp Cloud', tiktok: 'TikTok', linkedin: 'LinkedIn' };
+    await supa('integration_connections?on_conflict=provider', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        provider,
+        display_name: displayNames[provider] || provider,
+        enabled: true,
+        status: 'connected',
+        mode: provider === 'tiktok' ? (process.env.TIKTOK_MODE || 'production') : 'production',
+        last_checked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        metadata: { scopes: grantedScopes, ...(accountMetadata || {}) }
+      })
+    });
     return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
