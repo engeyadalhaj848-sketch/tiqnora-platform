@@ -1201,7 +1201,7 @@ VIEWS.commerce = async v => {
     db.from('fulfillment_requests').select('*, orders(order_number,customer_name), commerce_suppliers(display_name)').order('created_at',{ascending:false}).limit(50),
     db.from('product_import_queue').select('*').order('created_at',{ascending:false}).limit(50),
     db.from('supplier_sync_logs').select('*, commerce_suppliers(display_name)').order('started_at',{ascending:false}).limit(30),
-    db.from('supplier_orders').select('*, orders(order_number), commerce_suppliers(display_name)').order('created_at',{ascending:false}).limit(30),
+    db.from('supplier_orders').select('*, orders(order_number), commerce_suppliers(display_name,provider)').order('created_at',{ascending:false}).limit(30),
   ]);
   const [supRes, candRes, fulRes, qRes, syncRes, soRes] = results;
   if (supRes.error && String(supRes.error.message||'').includes('does not exist')) {
@@ -1260,7 +1260,10 @@ VIEWS.commerce = async v => {
       <td><span class="pill ${r.status==='fulfilled'?'ok':r.status==='failed'?'danger':'warn'}">${esc(r.status)}</span></td>
       <td>${so?esc(so.status):'—'}</td>
       <td>${r.status==='awaiting_approval'?`<button class="btn-sm btn-primary" data-approve="${r.id}">اعتماد</button>`:''}
-      ${r.status==='approved'?`<button class="btn-sm" data-prep="${r.id}" data-order="${r.order_id}" data-sup="${r.supplier_id||''}">إعداد طلب مورد</button>`:''}</td>
+      ${r.status==='approved' && !so?`<button class="btn-sm" data-prep="${r.id}" data-order="${r.order_id}" data-sup="${r.supplier_id||''}">إعداد طلب مورد</button>`:''}
+      ${r.status==='approved' && so && ['ready','failed'].includes(so.status) && so.commerce_suppliers?.provider==='aliexpress'
+        ? `<button class="btn-sm btn-primary" data-submit-ae="${r.id}">${so.status==='failed'?'إعادة المحاولة':'إرسال إلى AliExpress'}</button>`
+        : ''}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا طلبات تنفيذ</td></tr>');
 
@@ -1709,6 +1712,41 @@ VIEWS.commerce = async v => {
     const { error } = await db.from('supplier_orders').insert(payload);
     if (error) toast(error.message||'فشل الإعداد');
     else { toast('تم إعداد طلب المورد (draft/ready) — بدون إرسال تلقائي'); VIEWS.commerce(v); }
+  });
+
+  $('[data-submit-ae]').forEach(b=>b.onclick=async()=>{
+    if (!confirm('إنشاء طلب فعلي لدى AliExpress الآن؟ سيتم إنشاء طلب المورد فقط بعد اعتمادك، ولن يتم الدفع تلقائياً.')) return;
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.access_token) return toast('انتهت جلسة الأدمن — سجّل الدخول من جديد', false);
+    b.disabled = true;
+    const oldText = b.textContent;
+    b.textContent = 'جارٍ الإرسال…';
+    try {
+      const resp = await fetch('/api/suppliers/fulfillment-submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + session.access_token,
+        },
+        body: JSON.stringify({
+          fulfillment_request_id: b.dataset.submitAe,
+          confirm_submit: true,
+        }),
+      });
+      const out = await resp.json().catch(()=>({}));
+      if (!resp.ok || !out.ok) {
+        toast(out.message || out.error || 'فشل إنشاء طلب AliExpress', false);
+        b.disabled = false;
+        b.textContent = oldText;
+        return;
+      }
+      toast('تم إنشاء طلب AliExpress: ' + (out.external_order_id || 'تم') + ' — الدفع غير تلقائي');
+      VIEWS.commerce(v);
+    } catch (e) {
+      toast(e.message || 'تعذر الاتصال بخدمة المورد', false);
+      b.disabled = false;
+      b.textContent = oldText;
+    }
   });
 
   $('#add-source').onclick=()=>crudModal({title:'إضافة منتج مرشح من مورد',fields:[
