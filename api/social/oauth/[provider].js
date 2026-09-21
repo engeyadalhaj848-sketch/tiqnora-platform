@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, createCipheriv } from 'node:crypto';
+import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 
 const providers = {
   meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_manage_comments,instagram_manage_messages,pages_messaging' },
@@ -58,10 +58,191 @@ async function fetchTikTokUser(accessToken) {
   if (!r.ok || (body?.error?.code && body.error.code !== 'ok')) throw new Error(body?.error?.message || `TikTok user info failed (${r.status})`);
   return body?.data?.user || null;
 }
+
+function decrypt(ciphertext, iv, tag) {
+  if (!ciphertext || !iv || !tag) return null;
+  const key = Buffer.from(process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || '', 'base64');
+  if (key.length !== 32) throw new Error('SOCIAL_TOKEN_ENCRYPTION_KEY must be a base64 32-byte key');
+  const d = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'));
+  d.setAuthTag(Buffer.from(tag, 'base64url'));
+  return Buffer.concat([d.update(Buffer.from(ciphertext, 'base64url')), d.final()]).toString();
+}
+
+async function verifyAdmin(authHeader) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7);
+  const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
+  const apikey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const r = await fetch(`${base}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey } });
+  if (!r.ok) return null;
+  const user = await r.json().catch(() => null);
+  if (!user?.id) return null;
+  const rows = await supa(`profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`);
+  const profile = Array.isArray(rows) ? rows[0] : null;
+  if (!profile || profile.is_active === false || !['super_admin','admin','owner'].includes(String(profile.role || ''))) return null;
+  return { ...user, role: profile.role };
+}
+
+async function resolveOrganization(requestedId, admin) {
+  if (requestedId && ['super_admin','owner'].includes(admin.role)) return String(requestedId);
+  if (requestedId) {
+    const rows = await supa(`organization_members?organization_id=eq.${encodeURIComponent(requestedId)}&user_id=eq.${encodeURIComponent(admin.id)}&select=organization_id&limit=1`);
+    if (Array.isArray(rows) && rows[0]?.organization_id) return String(rows[0].organization_id);
+    throw Object.assign(new Error('Organization access denied'), { status: 403 });
+  }
+  const rows = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
+  if (!Array.isArray(rows) || !rows[0]?.id) throw new Error('Organization is missing');
+  return rows[0].id;
+}
+
+async function getTikTokTokenRow(organizationId) {
+  const rows = await supa(`social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.tiktok&select=*&limit=1`);
+  return Array.isArray(rows) ? rows[0] : null;
+}
+
+async function refreshTikTokAccess(row) {
+  if (!row?.refresh_ciphertext || !row?.refresh_iv || !row?.refresh_tag) {
+    throw Object.assign(new Error('TikTok authorization needs renewal for long-lived access.'), { status: 409, code: 'reauthorize_required' });
+  }
+  const refreshToken = decrypt(row.refresh_ciphertext, row.refresh_iv, row.refresh_tag);
+  const { clientId, clientSecret } = credentials('tiktok');
+  const body = new URLSearchParams({ client_key: clientId, client_secret: clientSecret, grant_type: 'refresh_token', refresh_token: refreshToken });
+  const r = await fetch(providers.tiktok.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' }, body });
+  const token = await r.json().catch(() => ({}));
+  if (!r.ok || !token.access_token) throw Object.assign(new Error(token.error_description || token.error || 'TikTok token refresh failed'), { status: 401, code: 'reauthorize_required' });
+
+  const accessEncrypted = encrypt(token.access_token);
+  const refreshEncrypted = token.refresh_token ? encrypt(token.refresh_token) : null;
+  const patch = {
+    ciphertext: accessEncrypted.ciphertext,
+    iv: accessEncrypted.iv,
+    tag: accessEncrypted.tag,
+    scopes: token.scope || row.scopes,
+    open_id: token.open_id || row.open_id,
+    expires_at: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : null,
+    refresh_expires_at: token.refresh_expires_in ? new Date(Date.now() + Number(token.refresh_expires_in) * 1000).toISOString() : row.refresh_expires_at,
+    updated_at: new Date().toISOString(),
+    ...(refreshEncrypted ? { refresh_ciphertext: refreshEncrypted.ciphertext, refresh_iv: refreshEncrypted.iv, refresh_tag: refreshEncrypted.tag } : {})
+  };
+  await supa(`social_provider_tokens?id=eq.${encodeURIComponent(row.id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  return { accessToken: token.access_token, scopes: patch.scopes, row: { ...row, ...patch } };
+}
+
+async function getTikTokAccess(organizationId) {
+  const row = await getTikTokTokenRow(organizationId);
+  if (!row) throw Object.assign(new Error('TikTok is not connected.'), { status: 409, code: 'not_connected' });
+  const exp = row.expires_at ? new Date(row.expires_at).getTime() : 0;
+  if (exp > Date.now() + 10 * 60 * 1000) return { accessToken: decrypt(row.ciphertext, row.iv, row.tag), scopes: row.scopes || '', row };
+  return refreshTikTokAccess(row);
+}
+
+async function tiktokPost(url, accessToken, payload) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify(payload)
+  });
+  const data = await r.json().catch(() => ({}));
+  const code = data?.error?.code;
+  if (!r.ok || (code && code !== 'ok')) throw Object.assign(new Error(data?.error?.message || code || `TikTok API ${r.status}`), { status: r.status || 502, code: code || 'tiktok_error', detail: data });
+  return data;
+}
+
+function chooseTikTokChunks(size) {
+  const min = 5 * 1024 * 1024;
+  const maxSingle = 64 * 1024 * 1024;
+  if (size < min || size <= maxSingle) return { chunkSize: size, totalChunks: 1 };
+  const chunkSize = 10 * 1024 * 1024;
+  return { chunkSize, totalChunks: Math.floor(size / chunkSize) };
+}
+
+async function handleTikTokPosting(req, res) {
+  try {
+    const admin = await verifyAdmin(req.headers.authorization || '');
+    if (!admin) return send(res, 401, { error: 'Admin authentication required' });
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const action = String(body.action || '').toLowerCase();
+    const organizationId = await resolveOrganization(body.organization_id, admin);
+
+    if (action === 'history') {
+      const jobs = await supa(`social_publish_jobs?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.tiktok&select=id,file_name,media_size,external_publish_id,status,error_message,created_at,updated_at&order=created_at.desc&limit=20`);
+      return send(res, 200, { ok: true, jobs: Array.isArray(jobs) ? jobs : [] });
+    }
+
+    if (action === 'mark_uploaded') {
+      if (body.job_id) await supa(`social_publish_jobs?id=eq.${encodeURIComponent(body.job_id)}&organization_id=eq.${encodeURIComponent(organizationId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'processing', updated_at: new Date().toISOString() }) });
+      return send(res, 200, { ok: true });
+    }
+
+    if (action === 'status') {
+      if (!body.publish_id) return send(res, 400, { error: 'publish_id required' });
+      const token = await getTikTokAccess(organizationId);
+      const api = await tiktokPost('https://open.tiktokapis.com/v2/post/publish/status/fetch/', token.accessToken, { publish_id: String(body.publish_id) });
+      const status = String(api?.data?.status || 'processing').toLowerCase();
+      const failReason = api?.data?.fail_reason || null;
+      if (body.job_id) await supa(`social_publish_jobs?id=eq.${encodeURIComponent(body.job_id)}&organization_id=eq.${encodeURIComponent(organizationId)}`, { method: 'PATCH', body: JSON.stringify({ status, error_message: failReason, metadata: { tiktok_status: api?.data || {} }, updated_at: new Date().toISOString() }) });
+      return send(res, 200, { ok: true, publish_id: body.publish_id, status, fail_reason: failReason, data: api?.data || {} });
+    }
+
+    if (action === 'init_upload') {
+      const size = Number(body.video_size);
+      const mime = String(body.mime_type || '');
+      if (!Number.isFinite(size) || size <= 0) return send(res, 400, { error: 'Invalid video size' });
+      if (size > 4 * 1024 * 1024 * 1024) return send(res, 400, { error: 'TikTok video upload limit is 4GB' });
+      if (!['video/mp4','video/quicktime','video/webm'].includes(mime)) return send(res, 400, { error: 'Supported formats: MP4, MOV, WebM' });
+
+      let token = await getTikTokAccess(organizationId);
+      if (!String(token.scopes || '').split(',').map(x => x.trim()).includes('video.upload')) return send(res, 403, { error: 'TikTok video.upload permission is not authorized.', code: 'scope_not_authorized' });
+
+      const { chunkSize, totalChunks } = chooseTikTokChunks(size);
+      let api;
+      try {
+        api = await tiktokPost('https://open.tiktokapis.com/v2/post/publish/inbox/video/init/', token.accessToken, { source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunkSize, total_chunk_count: totalChunks } });
+      } catch (e) {
+        if (e.code === 'access_token_invalid' && token.row?.refresh_ciphertext) {
+          token = await refreshTikTokAccess(token.row);
+          api = await tiktokPost('https://open.tiktokapis.com/v2/post/publish/inbox/video/init/', token.accessToken, { source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunkSize, total_chunk_count: totalChunks } });
+        } else throw e;
+      }
+
+      const publishId = api?.data?.publish_id;
+      const uploadUrl = api?.data?.upload_url;
+      if (!publishId || !uploadUrl) throw new Error('TikTok did not return an upload URL');
+
+      const connections = await supa(`social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.tiktok&status=eq.active&select=id&order=updated_at.desc&limit=1`);
+      const connectionId = Array.isArray(connections) ? connections[0]?.id : null;
+      const jobs = await supa('social_publish_jobs', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          connection_id: connectionId || null,
+          platform: 'tiktok',
+          media_type: 'video',
+          source_type: 'file_upload',
+          file_name: String(body.file_name || '').slice(0, 240) || null,
+          mime_type: mime,
+          media_size: size,
+          external_publish_id: publishId,
+          status: 'uploading',
+          created_by: admin.id,
+          metadata: { chunk_size: chunkSize, total_chunk_count: totalChunks }
+        })
+      });
+      const job = Array.isArray(jobs) ? jobs[0] : null;
+      return send(res, 200, { ok: true, publish_id: publishId, upload_url: uploadUrl, chunk_size: chunkSize, total_chunk_count: totalChunks, job_id: job?.id || null });
+    }
+
+    return send(res, 400, { error: 'Unknown TikTok action' });
+  } catch (e) {
+    return send(res, e.status || 500, { error: e.message || 'Internal error', code: e.code || 'internal_error', ...(e.detail ? { detail: e.detail } : {}) });
+  }
+}
 export default async function handler(req, res) {
   const provider = String(req.query?.provider || '').toLowerCase(); const cfg = providers[provider];
   if (!cfg) return send(res, 404, { error: 'Unsupported provider' });
   const scopes = provider === 'tiktok' ? (process.env.TIKTOK_SCOPES || cfg.scopes) : cfg.scopes;
+  if (provider === 'tiktok' && req.method === 'POST') return handleTikTokPosting(req, res);
   if (req.method === 'GET' && !req.query.code) {
     if (!secret()) return send(res, 503, { error: 'OAuth state secret is not configured' });
     const state = sign(JSON.stringify({ provider, organization_id: String(req.query.organization_id || ''), nonce: randomBytes(12).toString('hex'), exp: Date.now() + 600000 }));
