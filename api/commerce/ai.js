@@ -1578,6 +1578,15 @@ export default async function handler(req, res) {
         const out = await handleSuppliersGet('scout_history');
         return json(res, out.status, out.payload);
       }
+      if (action === 'connector_search' || action === 'search') {
+        const out = await handleSupplierCenter({
+          action: 'search',
+          provider: url.searchParams.get('provider') || 'aliexpress',
+          query: url.searchParams.get('q') || url.searchParams.get('query') || '',
+          limit: Number(url.searchParams.get('limit') || 10),
+        });
+        return json(res, out.status, out.payload);
+      }
       const out = await handleSuppliersGet(action);
       return json(res, out.status, out.payload);
     } catch (e) {
