@@ -345,6 +345,14 @@
     fileMeta.textContent = 'اختر MP4 أو MOV أو WebM.';
     wrap.appendChild(fileMeta);
 
+    const preview = document.createElement('video');
+    preview.controls = true;
+    preview.playsInline = true;
+    preview.muted = true;
+    preview.style.cssText = 'display:none;max-width:420px;width:100%;border-radius:12px;background:#000;aspect-ratio:9/16;object-fit:contain';
+    wrap.appendChild(preview);
+    let previewUrl = '';
+
     const titleLabel = document.createElement('label');
     titleLabel.textContent = 'الوصف / Caption';
     const titleInput = document.createElement('textarea');
@@ -412,8 +420,17 @@
     const aigc = mkCheck('الفيديو مولد أو معدل بالذكاء الاصطناعي');
     wrap.appendChild(aigc.holder);
 
-    const consent = mkCheck('أوافق على إرسال هذا الفيديو وإعداداته إلى TikTok للنشر');
-    wrap.appendChild(consent.holder);
+    const consent = mkCheck("By posting, you agree to TikTok's Music Usage Confirmation");
+    const consentTextNode = consent.holder.lastChild;
+    const consentHelp = document.createElement('small');
+    consentHelp.className = 'card-desc';
+    consentHelp.textContent = 'الموافقة مطلوبة قبل النشر.';
+    wrap.append(consent.holder, consentHelp);
+
+    const disclosureNote = document.createElement('small');
+    disclosureNote.className = 'card-desc';
+    disclosureNote.style.cssText = 'display:none;font-weight:600';
+    wrap.appendChild(disclosureNote);
 
     const progress = document.createElement('progress');
     progress.max = 100;
@@ -480,6 +497,30 @@
       MUTUAL_FOLLOW_FRIENDS: 'الأصدقاء المتبادلون',
       FOLLOWER_OF_CREATOR: 'المتابعون',
       SELF_ONLY: 'أنا فقط (SELF_ONLY)'
+    };
+
+    const updateComplianceCopy = () => {
+      const branded = paidPartner.input.checked;
+      const own = ownBusiness.input.checked;
+      consentTextNode.textContent = branded
+        ? "By posting, you agree to TikTok's Branded Content Policy and Music Usage Confirmation."
+        : "By posting, you agree to TikTok's Music Usage Confirmation";
+
+      if (branded) {
+        disclosureNote.style.display = 'block';
+        disclosureNote.textContent = "Your photo/video will be labeled as 'Paid partnership'";
+      } else if (own) {
+        disclosureNote.style.display = 'block';
+        disclosureNote.textContent = "Your photo/video will be labeled as 'Promotional content'";
+      } else {
+        disclosureNote.style.display = 'none';
+        disclosureNote.textContent = '';
+      }
+
+      [...privacy.options].forEach(opt => {
+        if (opt.value === 'SELF_ONLY') opt.disabled = branded;
+      });
+      if (branded && privacy.value === 'SELF_ONLY') privacy.value = '';
     };
 
     const refreshButtonState = () => {
@@ -570,9 +611,17 @@
       const mime = normalizeMime(file);
       if (!mime) {
         fileMeta.textContent = 'صيغة غير مدعومة.';
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = '';
+        preview.removeAttribute('src');
+        preview.style.display = 'none';
         refreshButtonState();
         return;
       }
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(file);
+      preview.src = previewUrl;
+      preview.style.display = 'block';
       videoDuration = await readDuration(file);
       fileMeta.textContent = `${file.name} — ${formatBytes(file.size)} — ${videoDuration ? Math.ceil(videoDuration) + ' ثانية' : 'مدة غير معروفة'}`;
       if (creator && videoDuration > 0 && Number(creator.max_video_post_duration_sec || 0) > 0 && videoDuration > Number(creator.max_video_post_duration_sec)) {
@@ -590,10 +639,15 @@
         ownBusiness.input.checked = false;
         paidPartner.input.checked = false;
       }
+      updateComplianceCopy();
       refreshButtonState();
     };
 
-    [privacy, consent.input, ownBusiness.input, paidPartner.input, allowComment.input, allowDuet.input, allowStitch.input, aigc.input]
+    [ownBusiness.input, paidPartner.input].forEach(el => el.addEventListener('change', () => {
+      updateComplianceCopy();
+      refreshButtonState();
+    }));
+    [privacy, consent.input, allowComment.input, allowDuet.input, allowStitch.input, aigc.input]
       .forEach(el => el.addEventListener('change', refreshButtonState));
 
     reloadCreatorBtn.onclick = loadCreator;
@@ -689,6 +743,10 @@
           : '✅ تم إرسال Direct Post إلى TikTok وهو قيد المعالجة. يمكنك تحديث سجل الإرسال بعد قليل.';
 
         fileInput.value = '';
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = '';
+        preview.removeAttribute('src');
+        preview.style.display = 'none';
         titleInput.value = '';
         privacy.value = '';
         consent.input.checked = false;
@@ -716,6 +774,7 @@
       }
     };
 
+    updateComplianceCopy();
     loadCreator();
     return card;
   }
