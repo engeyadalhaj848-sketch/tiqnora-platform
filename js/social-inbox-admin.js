@@ -307,6 +307,419 @@
     return card;
   }
 
+  function addTikTokDirectPostCard(view, db) {
+    const card = addCard(
+      view,
+      'النشر المباشر إلى TikTok',
+      'ينشر الفيديو مباشرة على الحساب المرتبط بعد أن تختار الخصوصية والتفاعلات وتوافق على الإرسال.'
+    );
+
+    const notice = document.createElement('div');
+    notice.className = 'db-banner';
+    notice.style.marginTop = '12px';
+    notice.textContent = 'وضع الاختبار/العميل غير المدقق: TikTok يقيّد Direct Post إلى SELF_ONLY ويشترط أن يكون حساب الاختبار خاصًا حتى يكتمل Audit.';
+    card.appendChild(notice);
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:grid;gap:12px;margin-top:14px';
+
+    const accountBox = document.createElement('div');
+    accountBox.className = 'card-desc';
+    accountBox.textContent = 'جارٍ تحميل إعدادات حساب TikTok…';
+    wrap.appendChild(accountBox);
+
+    const reloadCreatorBtn = document.createElement('button');
+    reloadCreatorBtn.type = 'button';
+    reloadCreatorBtn.className = 'btn-sm';
+    reloadCreatorBtn.textContent = 'تحديث إعدادات حساب TikTok';
+    reloadCreatorBtn.style.width = 'fit-content';
+    wrap.appendChild(reloadCreatorBtn);
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm';
+    wrap.appendChild(fileInput);
+
+    const fileMeta = document.createElement('small');
+    fileMeta.className = 'card-desc';
+    fileMeta.textContent = 'اختر MP4 أو MOV أو WebM.';
+    wrap.appendChild(fileMeta);
+
+    const titleLabel = document.createElement('label');
+    titleLabel.textContent = 'الوصف / Caption';
+    const titleInput = document.createElement('textarea');
+    titleInput.rows = 4;
+    titleInput.maxLength = 2200;
+    titleInput.placeholder = 'اكتب وصف الفيديو والهاشتاقات…';
+    titleInput.dir = 'auto';
+    wrap.append(titleLabel, titleInput);
+
+    const privacyLabel = document.createElement('label');
+    privacyLabel.textContent = 'الخصوصية';
+    const privacy = document.createElement('select');
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'اختر الخصوصية يدويًا';
+    placeholder.selected = true;
+    placeholder.disabled = true;
+    privacy.appendChild(placeholder);
+    privacy.disabled = true;
+    wrap.append(privacyLabel, privacy);
+
+    const interactions = document.createElement('div');
+    interactions.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap';
+    const mkCheck = (label) => {
+      const holder = document.createElement('label');
+      holder.style.cssText = 'display:flex;align-items:center;gap:6px';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      holder.append(input, document.createTextNode(label));
+      interactions.appendChild(holder);
+      return { holder, input };
+    };
+    const allowComment = mkCheck('السماح بالتعليقات');
+    const allowDuet = mkCheck('السماح بـ Duet');
+    const allowStitch = mkCheck('السماح بـ Stitch');
+    wrap.appendChild(interactions);
+
+    const commercial = mkCheck('هذا محتوى تجاري / ترويجي');
+    wrap.appendChild(commercial.holder);
+
+    const disclosureWrap = document.createElement('div');
+    disclosureWrap.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;padding-inline-start:18px';
+    const ownBusiness = (() => {
+      const holder = document.createElement('label');
+      holder.style.cssText = 'display:flex;align-items:center;gap:6px';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.disabled = true;
+      holder.append(input, document.createTextNode('يروج لنشاطي / علامتي'));
+      disclosureWrap.appendChild(holder);
+      return { holder, input };
+    })();
+    const paidPartner = (() => {
+      const holder = document.createElement('label');
+      holder.style.cssText = 'display:flex;align-items:center;gap:6px';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.disabled = true;
+      holder.append(input, document.createTextNode('شراكة مدفوعة مع طرف ثالث'));
+      disclosureWrap.appendChild(holder);
+      return { holder, input };
+    })();
+    wrap.appendChild(disclosureWrap);
+
+    const aigc = mkCheck('الفيديو مولد أو معدل بالذكاء الاصطناعي');
+    wrap.appendChild(aigc.holder);
+
+    const consent = mkCheck('أوافق على إرسال هذا الفيديو وإعداداته إلى TikTok للنشر');
+    wrap.appendChild(consent.holder);
+
+    const progress = document.createElement('progress');
+    progress.max = 100;
+    progress.value = 0;
+    progress.style.cssText = 'width:100%;height:14px;display:none';
+    wrap.appendChild(progress);
+
+    const status = document.createElement('div');
+    status.className = 'card-desc';
+    status.style.cssText = 'min-height:24px;white-space:pre-wrap';
+    wrap.appendChild(status);
+
+    const publishBtn = document.createElement('button');
+    publishBtn.type = 'button';
+    publishBtn.className = 'btn-sm';
+    publishBtn.textContent = 'نشر مباشرة إلى TikTok';
+    publishBtn.disabled = true;
+    publishBtn.style.width = 'fit-content';
+    wrap.appendChild(publishBtn);
+
+    card.appendChild(wrap);
+
+    let creator = null;
+    let videoDuration = 0;
+
+    const api = async (payload) => {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+      const r = await fetch('/api/social/oauth/tiktok', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const err = new Error(body.error || 'تعذر تنفيذ طلب TikTok');
+        err.code = body.code;
+        throw err;
+      }
+      return body;
+    };
+
+    const normalizeMime = (file) => {
+      if (['video/mp4', 'video/quicktime', 'video/webm'].includes(file.type)) return file.type;
+      const name = String(file.name || '').toLowerCase();
+      if (name.endsWith('.mp4')) return 'video/mp4';
+      if (name.endsWith('.mov')) return 'video/quicktime';
+      if (name.endsWith('.webm')) return 'video/webm';
+      return '';
+    };
+
+    const formatBytes = (n) => {
+      const x = Number(n) || 0;
+      if (x < 1024 * 1024) return (x / 1024).toFixed(1) + ' KB';
+      if (x < 1024 * 1024 * 1024) return (x / (1024 * 1024)).toFixed(1) + ' MB';
+      return (x / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    };
+
+    const privacyLabels = {
+      PUBLIC_TO_EVERYONE: 'الجميع',
+      MUTUAL_FOLLOW_FRIENDS: 'الأصدقاء المتبادلون',
+      FOLLOWER_OF_CREATOR: 'المتابعون',
+      SELF_ONLY: 'أنا فقط (SELF_ONLY)'
+    };
+
+    const refreshButtonState = () => {
+      const file = fileInput.files?.[0];
+      const disclosureOk = !commercial.input.checked || ownBusiness.input.checked || paidPartner.input.checked;
+      const brandedPrivacyOk = !(paidPartner.input.checked && privacy.value === 'SELF_ONLY');
+      publishBtn.disabled = !creator || !file || !privacy.value || !consent.input.checked || !disclosureOk || !brandedPrivacyOk;
+    };
+
+    const loadCreator = async () => {
+      reloadCreatorBtn.disabled = true;
+      privacy.disabled = true;
+      accountBox.textContent = 'جارٍ تحميل أحدث إعدادات حساب TikTok…';
+      try {
+        const data = await api({ action: 'creator_info' });
+        creator = data.creator || {};
+        accountBox.textContent = `الحساب: ${creator.creator_nickname || creator.creator_username || 'TikTok'} — أقصى مدة متاحة: ${creator.max_video_post_duration_sec || '—'} ثانية`;
+
+        privacy.replaceChildren();
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = 'اختر الخصوصية يدويًا';
+        ph.disabled = true;
+        ph.selected = true;
+        privacy.appendChild(ph);
+        (creator.privacy_level_options || []).forEach(value => {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = privacyLabels[value] || value;
+          privacy.appendChild(opt);
+        });
+        privacy.disabled = false;
+
+        allowComment.input.checked = false;
+        allowDuet.input.checked = false;
+        allowStitch.input.checked = false;
+
+        allowComment.input.disabled = creator.comment_disabled === true;
+        allowDuet.input.disabled = creator.duet_disabled === true;
+        allowStitch.input.disabled = creator.stitch_disabled === true;
+
+        allowComment.holder.style.opacity = allowComment.input.disabled ? '.55' : '1';
+        allowDuet.holder.style.opacity = allowDuet.input.disabled ? '.55' : '1';
+        allowStitch.holder.style.opacity = allowStitch.input.disabled ? '.55' : '1';
+
+        if (videoDuration > 0 && Number(creator.max_video_post_duration_sec || 0) > 0 && videoDuration > Number(creator.max_video_post_duration_sec)) {
+          status.textContent = `❌ مدة الفيديو ${Math.ceil(videoDuration)} ثانية، بينما الحد المتاح لهذا الحساب ${creator.max_video_post_duration_sec} ثانية.`;
+        } else {
+          status.textContent = '';
+        }
+      } catch (e) {
+        creator = null;
+        accountBox.textContent = 'تعذر قراءة إعدادات TikTok: ' + e.message;
+        if (e.code === 'scope_not_authorized') {
+          status.textContent = 'يلزم إعادة تفويض TikTok والموافقة على video.publish.';
+        }
+      } finally {
+        reloadCreatorBtn.disabled = false;
+        refreshButtonState();
+      }
+    };
+
+    const readDuration = (file) => new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        const d = Number(video.duration || 0);
+        URL.revokeObjectURL(url);
+        resolve(d);
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(0);
+      };
+      video.src = url;
+    });
+
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0];
+      videoDuration = 0;
+      progress.value = 0;
+      if (!file) {
+        fileMeta.textContent = 'اختر MP4 أو MOV أو WebM.';
+        refreshButtonState();
+        return;
+      }
+      const mime = normalizeMime(file);
+      if (!mime) {
+        fileMeta.textContent = 'صيغة غير مدعومة.';
+        refreshButtonState();
+        return;
+      }
+      videoDuration = await readDuration(file);
+      fileMeta.textContent = `${file.name} — ${formatBytes(file.size)} — ${videoDuration ? Math.ceil(videoDuration) + ' ثانية' : 'مدة غير معروفة'}`;
+      if (creator && videoDuration > 0 && Number(creator.max_video_post_duration_sec || 0) > 0 && videoDuration > Number(creator.max_video_post_duration_sec)) {
+        status.textContent = `❌ مدة الفيديو تتجاوز حد الحساب (${creator.max_video_post_duration_sec} ثانية).`;
+      } else {
+        status.textContent = '';
+      }
+      refreshButtonState();
+    };
+
+    commercial.input.onchange = () => {
+      ownBusiness.input.disabled = !commercial.input.checked;
+      paidPartner.input.disabled = !commercial.input.checked;
+      if (!commercial.input.checked) {
+        ownBusiness.input.checked = false;
+        paidPartner.input.checked = false;
+      }
+      refreshButtonState();
+    };
+
+    [privacy, consent.input, ownBusiness.input, paidPartner.input, allowComment.input, allowDuet.input, allowStitch.input, aigc.input]
+      .forEach(el => el.addEventListener('change', refreshButtonState));
+
+    reloadCreatorBtn.onclick = loadCreator;
+
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    publishBtn.onclick = async () => {
+      const file = fileInput.files?.[0];
+      const mime = file ? normalizeMime(file) : '';
+      if (!file || !mime || !creator) return;
+
+      if (videoDuration > 0 && Number(creator.max_video_post_duration_sec || 0) > 0 && videoDuration > Number(creator.max_video_post_duration_sec)) {
+        status.textContent = '❌ الفيديو أطول من المدة التي يسمح بها حساب TikTok.';
+        return;
+      }
+      if (paidPartner.input.checked && privacy.value === 'SELF_ONLY') {
+        status.textContent = '❌ المحتوى المدفوع لطرف ثالث لا يمكن نشره بخصوصية «أنا فقط».';
+        return;
+      }
+
+      publishBtn.disabled = true;
+      reloadCreatorBtn.disabled = true;
+      fileInput.disabled = true;
+      progress.style.display = 'block';
+      progress.value = 0;
+      status.textContent = 'جارٍ إنشاء طلب النشر المباشر…';
+
+      let init = null;
+      try {
+        init = await api({
+          action: 'init_direct_upload',
+          file_name: file.name,
+          mime_type: mime,
+          video_size: file.size,
+          video_duration_sec: videoDuration || 0,
+          title: titleInput.value,
+          privacy_level: privacy.value,
+          allow_comment: allowComment.input.checked,
+          allow_duet: allowDuet.input.checked,
+          allow_stitch: allowStitch.input.checked,
+          commercial_content: commercial.input.checked,
+          brand_organic_toggle: ownBusiness.input.checked,
+          brand_content_toggle: paidPartner.input.checked,
+          is_aigc: aigc.input.checked,
+          consent: consent.input.checked
+        });
+
+        const chunkSize = Number(init.chunk_size);
+        const totalChunks = Number(init.total_chunk_count);
+        let offset = 0;
+
+        for (let i = 0; i < totalChunks; i += 1) {
+          const isLast = i === totalChunks - 1;
+          const endExclusive = isLast ? file.size : Math.min(file.size, offset + chunkSize);
+          const chunk = file.slice(offset, endExclusive, mime);
+          status.textContent = `جارٍ رفع الفيديو للنشر — الجزء ${i + 1} من ${totalChunks}…`;
+
+          const uploadRes = await fetch(init.upload_url, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': mime,
+              'Content-Range': `bytes ${offset}-${endExclusive - 1}/${file.size}`
+            },
+            body: chunk
+          });
+
+          if (!uploadRes.ok) {
+            const detail = await uploadRes.text().catch(() => '');
+            throw new Error(`TikTok رفض جزء الرفع (${uploadRes.status})${detail ? ': ' + detail.slice(0, 180) : ''}`);
+          }
+
+          offset = endExclusive;
+          progress.value = Math.round((offset / file.size) * 100);
+        }
+
+        await api({ action: 'mark_uploaded', job_id: init.job_id });
+        status.textContent = 'تم رفع الفيديو. TikTok يعالج النشر الآن…';
+
+        let latest = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          await sleep(attempt === 0 ? 1500 : 2500);
+          latest = await api({ action: 'status', publish_id: init.publish_id, job_id: init.job_id });
+          const st = String(latest.status || '').toLowerCase();
+          if (st.includes('fail') || st.includes('complete') || st.includes('published')) break;
+        }
+
+        const st = String(latest?.status || '').toLowerCase();
+        if (st.includes('fail')) throw new Error(latest?.fail_reason || 'فشل TikTok في نشر الفيديو.');
+
+        progress.value = 100;
+        status.textContent = st.includes('complete') || st.includes('published')
+          ? '✅ اكتمل Direct Post على TikTok.'
+          : '✅ تم إرسال Direct Post إلى TikTok وهو قيد المعالجة. يمكنك تحديث سجل الإرسال بعد قليل.';
+
+        fileInput.value = '';
+        titleInput.value = '';
+        privacy.value = '';
+        consent.input.checked = false;
+        commercial.input.checked = false;
+        ownBusiness.input.checked = false;
+        paidPartner.input.checked = false;
+        ownBusiness.input.disabled = true;
+        paidPartner.input.disabled = true;
+        allowComment.input.checked = false;
+        allowDuet.input.checked = false;
+        allowStitch.input.checked = false;
+        aigc.input.checked = false;
+      } catch (e) {
+        if (e.code === 'unaudited_client_can_only_post_to_private_accounts') {
+          status.textContent = '❌ TikTok يطلب في وضع الاختبار أن يكون حساب TikTok خاصًا وأن تختار SELF_ONLY. بعد Audit يمكن رفع هذا القيد.';
+        } else if (e.code === 'scope_not_authorized') {
+          status.textContent = '❌ صلاحية video.publish غير مخولة. أعد تفويض TikTok.';
+        } else {
+          status.textContent = '❌ ' + e.message;
+        }
+      } finally {
+        reloadCreatorBtn.disabled = false;
+        fileInput.disabled = false;
+        refreshButtonState();
+      }
+    };
+
+    loadCreator();
+    return card;
+  }
+
   async function mount() {
     if (loading || location.hash !== '#social-inbox' || document.getElementById('social-admin-extra')) return;
     const view = document.getElementById('view');
@@ -320,6 +733,7 @@
 
     addConnectionCard(root);
     addTikTokUploadCard(root, db);
+    addTikTokDirectPostCard(root, db);
     const webhookCard = addCard(root, 'إعداد Webhook', 'نقطة دخول واحدة لكل المنصات، ويحدد Adapter طريقة تطبيع الحدث.');
     const webhook = document.createElement('code');
     webhook.dir = 'ltr'; webhook.style.wordBreak = 'break-all'; webhook.textContent = `${location.origin}/api/social/webhook?platform=meta`;
