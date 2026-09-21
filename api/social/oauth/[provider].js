@@ -82,8 +82,25 @@ export default async function handler(req, res) {
     if (missing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing });
     const body = provider === 'tiktok' ? new URLSearchParams({ client_key: clientId, client_secret: clientSecret, code: req.query.code, grant_type: 'authorization_code', redirect_uri: redirect }) : new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code: req.query.code, redirect_uri: redirect, grant_type: 'authorization_code' });
     const tokenRes = await fetch(cfg.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }); const token = await tokenRes.json(); if (!tokenRes.ok || !(token.access_token || token.data?.access_token)) throw new Error(token.error_description || token.error?.message || 'Token exchange failed');
-    const access = token.access_token || token.data.access_token; const encrypted = encrypt(access); const org = state.organization_id || (await supa('organizations?slug=eq.tiqnora&select=id&limit=1'))?.[0]?.id; if (!org) throw new Error('Organization is missing');
-    await supa('social_provider_tokens?on_conflict=organization_id,provider', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ organization_id: org, provider, ...encrypted, scopes: token.scope || token.data?.scope || scopes, expires_at: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : null }) });
+    const access = token.access_token || token.data.access_token;
+    const encrypted = encrypt(access);
+    const refreshToken = token.refresh_token || token.data?.refresh_token || null;
+    const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
+    const org = state.organization_id || (await supa('organizations?slug=eq.tiqnora&select=id&limit=1'))?.[0]?.id;
+    if (!org) throw new Error('Organization is missing');
+    const grantedScopes = token.scope || token.data?.scope || scopes;
+    const tokenRow = {
+      organization_id: org,
+      provider,
+      ...encrypted,
+      scopes: grantedScopes,
+      open_id: token.open_id || token.data?.open_id || null,
+      expires_at: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : null,
+      refresh_expires_at: token.refresh_expires_in ? new Date(Date.now() + Number(token.refresh_expires_in) * 1000).toISOString() : null,
+      updated_at: new Date().toISOString(),
+      ...(refreshEncrypted ? { refresh_ciphertext: refreshEncrypted.ciphertext, refresh_iv: refreshEncrypted.iv, refresh_tag: refreshEncrypted.tag } : {})
+    };
+    await supa('social_provider_tokens?on_conflict=organization_id,provider', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(tokenRow) });
 
     let accountMetadata = null;
     if (provider === 'tiktok') {
@@ -99,7 +116,7 @@ export default async function handler(req, res) {
             external_account_id: user.open_id,
             account_name: user.display_name || 'TikTok',
             status: 'active',
-            capabilities: { login: true, profile: true, publishing: false },
+            capabilities: { login: true, profile: true, draft_upload: grantedScopes.includes('video.upload'), direct_post: grantedScopes.includes('video.publish') },
             settings: { avatar_url: user.avatar_url || null, union_id: user.union_id || null },
             connected_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -108,7 +125,7 @@ export default async function handler(req, res) {
       }
     }
 
-    await supa('integration_connections?provider=eq.' + provider, { method: 'PATCH', body: JSON.stringify({ enabled: true, status: 'connected', mode: process.env.TIKTOK_MODE || 'production', last_checked_at: new Date().toISOString(), metadata: { scopes: token.scope || scopes, ...(accountMetadata || {}) } }) });
+    await supa('integration_connections?provider=eq.' + provider, { method: 'PATCH', body: JSON.stringify({ enabled: true, status: 'connected', mode: process.env.TIKTOK_MODE || 'production', last_checked_at: new Date().toISOString(), metadata: { scopes: grantedScopes, ...(accountMetadata || {}) } }) });
     return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
