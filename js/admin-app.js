@@ -1166,6 +1166,16 @@ VIEWS.commerce = async v => {
       <button class="btn-sm" id="sc-logs">عرض السجلات</button>
     </div>
     <pre id="sc-out" style="white-space:pre-wrap;max-height:260px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+      <h3 style="margin:0 0 8px">AliExpress — فحص رابط / Product ID</h3>
+      <p class="card-desc">استخدم رابط المنتج أو رقمه لجلب السعر والمخزون والشحن الحقيقي للسعودية، ثم أضفه للمراجعة. هذا بديل عملي للبحث النصي غير المتاح لصلاحية التطبيق الحالية.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="ae-product-input" dir="ltr" style="min-width:280px;flex:1" placeholder="https://www.aliexpress.com/item/123....html أو Product ID">
+        <button class="btn-primary" id="ae-product-check">فحص المنتج</button>
+        <button class="btn-sm" id="ae-product-stage" disabled>إضافة للمراجعة</button>
+      </div>
+      <pre id="ae-product-out" style="white-space:pre-wrap;margin-top:10px;max-height:300px;overflow:auto;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">—</pre>
+    </div>
     <div id="sc-import-report" style="margin-top:12px"></div>
     <div id="sc-log-table" style="margin-top:12px"></div>
   </div>
@@ -1303,6 +1313,86 @@ VIEWS.commerce = async v => {
     const margin = price > 0 ? (profit/price*100) : 0;
     const vat = price * 0.15 / 1.15;
     $('#pc-out').textContent = `الربح التقديري: ${profit.toFixed(2)} ر.س · الهامش: ${margin.toFixed(1)}٪ · ضريبة تقديرية ضمن السعر: ${vat.toFixed(2)} ر.س · رسوم: ${fees.toFixed(2)} — للمراجعة فقط.`;
+  };
+
+  // AliExpress Product ID / URL verification — live DS APIs, no auto-publish.
+  $('#ae-product-check').onclick = async () => {
+    const raw = ($('#ae-product-input').value || '').trim();
+    const m = raw.match(/\/item\/(\d+)/i) || raw.match(/(?:^|\D)(\d{8,})(?:\D|$)/);
+    const id = m ? m[1] : '';
+    if (!id) return toast('أدخل رابط AliExpress صحيح أو Product ID', false);
+    $('#ae-product-out').textContent = 'جارٍ جلب المنتج والشحن إلى السعودية…';
+    $('#ae-product-stage').disabled = true;
+    window.__lastAeProduct = null;
+    try {
+      const r = await fetch('/api/commerce/ai?action=connector_product&provider=aliexpress&product_id=' + encodeURIComponent(id));
+      const j = await r.json();
+      if (!r.ok || !j.ok || !j.product) {
+        $('#ae-product-out').textContent = j.error || j.message || 'تعذر جلب المنتج';
+        return;
+      }
+      window.__lastAeProduct = j;
+      $('#ae-product-stage').disabled = false;
+      const p = j.product;
+      const ship = j.shipping || {};
+      $('#ae-product-out').textContent = [
+        'Product ID: ' + id,
+        'المنتج: ' + (p.title || '—'),
+        'السعر: ' + (p.cost != null ? p.cost + ' ' + (p.currency || 'USD') : '—'),
+        'المخزون: ' + (j.stock != null ? j.stock : '—'),
+        'الشحن للسعودية: ' + (ship.ok
+          ? ((ship.shipping_cost_usd != null ? ship.shipping_cost_usd + ' USD · ' : '') + (ship.service_name || '') + ' · ' + (ship.estimate || ''))
+          : ('يحتاج مراجعة · ' + (ship.error || 'لا توجد نتيجة'))),
+        'الصور: ' + ((p.images || []).length),
+        '— المنتج غير منشور وغير مشتَرى —'
+      ].join('\n');
+    } catch(e) {
+      $('#ae-product-out').textContent = e.message || 'تعذر فحص المنتج';
+    }
+  };
+
+  $('#ae-product-stage').onclick = async () => {
+    const j = window.__lastAeProduct;
+    if (!j?.product) return;
+    const supplier = suppliers.find(s => s.provider === 'aliexpress');
+    if (!supplier) return toast('سجل مورد AliExpress غير موجود', false);
+    const p = j.product;
+    const estimate = String(j.shipping?.estimate || p.shipping_estimate || '');
+    const nums = estimate.match(/\d+/g) || [];
+    const minDays = nums.length ? Number(nums[0]) : null;
+    const maxDays = nums.length > 1 ? Number(nums[1]) : minDays;
+    const row = {
+      supplier_id: supplier.id,
+      external_product_id: String(j.supplier_product_id),
+      source_url: 'https://www.aliexpress.com/item/' + String(j.supplier_product_id) + '.html',
+      source_title: p.title || null,
+      source_price: p.cost != null ? Number(p.cost) : null,
+      source_currency: p.currency || 'USD',
+      shipping_cost: j.shipping?.shipping_cost_usd != null ? Number(j.shipping.shipping_cost_usd) : 0,
+      estimated_delivery_min_days: minDays,
+      estimated_delivery_max_days: maxDays,
+      availability_status: Number(j.stock || 0) > 0 ? 'available' : 'unknown',
+      approval_status: 'candidate',
+      last_checked_at: new Date().toISOString(),
+    };
+    const { error } = await db.from('supplier_products').upsert(row, { onConflict: 'supplier_id,external_product_id' });
+    if (error) {
+      // Older schemas may not have the unique constraint required by upsert.
+      const existing = await db.from('supplier_products')
+        .select('id')
+        .eq('supplier_id', supplier.id)
+        .eq('external_product_id', row.external_product_id)
+        .maybeSingle();
+      if (existing.data?.id) {
+        const u = await db.from('supplier_products').update(row).eq('id', existing.data.id);
+        if (u.error) return toast(u.error.message || 'فشل الإضافة', false);
+      } else {
+        const ins = await db.from('supplier_products').insert(row);
+        if (ins.error) return toast(ins.error.message || 'فشل الإضافة', false);
+      }
+    }
+    toast('أُضيف منتج AliExpress للمراجعة — غير منشور');
+    VIEWS.commerce(v);
   };
 
   // Product Scout
