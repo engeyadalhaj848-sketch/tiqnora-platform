@@ -531,8 +531,182 @@ async function handleTikTokPosting(req, res) {
     return send(res, e.status || 500, { error: e.message || 'Internal error', code: e.code || 'internal_error', ...(e.detail ? { detail: e.detail } : {}) });
   }
 }
+
+async function handleSocialReply(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    return send(res, 204, {});
+  }
+  if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
+  try {
+    const admin = await verifyAdmin(req.headers.authorization || req.headers.Authorization);
+    if (!admin) return send(res, 401, { error: 'Admin authentication required', code: 'unauthorized' });
+
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const message = String(body.message || body.text || '').trim();
+    const eventId = body.event_id || null;
+    const platform = String(body.platform || '').toLowerCase();
+    const template = body.template || null;
+    if (!message && !template?.name) return send(res, 400, { error: 'message is required (or template for WhatsApp)', code: 'message_required' });
+
+    const orgs = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
+    const organizationId = orgs?.[0]?.id;
+    if (!organizationId) return send(res, 500, { error: 'Organization missing' });
+
+    let event = null;
+    if (eventId) {
+      const rows = await supa(`social_events?id=eq.${encodeURIComponent(eventId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=1`);
+      event = Array.isArray(rows) ? rows[0] : null;
+      if (!event) return send(res, 404, { error: 'Event not found', code: 'event_not_found' });
+    }
+
+    const effectivePlatform = platform || event?.platform;
+    if (!effectivePlatform) return send(res, 400, { error: 'platform is required', code: 'platform_required' });
+    const eventType = String(event?.event_type || '');
+    const kind = body.kind || (eventType.startsWith('comment.') ? 'comment' : (body.comment_id ? 'comment' : 'message'));
+    const externalParentId = body.comment_id || body.parent_id || event?.external_event_id || null;
+    const recipientId = body.recipient_id || body.to || event?.author_external_id || null;
+    const accountExternalId = body.account_external_id || event?.account_external_id || null;
+
+    function pageTokenFromSettings(settings) {
+      const enc = settings?.page_access_token_enc;
+      if (!enc?.ciphertext || !enc?.iv || !enc?.tag) return null;
+      try { return decrypt(enc.ciphertext, enc.iv, enc.tag); } catch (e) {
+        console.warn('Page token decrypt failed', { message: e.message });
+        return null;
+      }
+    }
+
+    async function loadConnection(plat, externalId) {
+      let q = `social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.${encodeURIComponent(plat)}&status=eq.active&select=*&order=updated_at.desc&limit=5`;
+      if (externalId) q = `social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.${encodeURIComponent(plat)}&external_account_id=eq.${encodeURIComponent(externalId)}&select=*&limit=1`;
+      const rows = await supa(q);
+      return Array.isArray(rows) ? rows[0] : null;
+    }
+
+    let apiResult = null;
+    let usedConnection = null;
+
+    if (effectivePlatform === 'facebook' || effectivePlatform === 'instagram') {
+      const conn = await loadConnection(effectivePlatform, accountExternalId);
+      usedConnection = conn;
+      let pageToken = conn ? pageTokenFromSettings(conn.settings || {}) : null;
+      if (!pageToken && effectivePlatform === 'instagram') {
+        const pageId = conn?.settings?.page_id;
+        if (pageId) {
+          const pageConn = await loadConnection('facebook', pageId);
+          pageToken = pageConn ? pageTokenFromSettings(pageConn.settings || {}) : null;
+          usedConnection = pageConn || conn;
+        }
+      }
+      if (!pageToken) return send(res, 409, { error: 'Page access token missing. Reconnect Meta from Integrations.', code: 'token_missing', reconnect: true });
+      if (kind === 'comment') {
+        if (!externalParentId) return send(res, 400, { error: 'comment_id required', code: 'comment_id_required' });
+        apiResult = effectivePlatform === 'instagram'
+          ? await graphPost(`${externalParentId}/replies`, pageToken, { message })
+          : await graphPost(`${externalParentId}/comments`, pageToken, { message });
+      } else {
+        if (!recipientId) return send(res, 400, { error: 'recipient_id required for messaging', code: 'recipient_required' });
+        const pageId = usedConnection?.platform === 'facebook' ? usedConnection.external_account_id : (usedConnection?.settings?.page_id || accountExternalId);
+        const path = pageId ? `${pageId}/messages` : 'me/messages';
+        apiResult = await graphPost(path, pageToken, { recipient: { id: recipientId }, messaging_type: 'RESPONSE', message: { text: message } });
+      }
+    } else if (effectivePlatform === 'whatsapp') {
+      const conn = await loadConnection('whatsapp', accountExternalId);
+      usedConnection = conn;
+      const phoneNumberId = body.phone_number_id || conn?.external_account_id || conn?.settings?.phone_number_id;
+      if (!phoneNumberId) return send(res, 409, { error: 'WhatsApp Phone Number ID not connected', code: 'whatsapp_not_connected', reconnect: true });
+      let accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_SYSTEM_USER_TOKEN || null;
+      if (!accessToken) {
+        const rows = await supa(`social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=in.(whatsapp,meta)&select=ciphertext,iv,tag,provider&order=updated_at.desc`);
+        const row = Array.isArray(rows) ? rows[0] : null;
+        if (row) accessToken = decrypt(row.ciphertext, row.iv, row.tag);
+      }
+      if (!accessToken) return send(res, 409, { error: 'WhatsApp access token missing. Reconnect WhatsApp.', code: 'token_missing', reconnect: true });
+      const to = recipientId || body.to;
+      if (!to) return send(res, 400, { error: 'recipient phone required', code: 'recipient_required' });
+      if (event?.occurred_at && !template?.name) {
+        const ageMs = Date.now() - new Date(event.occurred_at).getTime();
+        if (ageMs > 24 * 60 * 60 * 1000) {
+          return send(res, 409, { error: 'Outside 24h customer care window. Use an approved WhatsApp template.', code: 'outside_session_window', requires_template: true });
+        }
+      }
+      const payload = template?.name ? {
+        messaging_product: 'whatsapp',
+        to: String(to).replace(/[^\d]/g, ''),
+        type: 'template',
+        template: { name: template.name, language: { code: template.language || 'ar' }, components: template.components || [] }
+      } : {
+        messaging_product: 'whatsapp',
+        to: String(to).replace(/[^\d]/g, ''),
+        type: 'text',
+        text: { body: message, preview_url: false }
+      };
+      apiResult = await graphPost(`${phoneNumberId}/messages`, accessToken, payload);
+    } else {
+      return send(res, 400, { error: `Unsupported platform: ${effectivePlatform}`, code: 'unsupported_platform' });
+    }
+
+    const outboundExternalId = String(apiResult?.id || apiResult?.message_id || apiResult?.messages?.[0]?.id || `out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const outboundEvent = await supa('social_events?on_conflict=platform,external_event_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        connection_id: usedConnection?.id || event?.connection_id || null,
+        platform: effectivePlatform,
+        event_type: kind === 'comment' ? 'comment.replied' : 'message.sent',
+        external_event_id: outboundExternalId,
+        external_parent_id: externalParentId || null,
+        author_external_id: 'tiqnora',
+        author_name: 'Tiqnora',
+        content: message || (template ? `[template:${template.name}]` : null),
+        occurred_at: new Date().toISOString(),
+        processing_status: 'processed',
+        raw_payload: { adapter: 'tiqnora_outbound', in_reply_to: eventId }
+      })
+    });
+
+    if (eventId) {
+      await supa(`social_events?id=eq.${encodeURIComponent(eventId)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ processing_status: 'processed' })
+      });
+      await supa('social_event_actions', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          event_id: eventId,
+          action_type: 'manual_reply',
+          status: 'completed',
+          result: { outbound_external_id: outboundExternalId, platform: effectivePlatform, kind, message_preview: String(message || '').slice(0, 120) },
+          completed_at: new Date().toISOString()
+        })
+      });
+    }
+
+    return send(res, 200, {
+      ok: true,
+      platform: effectivePlatform,
+      kind,
+      outbound_external_id: outboundExternalId,
+      event_id: Array.isArray(outboundEvent) ? outboundEvent[0]?.id : null,
+      api: { id: apiResult?.id || apiResult?.message_id || apiResult?.messages?.[0]?.id || null }
+    });
+  } catch (e) {
+    console.warn('Social reply failed', { code: e.code || 'reply_failed', message: e.message });
+    return send(res, 502, { error: e.message || 'Reply failed', code: e.code || 'reply_failed' });
+  }
+}
+
 export default async function handler(req, res) {
-  const provider = String(req.query?.provider || '').toLowerCase(); const cfg = providers[provider];
+  const provider = String(req.query?.provider || '').toLowerCase();
+  const action = String(req.query?.action || '').toLowerCase();
+  if (req.method === 'POST' && (action === 'reply' || provider === 'reply')) return handleSocialReply(req, res);
+  const cfg = providers[provider];
   if (!cfg) return send(res, 404, { error: 'Unsupported provider' });
   const scopes = provider === 'tiktok' ? (process.env.TIKTOK_SCOPES || cfg.scopes) : cfg.scopes;
   if (provider === 'tiktok' && req.method === 'POST') return handleTikTokPosting(req, res);

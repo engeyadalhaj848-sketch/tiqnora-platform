@@ -29,6 +29,35 @@ export default async function handler(req, res) {
   const supabaseUrl = (process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/$/, '');
   const anon = process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
+  // GET health (merged to stay under Hobby 12-function limit)
+  if (action === 'health') {
+    if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method' });
+    const checks = { api: true, supabase: false, gemini: !!process.env.GEMINI_API_KEY, telegram: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) };
+    let latencyMs = null;
+    try {
+      const t0 = Date.now();
+      const r = await fetch(`${supabaseUrl}/rest/v1/saas_plans?select=slug&limit=1`, {
+        headers: { apikey: anon, Authorization: `Bearer ${anon}` }
+      });
+      latencyMs = Date.now() - t0;
+      checks.supabase = r.ok || r.status === 401 || r.status === 200;
+      if (r.status >= 500) checks.supabase = false;
+    } catch {
+      checks.supabase = false;
+    }
+    const ok = checks.api && checks.supabase;
+    return json(res, ok ? 200 : 503, {
+      ok,
+      service: 'tiqnora-ai',
+      time: new Date().toISOString(),
+      checks,
+      latencyMs,
+      version: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown',
+      deploy_probe: true,
+      whop_fix: true
+    });
+  }
+
   // GET app-version
   if (action === 'app-version' || (req.method === 'GET' && !action)) {
     if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
