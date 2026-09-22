@@ -240,20 +240,140 @@ function dbBanner() {
 const VIEWS = {};
 
 VIEWS['social-inbox'] = async v => {
-  v.innerHTML = dbBanner() + '<div class="grid-stats" id="social-stats"></div><div class="card"><h2>صندوق التواصل الموحد</h2><p class="card-desc">كل المنصات تدخل إلى مسار موحّد. إضافة منصة جديدة لا تغيّر بنية العملاء أو قواعد الأتمتة.</p><div class="social-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0"><select id="social-platform-filter"><option value="">كل المنصات</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="whatsapp">WhatsApp</option></select><select id="social-status-filter"><option value="">كل الحالات</option><option value="new">جديد</option><option value="matched">مطابق</option><option value="processed">تمت المعالجة</option><option value="ignored">متجاهل</option><option value="failed">فشل</option></select><select id="social-intent-filter"><option value="">كل النوايا</option><option value="business_audit">طلب تحليل</option></select></div><div id="social-events">جارٍ التحميل…</div></div>';
+  v.innerHTML = dbBanner() + `
+  <div class="grid-stats" id="social-stats"></div>
+  <div class="card social-inbox-card">
+    <div class="card-head">
+      <div>
+        <h2>صندوق التواصل الموحد</h2>
+        <p class="card-desc" style="margin:0">كل المنصات تدخل إلى مسار موحّد. إضافة منصة جديدة لا تغيّر بنية العملاء أو قواعد الأتمتة.</p>
+      </div>
+    </div>
+    <div class="social-filters" id="social-filters">
+      <select id="social-platform-filter"><option value="">كل المنصات</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="whatsapp">WhatsApp</option></select>
+      <select id="social-status-filter"><option value="">كل الحالات</option><option value="new">جديد</option><option value="matched">مطابق</option><option value="processed">تمت المعالجة</option><option value="ignored">متجاهل</option><option value="failed">فشل</option></select>
+      <select id="social-intent-filter"><option value="">كل النوايا</option><option value="business_audit">طلب تحليل</option></select>
+    </div>
+    <div class="social-inbox-layout">
+      <div class="social-thread-list" id="social-events">جارٍ التحميل…</div>
+      <div class="social-thread-panel" id="social-thread-panel">
+        <div class="empty">اختر محادثة من القائمة لعرض التفاصيل</div>
+      </div>
+    </div>
+  </div>`;
+
   const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
-    db.from('social_connections').select('id,platform,status'),
-    db.from('social_events').select('id,platform,intent,processing_status,received_at,author_name,content').order('received_at', { ascending: false }).limit(30)
+    db.from('social_connections').select('id,platform,status,account_name'),
+    db.from('social_events').select('id,platform,intent,processing_status,received_at,author_name,content').order('received_at', { ascending: false }).limit(80)
   ]);
-  if (error) { $('#social-events').innerHTML = '<div class="empty">نفّذ ملف الترحيل 004_social_inbox.sql في Supabase أولًا.</div>'; return; }
+
+  // Mount extended admin cards (connections, rules, webhook) without breaking
+  if (window.TiqnoraSocialAdmin?.mount) {
+    try { window.TiqnoraSocialAdmin.mount(); } catch (_) {}
+  } else if (typeof mount === 'function') {
+    try { mount(); } catch (_) {}
+  }
+
+  if (error) {
+    $('#social-events').innerHTML = '<div class="empty">نفّذ ملف الترحيل 004_social_inbox.sql في Supabase أولًا.</div>';
+    return;
+  }
+
+  const activePlatforms = new Set((connections || []).filter(x => x.status === 'active').map(x => String(x.platform || '').toLowerCase()));
+  // Keep only filter options that exist or are always available; hide empty optional platforms if none connected and no events
+  const platformSelect = $('#social-platform-filter');
+  if (platformSelect) {
+    [...platformSelect.options].forEach(opt => {
+      if (!opt.value) return;
+      const has = activePlatforms.has(opt.value) || events.some(e => e.platform === opt.value);
+      // Always keep WhatsApp/Instagram/Facebook/TikTok as known product channels even if empty
+      if (!has && !['whatsapp','instagram','facebook','tiktok'].includes(opt.value)) opt.hidden = true;
+    });
+  }
+
   const matched = events.filter(x => x.intent === 'business_audit').length;
+  const unread = events.filter(x => x.processing_status === 'new').length;
   $('#social-stats').innerHTML = [
     ['المنصات المتصلة', connections.filter(x => x.status === 'active').length],
-    ['الأحداث الجديدة', events.filter(x => x.processing_status === 'new').length],
+    ['غير مقروء / جديد', unread],
     ['طلبات التحليل', matched]
   ].map(([t,n]) => `<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${t}</div></div>`).join('');
-  const renderEvents = () => { const platform = $('#social-platform-filter').value, status = $('#social-status-filter').value, intent = $('#social-intent-filter').value; const filtered = events.filter(e => (!platform || e.platform === platform) && (!status || e.processing_status === status) && (!intent || e.intent === intent)); $('#social-events').innerHTML = tbl(['المنصة','العميل','المحتوى','النية','الحالة','وقت الاستلام'], filtered.map(e => `<tr><td>${esc(e.platform)}</td><td>${esc(e.author_name || '—')}</td><td>${esc(e.content || '—')}</td><td>${e.intent === 'business_audit' ? '<span class="pill ok">طلب تحليل</span>' : '—'}</td><td><span class="pill ${pillCls(e.processing_status)}">${esc(e.processing_status)}</span></td><td>${new Date(e.received_at).toLocaleString('ar-SA')}</td></tr>`).join('')); };
-  ['social-platform-filter','social-status-filter','social-intent-filter'].forEach(id => { $('#' + id).onchange = renderEvents; }); renderEvents();
+
+  let selectedId = null;
+  const statusLabel = {
+    new: 'جديد', matched: 'مطابق', processed: 'تمت المعالجة', ignored: 'متجاهل', failed: 'فشل'
+  };
+
+  const openThread = (ev) => {
+    selectedId = ev.id;
+    renderList();
+    const panel = $('#social-thread-panel');
+    panel.innerHTML = `
+      <div class="thread-head">
+        <div>
+          <strong>${esc(ev.author_name || 'عميل')}</strong>
+          <div class="thread-meta">
+            <span class="pill">${esc(ev.platform)}</span>
+            <span class="pill ${pillCls(ev.processing_status)}">${esc(statusLabel[ev.processing_status] || ev.processing_status)}</span>
+            <span class="muted">${new Date(ev.received_at).toLocaleString('ar-SA')}</span>
+          </div>
+        </div>
+      </div>
+      <div class="thread-body">
+        <div class="thread-bubble">${esc(ev.content || '—')}</div>
+        <div class="thread-customer">
+          <h4>معلومات العميل</h4>
+          <p><span class="muted">الاسم:</span> ${esc(ev.author_name || '—')}</p>
+          <p><span class="muted">المنصة:</span> ${esc(ev.platform || '—')}</p>
+          <p><span class="muted">النية:</span> ${ev.intent === 'business_audit' ? 'طلب تحليل' : '—'}</p>
+        </div>
+      </div>
+      <div class="thread-reply">
+        <p class="card-desc">الرد يتم عبر مسارات المنصة الحالية (OAuth / API). لا تغيير على Webhooks.</p>
+        <a class="btn-primary btn-sm" style="display:inline-block;text-decoration:none;padding:8px 14px" href="#social-inbox">تحديث القائمة</a>
+      </div>`;
+  };
+
+  const renderList = () => {
+    const platform = $('#social-platform-filter').value;
+    const status = $('#social-status-filter').value;
+    const intent = $('#social-intent-filter').value;
+    const filtered = events.filter(e =>
+      (!platform || e.platform === platform) &&
+      (!status || e.processing_status === status) &&
+      (!intent || e.intent === intent)
+    );
+    if (!filtered.length) {
+      $('#social-events').innerHTML = '<div class="empty">لا توجد محادثات مطابقة للفلتر الحالي</div>';
+      return;
+    }
+    $('#social-events').innerHTML = filtered.map(e => {
+      const isNew = e.processing_status === 'new';
+      const active = e.id === selectedId ? ' active' : '';
+      return `<button type="button" class="social-thread-item${active}" data-id="${e.id}">
+        <div class="sti-top">
+          <strong>${esc(e.author_name || 'عميل')}</strong>
+          ${isNew ? '<span class="unread-badge">جديد</span>' : ''}
+        </div>
+        <div class="sti-preview">${esc((e.content || '').slice(0, 90) || '—')}</div>
+        <div class="sti-bottom">
+          <span class="pill">${esc(e.platform)}</span>
+          <span class="muted">${new Date(e.received_at).toLocaleString('ar-SA')}</span>
+        </div>
+      </button>`;
+    }).join('');
+    $$('#social-events [data-id]').forEach(btn => {
+      btn.onclick = () => {
+        const ev = events.find(x => x.id === btn.dataset.id);
+        if (ev) openThread(ev);
+      };
+    });
+  };
+
+  ['social-platform-filter','social-status-filter','social-intent-filter'].forEach(id => {
+    $('#' + id).onchange = renderList;
+  });
+  renderList();
 };
 
 VIEWS.workforce = v => {
@@ -325,18 +445,41 @@ VIEWS.dashboard = async v => {
   </div>`;
 };
 
+/* Service form fields — reconstructed from existing services schema usage */
+function SVC_FIELDS(cats) {
+  return [
+    { k: 'slug', t: 'المعرّف (slug)', req: 1, dir: 'ltr' },
+    { k: 'category_id', t: 'القسم', type: 'select', options: [{ v: '', t: '— بدون —' }, ...(cats || []).map(c => ({ v: c.id, t: c.name_ar || c.slug }))] },
+    { k: 'title_ar', t: 'العنوان (عربي)', req: 1 },
+    { k: 'title_en', t: 'Title (EN)', dir: 'ltr' },
+    { k: 'price', t: 'السعر (ر.س)', type: 'number', step: '0.01' },
+    { k: 'period', t: 'الفترة', type: 'select', options: [{ v: 'once', t: 'مرة واحدة' }, { v: 'monthly', t: 'شهري' }, { v: 'yearly', t: 'سنوي' }] },
+    { k: 'status', t: 'الحالة', type: 'select', options: [{ v: 'published', t: 'منشور' }, { v: 'draft', t: 'مسودة' }, { v: 'archived', t: 'مؤرشف' }] },
+    { k: 'sort_order', t: 'الترتيب', type: 'number', default: 0 },
+    { k: 'image_url', t: 'رابط الصورة', dir: 'ltr' },
+    { k: 'description_ar', t: 'الوصف (عربي)', type: 'textarea', full: 1 },
+    { k: 'description_en', t: 'Description (EN)', type: 'textarea', full: 1, dir: 'ltr' },
+    { k: 'features_ar', t: 'المميزات (عربي — سطر لكل ميزة)', type: 'list', full: 1 },
+    { k: 'features_en', t: 'Features (EN — one per line)', type: 'list', full: 1 },
+    { k: 'seo_title_ar', t: 'SEO Title (AR)' },
+    { k: 'seo_description_ar', t: 'SEO Description (AR)', type: 'textarea', full: 1 },
+  ];
+}
+
 VIEWS.services = async v => {
   v.innerHTML = dbBanner() + `<div class="card"><div class="card-head"><div><h2>الخدمات</h2><p class="card-desc">الخدمات المعروضة في الموقع الرئيسي — محتوى ثنائي اللغة مع حقول SEO.</p></div><button class="btn-primary" id="add">+ خدمة جديدة</button></div><div id="tbl"></div></div>`;
   const { data: cats } = await db.from('categories').select('*').eq('type', 'service').order('sort_order');
   const { data: rows } = await db.from('services').select('*, categories(name_ar)').order('sort_order');
   const F = SVC_FIELDS(cats || []);
-  $('#tbl').innerHTML = tbl(['الخدمة', 'القسم', 'السعر', 'الفترة', 'الحالة', 'إجراءات'], (rows || []).map(s =>
+  const tblEl = $('#tbl');
+  if (tblEl) tblEl.innerHTML = tbl(['الخدمة', 'القسم', 'السعر', 'الفترة', 'الحالة', 'إجراءات'], (rows || []).map(s =>
     `<tr><td><b>${esc(s.title_ar)}</b><br><small style="color:var(--muted)" dir="ltr">${esc(s.title_en)}</small></td>
      <td>${esc(s.categories?.name_ar || '—')}</td><td>${money(s.price)}</td>
      <td><span class="pill muted">${s.period === 'monthly' ? 'شهري' : s.period === 'yearly' ? 'سنوي' : 'مرة'}</span></td>
      <td><span class="pill ${pillCls(s.status)}">${STATUS_AR[s.status]}</span></td>
      <td class="actions"><button class="btn-sm" data-edit="${s.id}">تعديل</button><button class="btn-sm btn-danger" data-del="${s.id}">حذف</button></td></tr>`).join(''));
-  $('#add').onclick = () => crudModal({ title: 'خدمة جديدة', fields: F, row: null, onSave: async d => { await db.from('services').insert(d); log('service.create', 'services', null, { title: d.title_ar }); toast('تمت إضافة الخدمة'); VIEWS.services(v); } });
+  const addBtn = $('#add');
+  if (addBtn) addBtn.onclick = () => crudModal({ title: 'خدمة جديدة', fields: F, row: null, onSave: async d => { await db.from('services').insert(d); log('service.create', 'services', null, { title: d.title_ar }); toast('تمت إضافة الخدمة'); VIEWS.services(v); } });
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل خدمة', fields: F, row, onSave: async d => { await db.from('services').update(d).eq('id', row.id); log('service.update', 'services', row.id); toast('تم التحديث'); VIEWS.services(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (!confirm('حذف هذه الخدمة نهائيًا؟')) return; const row = rows.find(r => r.id === b.dataset.del); await db.from('services').delete().eq('id', row.id); log('service.delete', 'services', row.id, { title: row.title_ar }); toast('تم الحذف'); VIEWS.services(v); });
 };
@@ -1441,11 +1584,13 @@ VIEWS.commerce = async v => {
 
   // Market Intelligence
   const renderMiList = async () => {
+    const el = $('#mi-list');
+    if (!el) return;
     try {
       const { data, error } = await db.from('product_market_reports').select('id,product_name,demand_score,competition_score,seo_score,profit_margin,ai_decision,created_at').order('created_at',{ascending:false}).limit(20);
-      if (error) { $('#mi-list').innerHTML = '<p style="color:var(--muted)">نفّذ migration 032 لعرض التقارير</p>'; return; }
+      if (error) { el.innerHTML = '<p style="color:var(--muted)">نفّذ migration 032 لعرض التقارير</p>'; return; }
       const rows = data || [];
-      $('#mi-list').innerHTML = tbl(['المنتج','طلب','منافسة','SEO','هامش٪','قرار','وقت'], rows.map(r => `<tr>
+      el.innerHTML = tbl(['المنتج','طلب','منافسة','SEO','هامش٪','قرار','وقت'], rows.map(r => `<tr>
         <td><b>${esc(r.product_name)}</b></td>
         <td>${r.demand_score??'—'}</td>
         <td>${r.competition_score??'—'}</td>
@@ -1455,7 +1600,7 @@ VIEWS.commerce = async v => {
         <td dir="ltr">${esc(String(r.created_at||'').slice(0,19))}</td>
       </tr>`).join('')) || '<p style="color:var(--muted)">لا تقارير بعد</p>';
     } catch (_) {
-      $('#mi-list').innerHTML = '<p style="color:var(--muted)">تعذر تحميل التقارير</p>';
+      el.innerHTML = '<p style="color:var(--muted)">تعذر تحميل التقارير</p>';
     }
   };
   renderMiList();
@@ -1549,8 +1694,10 @@ VIEWS.commerce = async v => {
   const renderDpList = async () => {
     try {
       const { data, error } = await db.from('product_price_reports').select('id,recommended_price,profit_margin,pricing_strategy,cost_price,created_at').order('created_at',{ascending:false}).limit(15);
-      if (error) { $('#dp-list').innerHTML = '<p style="color:var(--muted)">نفّذ migration 033</p>'; return; }
-      $('#dp-list').innerHTML = tbl(['تكلفة','موصى','هامش٪','استراتيجية','وقت'], (data||[]).map(r=>`<tr>
+      const dpEl = $('#dp-list');
+      if (!dpEl) return;
+      if (error) { dpEl.innerHTML = '<p style="color:var(--muted)">نفّذ migration 033</p>'; return; }
+      dpEl.innerHTML = tbl(['تكلفة','موصى','هامش٪','استراتيجية','وقت'], (data||[]).map(r=>`<tr>
         <td>${r.cost_price??'—'}</td><td><b>${r.recommended_price??'—'}</b></td><td>${r.profit_margin??'—'}</td>
         <td>${esc(r.pricing_strategy||'—')}</td><td dir="ltr">${esc(String(r.created_at||'').slice(0,19))}</td>
       </tr>`).join('')) || '';
@@ -1607,10 +1754,12 @@ VIEWS.commerce = async v => {
 
   // Supplier Compare
   const renderScmpList = async () => {
+    const el = $('#scmp-list');
+    if (!el) return;
     try {
       const { data, error } = await db.from('supplier_comparison_reports').select('id,product_name,recommended_supplier,comparison_score,created_at').order('created_at',{ascending:false}).limit(15);
-      if (error) { $('#scmp-list').innerHTML = '<p style="color:var(--muted)">نفّذ migration 033</p>'; return; }
-      $('#scmp-list').innerHTML = tbl(['منتج','أفضل مورد','درجة','وقت'], (data||[]).map(r=>`<tr>
+      if (error) { el.innerHTML = '<p style="color:var(--muted)">نفّذ migration 033</p>'; return; }
+      el.innerHTML = tbl(['منتج','أفضل مورد','درجة','وقت'], (data||[]).map(r=>`<tr>
         <td>${esc(r.product_name||'—')}</td><td><b>${esc(r.recommended_supplier||'—')}</b></td>
         <td>${r.comparison_score??'—'}</td><td dir="ltr">${esc(String(r.created_at||'').slice(0,19))}</td>
       </tr>`).join('')) || '';
@@ -1661,44 +1810,54 @@ VIEWS.commerce = async v => {
   const refreshScStatus = async () => {
     try {
       const j = await scApi({ action: 'status' });
-      const list = j.connectors || [];
-      $('#sc-status').innerHTML = list.map(c => `<div class="stat"><b>${esc(c.status)}</b><span>${esc(c.provider)}</span></div>`).join('') || '<div class="stat"><b>—</b><span>لا بيانات</span></div>';
+      const list = Array.isArray(j?.connectors) ? j.connectors : [];
+      const el = $('#sc-status');
+      if (el) el.innerHTML = list.map(c => `<div class="stat"><b>${esc(c.status)}</b><span>${esc(c.provider)}</span></div>`).join('') || '<div class="stat"><b>—</b><span>لا بيانات</span></div>';
     } catch(_) {}
   };
   refreshScStatus();
-  $('#sc-test').onclick = async () => {
-    const provider = $('#sc-provider').value;
-    $('#sc-out').textContent = 'اختبار ' + provider + '…';
+  const scTest = $('#sc-test');
+  if (scTest) scTest.onclick = async () => {
+    const provider = $('#sc-provider')?.value;
+    const out = $('#sc-out');
+    if (out) out.textContent = 'اختبار ' + provider + '…';
     const j = await scApi({ action: 'test', provider });
-    $('#sc-out').textContent = JSON.stringify(j, null, 2);
+    if (out) out.textContent = JSON.stringify(j, null, 2);
     refreshScStatus();
   };
-  $('#sc-sync').onclick = async () => {
+  const scSync = $('#sc-sync');
+  if (scSync) scSync.onclick = async () => {
     if (!confirm('مزامنة منتجات المورد إلى جدول الربط فقط؟ لن تُنشر في المتجر تلقائياً.')) return;
-    const provider = $('#sc-provider').value;
-    $('#sc-out').textContent = 'مزامنة…';
+    const provider = $('#sc-provider')?.value;
+    const out = $('#sc-out');
+    if (out) out.textContent = 'مزامنة…';
     const j = await scApi({ action: 'sync', provider, query: 'tech', limit: 5 });
-    $('#sc-out').textContent = JSON.stringify(j, null, 2);
+    if (out) out.textContent = JSON.stringify(j, null, 2);
     toast(j.synced != null ? ('تمت مزامنة ' + j.synced + ' (مسودة ربط)') : (j.message || j.error || 'تم'));
     refreshScStatus();
   };
-  $('#sc-inv').onclick = async () => {
-    $('#sc-out').textContent = 'فحص مخزون/أسعار…';
-    const j = await scApi({ action: 'sync_inventory', provider: $('#sc-provider').value });
-    $('#sc-out').textContent = JSON.stringify(j, null, 2);
+  const scInv = $('#sc-inv');
+  if (scInv) scInv.onclick = async () => {
+    const out = $('#sc-out');
+    if (out) out.textContent = 'فحص مخزون/أسعار…';
+    const j = await scApi({ action: 'sync_inventory', provider: $('#sc-provider')?.value });
+    if (out) out.textContent = JSON.stringify(j, null, 2);
     toast('تنبيهات: ' + ((j.alerts&&j.alerts.length)||0) + ' (بدون تغيير أسعار البيع)');
   };
-  $('#sc-import').onclick = async () => {
+  const scImport = $('#sc-import');
+  if (scImport) scImport.onclick = async () => {
     if (!confirm('استيراد منتج واحد فقط إلى طابور المراجعة؟\nلن يُنشر تلقائياً (is_active=false).')) return;
-    const provider = $('#sc-provider').value || 'cj_dropshipping';
-    $('#sc-out').textContent = 'استيراد منتج تجريبي من ' + provider + '…';
-    $('#sc-import-report').innerHTML = '';
+    const provider = $('#sc-provider')?.value || 'cj_dropshipping';
+    const out = $('#sc-out');
+    if (out) out.textContent = 'استيراد منتج تجريبي من ' + provider + '…';
+    const report = $('#sc-import-report');
+    if (report) report.innerHTML = '';
     try {
       const j = await scApi({ action: 'import_test', provider, query: 'magnetic power bank' });
-      $('#sc-out').textContent = JSON.stringify(j, null, 2);
+      if (out) out.textContent = JSON.stringify(j, null, 2);
       if (j.ok) {
         const s = j.product_summary || {};
-        $('#sc-import-report').innerHTML = `<div class="card" style="border:1px solid var(--line);padding:12px;border-radius:12px">
+        if (report) report.innerHTML = `<div class="card" style="border:1px solid var(--line);padding:12px;border-radius:12px">
           <b>تقرير الاستيراد</b>
           <ul style="margin:8px 0;padding-right:18px">
             <li>المنتجات المستوردة: <b>${j.imported || 1}</b></li>
@@ -2169,24 +2328,30 @@ VIEWS.media = async v => {
   <div><input type="file" id="up" accept="image/*" multiple hidden><button class="btn-primary" id="up-btn">⬆ رفع صور</button></div></div>
   <div class="media-grid" id="grid"></div></div>`;
   const load = async () => {
+    const grid = $('#grid');
+    if (!grid) return;
     const { data: rows } = await db.from('media').select('*').order('created_at', { ascending: false }).limit(60);
-    $('#grid').innerHTML = (rows || []).map(m => `<div class="media-item">
+    grid.innerHTML = (rows || []).map(m => `<div class="media-item">
       <img src="${esc(m.url)}" alt="${esc(m.alt_text || m.file_name)}" loading="lazy">
       <div class="mi-bar"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.file_name)}</span>
       <button class="btn-sm" data-copy="${esc(m.url)}" title="نسخ الرابط">⧉</button></div></div>`).join('') || '<p class="empty">لا توجد صور بعد.</p>';
     $$('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy); toast('تم نسخ الرابط'); });
   };
-  $('#up-btn').onclick = () => $('#up').click();
-  $('#up').onchange = async e => {
-    for (const file of e.target.files) {
-      const path = `media/${Date.now()}-${file.name.replace(/[^\w.\-]/g, '_')}`;
-      const { error } = await db.storage.from('media').upload(path, file, { upsert: true });
-      if (error) { toast('فشل رفع ' + file.name + ': ' + error.message, false); continue; }
-      const { data: { publicUrl } } = db.storage.from('media').getPublicUrl(path);
-      await db.from('media').insert({ storage_path: path, url: publicUrl, file_name: file.name, mime_type: file.type, size_bytes: file.size, uploaded_by: me.id });
-    }
-    toast('تم الرفع'); load();
-  };
+  const upBtn = $('#up-btn');
+  const upInput = $('#up');
+  if (upBtn && upInput) {
+    upBtn.onclick = () => upInput.click();
+    upInput.onchange = async e => {
+      for (const file of (e.target.files || [])) {
+        const path = `media/${Date.now()}-${file.name.replace(/[^\w.\-]/g, '_')}`;
+        const { error } = await db.storage.from('media').upload(path, file, { upsert: true });
+        if (error) { toast('فشل رفع ' + file.name + ': ' + error.message, false); continue; }
+        const { data: { publicUrl } } = db.storage.from('media').getPublicUrl(path);
+        await db.from('media').insert({ storage_path: path, url: publicUrl, file_name: file.name, mime_type: file.type, size_bytes: file.size, uploaded_by: me.id });
+      }
+      toast('تم الرفع'); load();
+    };
+  }
   load();
 };
 
@@ -2248,27 +2413,28 @@ VIEWS.ai = async v => {
   <div id="ai-logs"></div></div>`;
 
   // Provider status from serverless (no secrets)
+  const setHtml = (sel, html) => { const el = $(sel); if (el) el.innerHTML = html; };
   try {
     const { data: { session } } = await db.auth.getSession();
     const token = session?.access_token;
     if (token) {
       const res = await fetch('/api/ai-workforce/providers', { headers: { Authorization: 'Bearer ' + token } });
       const payload = await res.json().catch(() => ({}));
-      if (res.ok && payload.providers) {
-        $('#prov-status').innerHTML = payload.providers.map(p => `
+      if (res.ok && Array.isArray(payload.providers)) {
+        setHtml('#prov-status', payload.providers.map(p => `
           <div class="card" style="background:var(--bg2);padding:12px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
               <b>${esc(p.name)}</b>
               <span class="pill ${p.configured ? 'ok' : 'warn'}">${p.configured ? 'متصل' : 'غير مُعد'}</span>
             </div>
             <div style="margin-top:6px;color:var(--muted);font-size:.85rem" dir="ltr">${esc(p.defaultModel)} · ${(p.envVars || []).join(' / ')}</div>
-          </div>`).join('');
+          </div>`).join(''));
       } else {
-        $('#prov-status').innerHTML = `<div style="color:var(--muted)">تعذر فحص المزودين (${esc(payload.error || res.status)}). تأكد من نشر /api/ai-workforce/providers.</div>`;
+        setHtml('#prov-status', `<div style="color:var(--muted)">تعذر فحص المزودين (${esc(payload.error || res.status)}). تأكد من نشر /api/ai-workforce/providers.</div>`);
       }
     }
   } catch (e) {
-    $('#prov-status').innerHTML = `<div style="color:var(--danger)">خطأ فحص المزودين: ${esc(e.message)}</div>`;
+    setHtml('#prov-status', `<div style="color:var(--danger)">خطأ فحص المزودين: ${esc(e.message)}</div>`);
   }
 
   const providerOptions = [
@@ -2279,9 +2445,9 @@ VIEWS.ai = async v => {
   ];
   const { data: rows } = await db.from('ai_agents').select('*').order('created_at');
   if (!rows || !rows.length) {
-    $('#rows').innerHTML = `<p style="color:var(--warn)">لا يوجد وكلاء بعد. نفّذ <code>supabase/migrations/010_phase1_activation.sql</code> في Supabase SQL Editor.</p>`;
+    setHtml('#rows', `<p style="color:var(--warn)">لا يوجد وكلاء بعد. نفّذ <code>supabase/migrations/010_phase1_activation.sql</code> في Supabase SQL Editor.</p>`);
   } else {
-    $('#rows').innerHTML = rows.map(a => `<div class="card" style="background:var(--bg2)">
+    setHtml('#rows', rows.map(a => `<div class="card" style="background:var(--bg2)">
       <div class="card-head"><h2 style="margin:0">${esc(a.name_ar || a.name)} <small style="color:var(--muted)" dir="ltr">${esc(a.slug)}</small></h2>
       <label class="switch"><input type="checkbox" data-en="${a.id}" ${a.is_enabled ? 'checked' : ''}><span>مفعّل</span></label></div>
       <div class="form-grid">
@@ -2291,15 +2457,15 @@ VIEWS.ai = async v => {
         <div style="grid-column:1/-1"><label>System Prompt</label><textarea data-prompt="${a.id}" rows="4">${esc(a.system_prompt || '')}</textarea></div>
       </div>
       <button class="btn-primary btn-sm" data-save="${a.id}" style="margin-top:10px">حفظ الوحدة</button>
-    </div>`).join('');
+    </div>`).join(''));
     $$('[data-save]').forEach(b => b.onclick = async () => {
       const id = b.dataset.save;
       await db.from('ai_agents').update({
-        is_enabled: $(`[data-en="${id}"]`).checked,
-        provider: $(`[data-prov="${id}"]`).value,
-        model: $(`[data-model="${id}"]`).value || null,
-        temperature: Number($(`[data-temp="${id}"]`).value) || 0.7,
-        system_prompt: $(`[data-prompt="${id}"]`).value || null,
+        is_enabled: $(`[data-en="${id}"]`)?.checked ?? false,
+        provider: $(`[data-prov="${id}"]`)?.value,
+        model: $(`[data-model="${id}"]`)?.value || null,
+        temperature: Number($(`[data-temp="${id}"]`)?.value) || 0.7,
+        system_prompt: $(`[data-prompt="${id}"]`)?.value || null,
       }).eq('id', id);
       log('ai_agent.update', 'ai_agents', id); toast('تم حفظ الوحدة');
     });
@@ -2308,19 +2474,20 @@ VIEWS.ai = async v => {
   const { data: aiS } = await db.from('site_settings').select('value').eq('key', 'ai').maybeSingle();
   const aiVal = aiS?.value || {};
   if ($('#ai-prov')) $('#ai-prov').value = aiVal.default_provider || 'google_ai';
-  $('#ai-save').onclick = async () => {
+  const aiSave = $('#ai-save');
+  if (aiSave) aiSave.onclick = async () => {
     const { api_keys, ...safeAiVal } = aiVal;
-    await db.from('site_settings').upsert({ key: 'ai', value: { ...safeAiVal, default_provider: $('#ai-prov').value } });
+    await db.from('site_settings').upsert({ key: 'ai', value: { ...safeAiVal, default_provider: $('#ai-prov')?.value || 'google_ai' } });
     toast('تم حفظ المزود الافتراضي');
   };
 
   const { data: conv } = await db.from('ai_conversations').select('id,status,provider,model,created_at,error_message').order('created_at', { ascending: false }).limit(30);
-  $('#ai-logs').innerHTML = tbl(['الوقت','الحالة','المزود','النموذج','ملاحظة'], (conv || []).map(c =>
+  setHtml('#ai-logs', tbl(['الوقت','الحالة','المزود','النموذج','ملاحظة'], (conv || []).map(c =>
     `<tr><td>${new Date(c.created_at).toLocaleString('ar-SA')}</td>
      <td><span class="pill ${c.status==='completed'?'ok':c.status==='failed'?'danger':'warn'}">${esc(c.status)}</span></td>
      <td dir="ltr">${esc(c.provider || '—')}</td><td dir="ltr">${esc(c.model || '—')}</td>
      <td style="color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(c.error_message || '')}</td></tr>`
-  ).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا محادثات بعد</td></tr>');
+  ).join('') || '<tr><td colspan="5" style="color:var(--muted)">لا محادثات بعد</td></tr>'));
 };
 
 

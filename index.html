@@ -2,223 +2,186 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
+  <script>
+    (() => {
+      const query = new URLSearchParams(location.search);
+      const authHash = /(?:^|[&#])(access_token|refresh_token|type)=(?:[^&]*)/i.test(location.hash);
+      const authQuery = query.has('code') || query.get('type') === 'recovery' || query.get('type') === 'magiclink';
+      if (authHash || authQuery) {
+        location.replace('/admin.html' + location.search + location.hash);
+      }
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#060B1E" />
   <meta name="description" content="تيقنورا — أنظمة رقمية وذكاء اصطناعي للأعمال في السعودية. مواقع، وكلاء AI، أتمتة، شبكات، وتجارة تقنية. ناقش مشروعك معنا." />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
   <link rel="canonical" href="https://www.tiqnora.com/" />
   <link rel="alternate" hreflang="ar" href="https://www.tiqnora.com/" />
+  <link rel="alternate" hreflang="en" href="https://www.tiqnora.com/?lang=en" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="ar_SA" />
   <meta property="og:site_name" content="Tiqnora AI" />
   <meta property="og:title" content="تيقنورا | أنظمة رقمية وذكاء اصطناعي للأعمال" />
-  <meta property="og:description" content="نبني أنظمة رقمية مترابطة: مواقع، وكلاء AI، أتمتة سوشيال، شبكات وأمن — بدون أسعار ثابتة. ناقش مشروعك معنا." />
+  <meta property="og:description" content="نبني أنظمة رقمية مترابطة: مواقع، وكلاء AI، أتمتة، شبكات وأمن — ناقش مشروعك معنا." />
+  <meta property="og:image" content="https://www.tiqnora.com/assets/tiqnora-logo.png" />
   <meta property="og:url" content="https://www.tiqnora.com/" />
   <title>تيقنورا | أنظمة رقمية وذكاء اصطناعي للأعمال</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=4.0.0" />
+  <link rel="stylesheet" href="styles.css?v=5.0.0" />
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"Organization","@id":"https://www.tiqnora.com/#organization","name":"Tiqnora AI","alternateName":["تيقنورا","Tiqnora"],"url":"https://www.tiqnora.com/","logo":"https://www.tiqnora.com/assets/tiqnora-logo.png","description":"أنظمة رقمية وذكاء اصطناعي للأعمال في السعودية","areaServed":"SA","contactPoint":{"@type":"ContactPoint","contactType":"sales","availableLanguage":["ar","en"]}}
+  {"@context":"https://schema.org","@type":"Organization","@id":"https://www.tiqnora.com/#organization","name":"Tiqnora AI","alternateName":["تيقنورا","Tiqnora"],"url":"https://www.tiqnora.com/","logo":{"@type":"ImageObject","url":"https://www.tiqnora.com/assets/tiqnora-logo.png"},"description":"أنظمة رقمية وذكاء اصطناعي للأعمال في السعودية","email":"eng.eyadalhaj848@gmail.com","telephone":"+966551341398","address":{"@type":"PostalAddress","addressLocality":"Madinah","addressRegion":"المدينة المنورة","addressCountry":"SA"},"areaServed":"SA","knowsLanguage":["ar","en"]}
   </script>
 </head>
 <body>
+  <a class="skip-link" href="#main" data-i18n="skip">تخطي إلى المحتوى</a>
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="/">
-        <span class="brand-mark">T</span>
-        <span>تيقنورا</span>
+      <a class="brand" href="#top" aria-label="Tiqnora AI">
+        <img src="assets/tiqnora-logo.png" alt="Tiqnora AI" width="36" height="36" />
+        <span class="brand-text">تيقنورا</span>
       </a>
-      <nav class="nav" aria-label="القائمة الرئيسية">
-        <a href="#systems">المنظومات</a>
-        <a href="services/web-design.html">تصميم المواقع</a>
-        <a href="services/ai-agents.html">وكلاء AI</a>
-        <a href="services/social-automation.html">أتمتة السوشيال</a>
-        <a href="#contact">تواصل</a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav" id="menu-btn">
+        <span class="sr-only" data-i18n="menu">القائمة</span>
+        <span></span><span></span><span></span>
+      </button>
+      <nav id="site-nav" class="site-nav" aria-label="التنقل الرئيسي">
+        <a href="#systems" data-i18n="navSystems">المنظومات</a>
+        <a href="services/web-design.html" data-i18n="navWeb">تصميم المواقع</a>
+        <a href="services/ai-agents.html" data-i18n="navAI">وكلاء AI</a>
+        <a href="services/social-automation.html" data-i18n="navSocial">أتمتة السوشيال</a>
+        <a href="shop.html" data-i18n="navShop">المتجر</a>
+        <a href="#method" data-i18n="navMethod">طريقة العمل</a>
+        <a href="track.html" data-i18n="navTrack">تتبع طلبك</a>
+        <a href="#contact" data-i18n="navContact">تواصل</a>
       </nav>
-      <div class="header-actions">
-        <a class="btn btn-primary" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D9%85%D8%B4%D8%B1%D9%88%D8%B9%D9%8A%20%D9%85%D8%B9%20%D8%AA%D9%8A%D9%82%D9%86%D9%88%D8%B1%D8%A7" target="_blank" rel="noopener">ناقش مشروعك</a>
-        <button class="menu-toggle" type="button" aria-label="فتح القائمة" id="menu-btn">
-          <span></span><span></span><span></span>
+      <div class="nav-actions">
+        <button class="cart-button" type="button" data-cart-open aria-label="السلة">
+          <span data-i18n="cart">السلة</span>
+          <b id="cart-count">0</b>
         </button>
+        <button class="language-toggle" type="button" data-lang-toggle aria-label="Switch language">EN</button>
+        <a class="btn btn-primary header-cta" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D9%85%D8%B4%D8%B1%D9%88%D8%B9%D9%8A" target="_blank" rel="noopener" data-i18n="ctaDiscuss">ناقش مشروعك</a>
       </div>
     </div>
   </header>
 
-  <nav class="mobile-nav" id="mobile-nav" aria-label="قائمة الجوال">
-    <a href="#systems">المنظومات</a>
-    <a href="services/web-design.html">تصميم المواقع</a>
-    <a href="services/ai-agents.html">وكلاء AI</a>
-    <a href="services/social-automation.html">أتمتة السوشيال</a>
-    <a href="#contact">تواصل</a>
-    <a class="btn btn-primary" style="margin-top:1rem" href="https://wa.me/966551341398" target="_blank" rel="noopener">ناقش مشروعك معنا</a>
-  </nav>
-
-  <main>
-    <!-- HERO -->
-    <section class="hero">
+  <main id="main">
+    <section id="top" class="hero">
       <div class="container hero-grid">
-        <div>
-          <div class="hero-badge">ويب · ذكاء اصطناعي · أتمتة · أنظمة</div>
-          <h1>أنظمة رقمية مصممة<br><span>لنمو أعمالك</span></h1>
-          <p class="hero-lead">
-            نبني منظومات مترابطة: مواقع عالية التحويل، وكلاء ذكاء اصطناعي، أتمتة سوشيال، وشبكات وأمن — تعمل معاً كوحدة واحدة وتُسلَّم بأداء سريع ووضوح كامل.
-          </p>
+        <div class="hero-copy">
+          <div class="hero-badge" data-i18n="heroBadge">ويب · ذكاء اصطناعي · أتمتة · أنظمة</div>
+          <h1 data-i18n="heroTitle">أنظمة رقمية مصممة<br><span>لنمو أعمالك</span></h1>
+          <p class="hero-lead" data-i18n="heroLead">نبني منظومات مترابطة: مواقع عالية التحويل، وكلاء ذكاء اصطناعي، أتمتة سوشيال، وشبكات وأمن — تعمل معاً كوحدة واحدة بأداء سريع ووضوح كامل.</p>
           <div class="hero-ctas">
-            <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%85%D8%AE%D8%B5%D8%B5" target="_blank" rel="noopener">اطلب عرض سعر مخصص</a>
-            <a class="btn btn-ghost btn-lg" href="#systems">استكشف المنظومات</a>
+            <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%85%D8%AE%D8%B5%D8%B5" target="_blank" rel="noopener" data-i18n="ctaQuote">اطلب عرض سعر مخصص</a>
+            <a class="btn btn-ghost btn-lg" href="#systems" data-i18n="ctaExplore">استكشف المنظومات</a>
           </div>
           <div class="hero-trust">
-            <span><strong>أداء عالي</strong> · هدف 95+ Lighthouse</span>
-            <span><strong>تنفيذ واضح</strong> · من الاكتشاف إلى الإطلاق</span>
+            <span data-i18n="trust1">تنفيذ واضح من الاكتشاف إلى الإطلاق</span>
+            <span data-i18n="trust2">متجر أجهزة وحلول للشركات</span>
           </div>
         </div>
         <div class="live-visual" aria-hidden="true">
-          <div class="node"></div>
-          <div class="node"></div>
-          <div class="node"></div>
-          <div class="node"></div>
-          <div class="node"></div>
-          <div class="node"></div>
+          <div class="node"></div><div class="node"></div><div class="node"></div>
+          <div class="node"></div><div class="node"></div><div class="node"></div>
           <div class="visual-label">
-            <strong>نظام حي مترابط</strong>
-            ستة منظومات تعمل معاً — واضحة خلال ثوانٍ
+            <strong data-i18n="visualTitle">نظام حي مترابط</strong>
+            <span data-i18n="visualSub">ست منظومات تعمل معاً</span>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 6 SYSTEMS -->
     <section class="section" id="systems">
       <div class="container">
         <div class="section-header">
-          <span class="section-label">المنظومات</span>
-          <h2>ست منظومات. محرك واحد.</h2>
-          <p>كل ما يحتاجه نشاطك للنمو الرقمي — متصل ضمن نظام ذكي واحد. بدون أسعار ثابتة؛ النطاق يُحدد بعد فهم احتياجك.</p>
+          <span class="section-label" data-i18n="systemsLabel">المنظومات</span>
+          <h2 data-i18n="systemsTitle">ست منظومات. محرك واحد.</h2>
+          <p data-i18n="systemsIntro">كل ما يحتاجه نشاطك للنمو الرقمي — متصل ضمن نظام ذكي واحد. النطاق يُحدد بعد فهم احتياجك.</p>
         </div>
         <div class="systems-grid">
           <article class="system-card">
             <div class="system-num">01</div>
-            <h3>تصميم المواقع والأنظمة</h3>
-            <p>مواقع سريعة، متجاوبة، مصممة للتحويل والثقة — مع بنية واضحة وقابلية للتوسع.</p>
-            <a class="link" href="services/web-design.html">اعرف المزيد ←</a>
+            <h3 data-i18n="sys1t">تصميم المواقع والأنظمة</h3>
+            <p data-i18n="sys1d">مواقع سريعة ومتجاوبة مصممة للتحويل والثقة — مع بنية واضحة وقابلية للتوسع.</p>
+            <a class="link" href="services/web-design.html" data-i18n="learnMore">اعرف المزيد ←</a>
           </article>
           <article class="system-card">
             <div class="system-num">02</div>
-            <h3>وكلاء الذكاء الاصطناعي</h3>
-            <p>مساعدات محادثة وصوت تُجيب، تؤهل العملاء المحتملين، وتدعم الحجوزات والدعم على مدار الساعة.</p>
-            <a class="link" href="services/ai-agents.html">اعرف المزيد ←</a>
+            <h3 data-i18n="sys2t">وكلاء الذكاء الاصطناعي</h3>
+            <p data-i18n="sys2d">مساعدات محادثة وصوت تُجيب، تؤهل العملاء المحتملين، وتدعم الحجوزات والدعم.</p>
+            <a class="link" href="services/ai-agents.html" data-i18n="learnMore">اعرف المزيد ←</a>
           </article>
           <article class="system-card">
             <div class="system-num">03</div>
-            <h3>أتمتة السوشيال ميديا</h3>
-            <p>محتوى ونشر ومتابعة منظمة — صوت علامتك يبقى متسقاً دون استنزاف الفريق.</p>
-            <a class="link" href="services/social-automation.html">اعرف المزيد ←</a>
+            <h3 data-i18n="sys3t">أتمتة السوشيال ميديا</h3>
+            <p data-i18n="sys3d">محتوى ونشر ومتابعة منظمة — صوت علامتك يبقى متسقاً دون استنزاف الفريق.</p>
+            <a class="link" href="services/social-automation.html" data-i18n="learnMore">اعرف المزيد ←</a>
           </article>
           <article class="system-card">
             <div class="system-num">04</div>
-            <h3>الشبكات والأمن</h3>
-            <p>تصميم وتنظيم الشبكات، CCTV، والوصول الآمن — بنية واضحة قابلة للصيانة.</p>
-            <a class="link" href="#contact">ناقش النطاق ←</a>
+            <h3 data-i18n="sys4t">الشبكات والأمن</h3>
+            <p data-i18n="sys4d">تصميم وتنظيم الشبكات، المراقبة، والوصول الآمن — بنية واضحة قابلة للصيانة.</p>
+            <a class="link" href="#contact" data-i18n="discussScope">ناقش النطاق ←</a>
           </article>
           <article class="system-card">
             <div class="system-num">05</div>
-            <h3>إدارة العملاء والأتمتة</h3>
-            <p>تنظيم الاستفسارات، المسارات، والمتابعة في نظام واحد يقلل العمل اليدوي والأخطاء.</p>
-            <a class="link" href="#contact">ناقش النطاق ←</a>
+            <h3 data-i18n="sys5t">إدارة العملاء والأتمتة</h3>
+            <p data-i18n="sys5d">تنظيم الاستفسارات والمسارات والمتابعة في نظام واحد يقلل العمل اليدوي.</p>
+            <a class="link" href="#contact" data-i18n="discussScope">ناقش النطاق ←</a>
           </article>
           <article class="system-card">
             <div class="system-num">06</div>
-            <h3>التجارة والتقنية المتكاملة</h3>
-            <p>كتالوج، طلبات، ودعم تشغيلي للشركات والمتاجر — منصة واحدة للطلب والمتابعة.</p>
-            <a class="link" href="/shop.html">تصفح الكتالوج ←</a>
+            <h3 data-i18n="sys6t">التجارة والتقنية المتكاملة</h3>
+            <p data-i18n="sys6d">كتالوج وطلبات ودعم تشغيلي للشركات والمتاجر — منصة واحدة للطلب والمتابعة.</p>
+            <a class="link" href="shop.html" data-i18n="browseShop">تصفح المتجر ←</a>
           </article>
         </div>
       </div>
     </section>
 
-    <!-- PROCESS -->
-    <section class="section" style="background: var(--navy-900);">
+    <section class="section section-alt" id="method">
       <div class="container">
         <div class="section-header">
-          <span class="section-label">كيف نعمل</span>
-          <h2>عملية واضحة. تنفيذ قوي.</h2>
-          <p>من أول محادثة حتى الإطلاق — خطوات محددة ونطاق متفق عليه.</p>
+          <span class="section-label" data-i18n="methodLabel">كيف نعمل</span>
+          <h2 data-i18n="methodTitle">عملية واضحة. تنفيذ قوي.</h2>
+          <p data-i18n="methodIntro">من أول محادثة حتى الإطلاق — خطوات محددة ونطاق متفق عليه.</p>
         </div>
         <div class="process-steps">
-          <div class="step">
-            <div class="step-num">01</div>
-            <h3>اكتشاف</h3>
-            <p>نفهم عملك وأهدافك والاحتياج الفعلي بدون افتراضات.</p>
-          </div>
-          <div class="step">
-            <div class="step-num">02</div>
-            <h3>تصميم</h3>
-            <p>نصمم التجربة والبنية لتعكس هويتك وتخدم زوارك.</p>
-          </div>
-          <div class="step">
-            <div class="step-num">03</div>
-            <h3>بناء</h3>
-            <p>نطور بجودة عالية وأداء سريع وقابلية للصيانة.</p>
-          </div>
-          <div class="step">
-            <div class="step-num">04</div>
-            <h3>إطلاق</h3>
-            <p>ننشر ونتأكد من السلاسة، مع دعم حسب النطاق المتفق عليه.</p>
-          </div>
+          <div class="step"><div class="step-num">01</div><h3 data-i18n="step1t">اكتشاف</h3><p data-i18n="step1d">نفهم عملك وأهدافك والاحتياج الفعلي بدون افتراضات.</p></div>
+          <div class="step"><div class="step-num">02</div><h3 data-i18n="step2t">تصميم</h3><p data-i18n="step2d">نصمم التجربة والبنية لتعكس هويتك وتخدم زوارك.</p></div>
+          <div class="step"><div class="step-num">03</div><h3 data-i18n="step3t">بناء</h3><p data-i18n="step3d">نطور بجودة عالية وأداء سريع وقابلية للصيانة.</p></div>
+          <div class="step"><div class="step-num">04</div><h3 data-i18n="step4t">إطلاق</h3><p data-i18n="step4d">ننشر ونتأكد من السلاسة، مع دعم حسب النطاق المتفق عليه.</p></div>
         </div>
       </div>
     </section>
 
-    <!-- WHY -->
-    <section class="section">
+    <section class="section" id="why">
       <div class="container">
         <div class="section-header">
-          <span class="section-label">لماذا تيقنورا</span>
-          <h2>وضوح، أداء، ونتيجة قابلة للاستخدام</h2>
+          <span class="section-label" data-i18n="whyLabel">لماذا تيقنورا</span>
+          <h2 data-i18n="whyTitle">وضوح، أداء، ونتيجة قابلة للاستخدام</h2>
         </div>
         <div class="why-grid">
-          <div class="why-item">
-            <div class="why-icon">⚡</div>
-            <div>
-              <h3>أداء أولاً</h3>
-              <p>هدف Lighthouse 95+، بدون فيديوهات ثقيلة أو حركات تبطئ التجربة — خاصة على الجوال.</p>
-            </div>
-          </div>
-          <div class="why-item">
-            <div class="why-icon">🎯</div>
-            <div>
-              <h3>نطاق واضح</h3>
-              <p>لا أسعار ثابتة مضللة. نحدد النطاق معاً ثم نقدم عرضاً مخصصاً يتوافق مع احتياجك.</p>
-            </div>
-          </div>
-          <div class="why-item">
-            <div class="why-icon">🔗</div>
-            <div>
-              <h3>أنظمة مترابطة</h3>
-              <p>الموقع، الوكلاء، الأتمتة، والشبكات تعمل معاً — ليس كقطع منفصلة.</p>
-            </div>
-          </div>
-          <div class="why-item">
-            <div class="why-icon">🛡</div>
-            <div>
-              <h3>تسليم قابل للصيانة</h3>
-              <p>حلول عملية تبقى قابلة للتطوير والدعم بعد الإطلاق.</p>
-            </div>
-          </div>
+          <div class="why-item"><div class="why-icon">◈</div><div><h3 data-i18n="why1t">أداء أولاً</h3><p data-i18n="why1d">تجربة سريعة على الجوال وسطح المكتب — بدون عناصر تبطئ الزائر.</p></div></div>
+          <div class="why-item"><div class="why-icon">◎</div><div><h3 data-i18n="why2t">نطاق واضح</h3><p data-i18n="why2d">نحدد النطاق معاً ثم نقدّم عرضاً مخصصاً يتوافق مع احتياجك الفعلي.</p></div></div>
+          <div class="why-item"><div class="why-icon">⬡</div><div><h3 data-i18n="why3t">أنظمة مترابطة</h3><p data-i18n="why3d">الموقع والوكلاء والأتمتة والشبكات تعمل معاً — ليس كقطع منفصلة.</p></div></div>
+          <div class="why-item"><div class="why-icon">▣</div><div><h3 data-i18n="why4t">تسليم قابل للصيانة</h3><p data-i18n="why4d">حلول عملية تبقى قابلة للتطوير والدعم بعد الإطلاق.</p></div></div>
         </div>
       </div>
     </section>
 
-    <!-- CTA -->
     <div class="container" id="contact">
       <div class="cta-banner">
-        <h2>جاهز لنمو أوضح؟</h2>
-        <p>ناقش مشروعك معنا خلال دقائق، أو اطلب عرض سعر مخصص بناءً على نطاقك الفعلي.</p>
+        <h2 data-i18n="ctaTitle">جاهز لنمو أوضح؟</h2>
+        <p data-i18n="ctaLead">ناقش مشروعك معنا، أو اطلب عرض سعر مخصص بناءً على نطاقك الفعلي.</p>
         <div class="cta-actions">
-          <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D9%85%D8%B4%D8%B1%D9%88%D8%B9%D9%8A" target="_blank" rel="noopener">ناقش مشروعك معنا</a>
-          <a class="btn btn-ghost btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%85%D8%AE%D8%B5%D8%B5" target="_blank" rel="noopener">اطلب عرض سعر مخصص</a>
+          <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D9%85%D8%B4%D8%B1%D9%88%D8%B9%D9%8A" target="_blank" rel="noopener" data-i18n="ctaDiscuss">ناقش مشروعك معنا</a>
+          <a class="btn btn-ghost btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%85%D8%AE%D8%B5%D8%B5" target="_blank" rel="noopener" data-i18n="ctaQuote">اطلب عرض سعر مخصص</a>
         </div>
       </div>
     </div>
@@ -228,40 +191,70 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="brand" href="/">
-            <span class="brand-mark">T</span>
-            <span>تيقنورا</span>
+          <a class="brand" href="#top">
+            <img src="assets/tiqnora-logo.png" alt="Tiqnora AI" width="36" height="36" />
+            <span class="brand-text">تيقنورا</span>
           </a>
-          <p>أنظمة رقمية وذكاء اصطناعي للأعمال التي تريد أن تعمل بثقة ووضوح.</p>
+          <p data-i18n="footerText">أنظمة رقمية وذكاء اصطناعي للأعمال التي تريد أن تعمل بثقة ووضوح.</p>
         </div>
         <div class="footer-col">
-          <h4>المنظومات</h4>
-          <a href="services/web-design.html">تصميم المواقع</a>
-          <a href="services/ai-agents.html">وكلاء الذكاء الاصطناعي</a>
-          <a href="services/social-automation.html">أتمتة السوشيال</a>
-          <a href="#systems">كل المنظومات</a>
+          <h4 data-i18n="footerSystems">المنظومات</h4>
+          <a href="services/web-design.html" data-i18n="navWeb">تصميم المواقع</a>
+          <a href="services/ai-agents.html" data-i18n="navAI">وكلاء الذكاء الاصطناعي</a>
+          <a href="services/social-automation.html" data-i18n="navSocial">أتمتة السوشيال</a>
+          <a href="shop.html" data-i18n="navShop">المتجر</a>
         </div>
         <div class="footer-col">
-          <h4>روابط</h4>
-          <a href="about.html">عن الشركة</a>
-          <a href="shop.html">المتجر</a>
-          <a href="faq.html">الأسئلة الشائعة</a>
-          <a href="privacy-policy.html">الخصوصية</a>
+          <h4 data-i18n="footerLinks">روابط</h4>
+          <a href="about.html" data-i18n="navAbout">عن الشركة</a>
+          <a href="track.html" data-i18n="navTrack">تتبع طلبك</a>
+          <a href="faq.html">FAQ</a>
+          <a href="privacy-policy.html" data-i18n="privacy">الخصوصية</a>
         </div>
       </div>
       <div class="footer-bottom">
-        <span>© <span id="year"></span> Tiqnora AI. جميع الحقوق محفوظة.</span>
-        <span>الرياض · المملكة العربية السعودية</span>
+        <span>© <span id="year"></span> Tiqnora AI</span>
+        <span data-i18n="footerCity">المدينة المنورة، المملكة العربية السعودية</span>
+        <a class="admin-link" href="admin.html" data-i18n="adminLink">إدارة المحتوى</a>
       </div>
     </div>
   </footer>
 
+  <aside class="cart-drawer" id="cart-drawer" aria-hidden="true">
+    <div class="cart-overlay" data-cart-close></div>
+    <div class="cart-panel">
+      <div class="cart-head">
+        <h2 data-i18n="cartTitle">سلتك</h2>
+        <button type="button" class="icon-button" data-cart-close aria-label="إغلاق">×</button>
+      </div>
+      <p class="cart-empty" id="cart-empty" data-i18n="cartEmpty">لم تضف منتجات بعد. تصفح المتجر لإضافة أجهزة وحلول.</p>
+      <div class="cart-items" id="cart-items"></div>
+      <div class="cart-foot">
+        <div><span data-i18n="cartTotal">الإجمالي</span><strong id="cart-total">0 ر.س</strong></div>
+        <a class="btn btn-primary" href="shop.html" data-i18n="goShop">الذهاب للمتجر</a>
+        <button class="btn btn-ghost" id="clear-cart" type="button" data-i18n="clearCart">تفريغ السلة</button>
+      </div>
+    </div>
+  </aside>
+
+  <noscript><div class="noscript">فعّل JavaScript لتشغيل السلة وتبديل اللغة.</div></noscript>
+  <script src="js/config.js?v=5.0.0" defer></script>
+  <script src="js/db.js?v=5.0.0" defer></script>
+  <script src="script.js?v=5.0.0" defer></script>
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
-    const btn = document.getElementById('menu-btn');
-    const nav = document.getElementById('mobile-nav');
-    btn.addEventListener('click', () => nav.classList.toggle('open'));
-    nav.querySelectorAll('a').forEach(a => a.addEventListener('click', () => nav.classList.remove('open')));
+    const menuBtn = document.getElementById('menu-btn');
+    const siteNav = document.getElementById('site-nav');
+    menuBtn?.addEventListener('click', () => {
+      const open = siteNav.classList.toggle('open');
+      menuBtn.setAttribute('aria-expanded', String(open));
+      document.body.classList.toggle('menu-open', open);
+    });
+    siteNav?.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+      siteNav.classList.remove('open');
+      document.body.classList.remove('menu-open');
+      menuBtn?.setAttribute('aria-expanded', 'false');
+    }));
   </script>
 </body>
 </html>

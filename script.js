@@ -26,7 +26,7 @@ const defaultContent = {services:[
 ]};
 
 let content = JSON.parse(localStorage.getItem('tiqnora-content-v1') || 'null') || defaultContent;
-let currentLang = localStorage.getItem('tiqnora-lang') || (navigator.language?.toLowerCase().startsWith('ar') ? 'ar' : 'en');
+let currentLang = localStorage.getItem('tiqnora-lang') || 'ar';
 let cart = JSON.parse(localStorage.getItem('tiqnora-cart-v1') || '[]');
 const root=document.documentElement, body=document.body;
 function ensureThemeButtons(){const picker=document.querySelector('.theme-picker');if(!picker)return;[['ocean','المحيطي'],['forest','الأخضر']].forEach(([id,label])=>{if(picker.querySelector(`[data-set-theme="${id}"]`))return;const b=document.createElement('button');b.className=`theme-dot ${id}`;b.dataset.setTheme=id;b.setAttribute('aria-label',`المظهر ${label}`);b.innerHTML='<span></span>';b.addEventListener('click',()=>applyTheme(id));picker.insertBefore(b,picker.querySelector('[data-set-theme="pearl"]'));});}
@@ -39,8 +39,8 @@ function addToCart(id){const item=content.services.find(s=>s.id===id);if(!item)r
 function addPlanToCart(id){const item=content.plans.find(p=>p.id===id);if(!item)return;cart.push({kind:'plan',id});persistCart();openCart();}
 function persistCart(){localStorage.setItem('tiqnora-cart-v1',JSON.stringify(cart));renderCart();}
 function renderCart(){const list=document.querySelector('#cart-items'),empty=document.querySelector('#cart-empty'),count=document.querySelector('#cart-count'),total=document.querySelector('#cart-total');if(!list)return;const d=translations[currentLang];count.textContent=cart.length;let sum=0;list.innerHTML=cart.map((item,i)=>{const obj=item.kind==='plan'?content.plans.find(p=>p.id===item.id):content.services.find(s=>s.id===item.id);if(!obj)return '';sum+=Number(obj.price)||0;const x=obj[currentLang]||obj.ar;return `<div class="cart-item"><div><strong>${x.name||x.title}</strong><small>${money(obj.price)}</small></div><button type="button" data-remove-index="${i}" aria-label="${d.remove}">×</button></div>`}).join('');empty.hidden=cart.length>0;total.textContent=money(sum);list.querySelectorAll('[data-remove-index]').forEach(b=>b.addEventListener('click',()=>{cart.splice(Number(b.dataset.removeIndex),1);persistCart()}));}
-function openCart(){const d=document.querySelector('#cart-drawer');d.classList.add('open');d.setAttribute('aria-hidden','false');}
-function closeCart(){const d=document.querySelector('#cart-drawer');d.classList.remove('open');d.setAttribute('aria-hidden','true');}
+function openCart(){const d=document.querySelector('#cart-drawer');if(!d)return;d.classList.add('open');d.setAttribute('aria-hidden','false');}
+function closeCart(){const d=document.querySelector('#cart-drawer');if(!d)return;d.classList.remove('open');d.setAttribute('aria-hidden','true');}
 function observeReveals(){if(!('IntersectionObserver' in window)){document.querySelectorAll('.reveal').forEach(e=>e.classList.add('visible'));return}const ob=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');ob.unobserve(e.target)}}),{threshold:.08});document.querySelectorAll('.reveal:not(.visible)').forEach(e=>ob.observe(e));}
 document.querySelector('[data-lang-toggle]')?.addEventListener('click',()=>applyLanguage(currentLang==='ar'?'en':'ar'));document.querySelectorAll('[data-set-theme]').forEach(b=>b.addEventListener('click',()=>applyTheme(b.dataset.setTheme)));const menu=document.querySelector('.menu-toggle'),nav=document.querySelector('.site-nav');menu?.addEventListener('click',()=>{const open=nav.classList.toggle('open');document.body.classList.toggle('menu-open',open);menu.setAttribute('aria-expanded',String(open))});nav?.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{nav.classList.remove('open');document.body.classList.remove('menu-open');menu?.setAttribute('aria-expanded','false')}));document.querySelectorAll('[data-cart-open]').forEach(b=>b.addEventListener('click',openCart));document.querySelectorAll('[data-cart-close]').forEach(b=>b.addEventListener('click',closeCart));document.querySelector('#clear-cart')?.addEventListener('click',()=>{cart=[];persistCart()});document.querySelector('#checkout-button')?.addEventListener('click',()=>{if(!cart.length)return;const lines=cart.map(item=>{const obj=item.kind==='plan'?content.plans.find(p=>p.id===item.id):content.services.find(s=>s.id===item.id);return (obj[currentLang]||obj.ar).name|| (obj[currentLang]||obj.ar).title}).join('\n- ');window.location.href=`mailto:eng.eyadalhaj848@gmail.com?subject=${encodeURIComponent(currentLang==='ar'?'طلب من موقع Tiqnora':'Tiqnora website request')}&body=${encodeURIComponent((currentLang==='ar'?'الخدمات المطلوبة:\n- ':'Requested services:\n- ')+lines)}`});document.querySelector('#contact-form')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.currentTarget);if(window.TiqnoraDB)window.TiqnoraDB.submitLead(f.get('name'),f.get('email'),f.get('message')).then(r=>{if(r.ok){const n=document.querySelector('#form-note');if(n){n.textContent=currentLang==='ar'?'✓ تم استلام استفسارك — سنعود إليك قريبًا.':'✓ Your enquiry was received — we will get back to you soon.';setTimeout(()=>n.textContent='',5000);}return;}});const subject=encodeURIComponent(currentLang==='ar'?`استفسار من ${f.get('name')}`:`Enquiry from ${f.get('name')}`);const bodyText=currentLang==='ar'?`الاسم: ${f.get('name')}\nالبريد: ${f.get('email')}\n\nالرسالة:\n${f.get('message')}`:`Name: ${f.get('name')}\nEmail: ${f.get('email')}\n\nMessage:\n${f.get('message')}`;window.location.href=`mailto:eng.eyadalhaj848@gmail.com?subject=${subject}&body=${encodeURIComponent(bodyText)}`});
 const yearEl=document.querySelector('#year');if(yearEl)yearEl.textContent=new Date().getFullYear();applyTheme(localStorage.getItem('tiqnora-theme')||'light');applyLanguage(currentLang);
@@ -71,3 +71,179 @@ window.TiqnoraStore={
   addProduct(p, qty=1){ const c=this.getCart(); const ex=c.find(i=>i.kind==='product'&&i.id===p.id); const unit=Number(p.discount_percent>0? (p.price*(1-p.discount_percent/100)) : p.price); if(ex){ ex.qty+=qty; } else { c.push({kind:'product', id:p.id, slug:p.slug, titleAr:p.name_ar, titleEn:p.name_en, price:unit, originalPrice:Number(p.price), image:(p.images||[])[0]||'', qty}); } this.saveCart(c); }
 };
 window.Tiqnora={content,defaultContent,saveContent(next){content=next;localStorage.setItem('tiqnora-content-v1',JSON.stringify(content));renderServices();renderPlans();}};
+
+
+/* ===== Tiqnora V5 bridge: store-first cart + expanded i18n ===== */
+(function v5Bridge(){
+  const extra = {
+    ar: {
+      navSystems:'المنظومات', navWeb:'تصميم المواقع', navAI:'وكلاء AI', navSocial:'أتمتة السوشيال',
+      navAbout:'عن الشركة', ctaDiscuss:'ناقش مشروعك', ctaQuote:'اطلب عرض سعر مخصص', ctaExplore:'استكشف المنظومات',
+      heroBadge:'ويب · ذكاء اصطناعي · أتمتة · أنظمة',
+      heroTitle:'أنظمة رقمية مصممة<br><span>لنمو أعمالك</span>',
+      heroLead:'نبني منظومات مترابطة: مواقع عالية التحويل، وكلاء ذكاء اصطناعي، أتمتة سوشيال، وشبكات وأمن — تعمل معاً كوحدة واحدة بأداء سريع ووضوح كامل.',
+      trust1:'تنفيذ واضح من الاكتشاف إلى الإطلاق', trust2:'متجر أجهزة وحلول للشركات',
+      visualTitle:'نظام حي مترابط', visualSub:'ست منظومات تعمل معاً',
+      systemsLabel:'المنظومات', systemsTitle:'ست منظومات. محرك واحد.', systemsIntro:'كل ما يحتاجه نشاطك للنمو الرقمي — متصل ضمن نظام ذكي واحد. النطاق يُحدد بعد فهم احتياجك.',
+      sys1t:'تصميم المواقع والأنظمة', sys1d:'مواقع سريعة ومتجاوبة مصممة للتحويل والثقة — مع بنية واضحة وقابلية للتوسع.',
+      sys2t:'وكلاء الذكاء الاصطناعي', sys2d:'مساعدات محادثة وصوت تُجيب، تؤهل العملاء المحتملين، وتدعم الحجوزات والدعم.',
+      sys3t:'أتمتة السوشيال ميديا', sys3d:'محتوى ونشر ومتابعة منظمة — صوت علامتك يبقى متسقاً دون استنزاف الفريق.',
+      sys4t:'الشبكات والأمن', sys4d:'تصميم وتنظيم الشبكات، المراقبة، والوصول الآمن — بنية واضحة قابلة للصيانة.',
+      sys5t:'إدارة العملاء والأتمتة', sys5d:'تنظيم الاستفسارات والمسارات والمتابعة في نظام واحد يقلل العمل اليدوي.',
+      sys6t:'التجارة والتقنية المتكاملة', sys6d:'كتالوج وطلبات ودعم تشغيلي للشركات والمتاجر — منصة واحدة للطلب والمتابعة.',
+      learnMore:'اعرف المزيد ←', discussScope:'ناقش النطاق ←', browseShop:'تصفح المتجر ←',
+      methodLabel:'كيف نعمل', methodTitle:'عملية واضحة. تنفيذ قوي.', methodIntro:'من أول محادثة حتى الإطلاق — خطوات محددة ونطاق متفق عليه.',
+      step1t:'اكتشاف', step1d:'نفهم عملك وأهدافك والاحتياج الفعلي بدون افتراضات.',
+      step2t:'تصميم', step2d:'نصمم التجربة والبنية لتعكس هويتك وتخدم زوارك.',
+      step3t:'بناء', step3d:'نطور بجودة عالية وأداء سريع وقابلية للصيانة.',
+      step4t:'إطلاق', step4d:'ننشر ونتأكد من السلاسة، مع دعم حسب النطاق المتفق عليه.',
+      whyLabel:'لماذا تيقنورا', whyTitle:'وضوح، أداء، ونتيجة قابلة للاستخدام',
+      why1t:'أداء أولاً', why1d:'تجربة سريعة على الجوال وسطح المكتب — بدون عناصر تبطئ الزائر.',
+      why2t:'نطاق واضح', why2d:'نحدد النطاق معاً ثم نقدّم عرضاً مخصصاً يتوافق مع احتياجك الفعلي.',
+      why3t:'أنظمة مترابطة', why3d:'الموقع والوكلاء والأتمتة والشبكات تعمل معاً — ليس كقطع منفصلة.',
+      why4t:'تسليم قابل للصيانة', why4d:'حلول عملية تبقى قابلة للتطوير والدعم بعد الإطلاق.',
+      ctaTitle:'جاهز لنمو أوضح؟', ctaLead:'ناقش مشروعك معنا، أو اطلب عرض سعر مخصص بناءً على نطاقك الفعلي.',
+      footerText:'أنظمة رقمية وذكاء اصطناعي للأعمال التي تريد أن تعمل بثقة ووضوح.',
+      footerSystems:'المنظومات', footerLinks:'روابط', footerCity:'المدينة المنورة، المملكة العربية السعودية',
+      privacy:'الخصوصية', cart:'السلة', cartTitle:'سلتك',
+      cartEmpty:'لم تضف منتجات بعد. تصفح المتجر لإضافة أجهزة وحلول.',
+      cartTotal:'الإجمالي', goShop:'الذهاب للمتجر', clearCart:'تفريغ السلة', adminLink:'إدارة المحتوى'
+    },
+    en: {
+      navSystems:'Systems', navWeb:'Web Design', navAI:'AI Agents', navSocial:'Social Automation',
+      navAbout:'About', ctaDiscuss:'Discuss your project', ctaQuote:'Request a custom quote', ctaExplore:'Explore systems',
+      heroBadge:'Web · AI · Automation · Systems',
+      heroTitle:'Digital systems built<br><span>for business growth</span>',
+      heroLead:'We build connected systems: high-converting websites, AI agents, social automation, and secure networks — working as one unit with speed and clarity.',
+      trust1:'Clear delivery from discovery to launch', trust2:'Business hardware & solutions store',
+      visualTitle:'Live connected system', visualSub:'Six systems working together',
+      systemsLabel:'Systems', systemsTitle:'Six systems. One engine.', systemsIntro:'Everything your business needs to grow digitally — connected in one smart system. Scope is defined after understanding your needs.',
+      sys1t:'Websites & digital systems', sys1d:'Fast, responsive sites designed for conversion and trust — with a clear, scalable structure.',
+      sys2t:'AI agents', sys2d:'Chat and voice assistants that answer, qualify leads, and support bookings and support.',
+      sys3t:'Social media automation', sys3d:'Organized content, publishing, and follow-up — your brand voice stays consistent without draining the team.',
+      sys4t:'Networks & security', sys4d:'Network design, monitoring, and secure access — clear structure you can maintain.',
+      sys5t:'Customer ops & automation', sys5d:'Organize inquiries, pipelines, and follow-up in one system that reduces manual work.',
+      sys6t:'Commerce & integrated tech', sys6d:'Catalog, orders, and operational support for companies and stores — one platform to request and track.',
+      learnMore:'Learn more ←', discussScope:'Discuss scope ←', browseShop:'Browse store ←',
+      methodLabel:'How we work', methodTitle:'Clear process. Strong delivery.', methodIntro:'From first conversation to launch — defined steps and an agreed scope.',
+      step1t:'Discover', step1d:'We understand your business, goals, and real needs without assumptions.',
+      step2t:'Design', step2d:'We design the experience and structure to reflect your identity and serve visitors.',
+      step3t:'Build', step3d:'We develop with high quality, fast performance, and maintainability.',
+      step4t:'Launch', step4d:'We publish, verify smoothness, and support according to the agreed scope.',
+      whyLabel:'Why Tiqnora', whyTitle:'Clarity, performance, and usable outcomes',
+      why1t:'Performance first', why1d:'A fast experience on mobile and desktop — without elements that slow visitors down.',
+      why2t:'Clear scope', why2d:'We define scope together, then provide a custom quote that matches your real needs.',
+      why3t:'Connected systems', why3d:'Website, agents, automation, and networks work together — not as separate pieces.',
+      why4t:'Maintainable delivery', why4d:'Practical solutions that remain supportable and evolvable after launch.',
+      ctaTitle:'Ready for clearer growth?', ctaLead:'Discuss your project with us, or request a custom quote based on your actual scope.',
+      footerText:'Digital systems and AI for businesses that want to work with confidence and clarity.',
+      footerSystems:'Systems', footerLinks:'Links', footerCity:'Madinah, Kingdom of Saudi Arabia',
+      privacy:'Privacy', cart:'Cart', cartTitle:'Your cart',
+      cartEmpty:'No products yet. Browse the store to add hardware and solutions.',
+      cartTotal:'Total', goShop:'Go to store', clearCart:'Clear cart', adminLink:'Content admin'
+    }
+  };
+  if (typeof translations !== 'undefined') {
+    Object.assign(translations.ar, extra.ar);
+    Object.assign(translations.en, extra.en);
+  }
+
+  function moneySAR(n){
+    const v = Number(n)||0;
+    try { return new Intl.NumberFormat(document.documentElement.lang==='en'?'en-SA':'ar-SA',{style:'currency',currency:'SAR',maximumFractionDigits:0}).format(v); }
+    catch { return v + ' ر.س'; }
+  }
+
+  function renderStoreCart(){
+    const list = document.querySelector('#cart-items');
+    const empty = document.querySelector('#cart-empty');
+    const count = document.querySelector('#cart-count');
+    const total = document.querySelector('#cart-total');
+    if (!list || !window.TiqnoraStore) return;
+    const items = window.TiqnoraStore.getCart();
+    const qty = items.reduce((s,i)=>s+(Number(i.qty)||1),0);
+    if (count) count.textContent = String(qty);
+    let sum = 0;
+    if (!items.length) {
+      list.innerHTML = '';
+      if (empty) empty.style.display = '';
+      if (total) total.textContent = moneySAR(0);
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.innerHTML = items.map((it, idx) => {
+      const line = (Number(it.price)||0) * (Number(it.qty)||1);
+      sum += line;
+      const title = (document.documentElement.lang==='en' ? (it.titleEn||it.titleAr) : (it.titleAr||it.titleEn)) || 'Product';
+      return `<div class="cart-item" style="display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+        ${it.image?`<img src="${it.image}" alt="" width="48" height="48" style="border-radius:8px;object-fit:cover;background:#0b1529">`:''}
+        <div style="flex:1;min-width:0">
+          <strong style="display:block;font-size:0.9rem">${title}</strong>
+          <small style="color:#7A91B0">${it.qty||1} × ${moneySAR(it.price)}</small>
+        </div>
+        <button type="button" class="icon-button" data-remove-store="${idx}" aria-label="Remove" style="width:32px;height:32px">×</button>
+      </div>`;
+    }).join('');
+    if (total) total.textContent = moneySAR(sum);
+    list.querySelectorAll('[data-remove-store]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const c = window.TiqnoraStore.getCart();
+        c.splice(Number(btn.getAttribute('data-remove-store')), 1);
+        window.TiqnoraStore.saveCart(c);
+        renderStoreCart();
+      });
+    });
+  }
+
+  // Prefer store cart when drawer opens / page loads
+  const _open = window.openCart;
+  window.openCart = function(){
+    if (typeof _open === 'function') _open();
+    else {
+      const d=document.querySelector('#cart-drawer');
+      if(d){ d.classList.add('open'); d.setAttribute('aria-hidden','false'); }
+    }
+    renderStoreCart();
+  };
+  const _close = window.closeCart;
+  window.closeCart = function(){
+    if (typeof _close === 'function') _close();
+    const d=document.querySelector('#cart-drawer');
+    if(d){ d.classList.remove('open'); d.setAttribute('aria-hidden','true'); }
+  };
+
+  // Patch TiqnoraStore.saveCart to refresh count
+  if (window.TiqnoraStore) {
+    const _save = window.TiqnoraStore.saveCart.bind(window.TiqnoraStore);
+    window.TiqnoraStore.saveCart = function(c){
+      _save(c);
+      renderStoreCart();
+    };
+  }
+
+  document.getElementById('clear-cart')?.addEventListener('click', () => {
+    if (window.TiqnoraStore) window.TiqnoraStore.saveCart([]);
+    renderStoreCart();
+  });
+
+  // Initial count + re-apply i18n after merging V5 keys
+  function v5Boot(){
+    if (typeof applyLanguage === 'function') applyLanguage(currentLang);
+    renderStoreCart();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', v5Boot);
+  } else {
+    v5Boot();
+  }
+
+  // Re-apply language for new keys when toggle fires
+  document.querySelectorAll('[data-lang-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => setTimeout(() => {
+      if (typeof applyLanguage === 'function') {
+        /* applyLanguage already ran; ensure store cart labels refresh */
+        renderStoreCart();
+      }
+    }, 0));
+  });
+})();

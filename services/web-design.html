@@ -4,129 +4,600 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#060B1E" />
-  <meta name="description" content="تصميم مواقع عالمي المستوى للأعمال في السعودية — سريع، محوّل، مع موك أب خفيف ومشاريع واضحة. ناقش مشروعك مع تيقنورا." />
+  <meta name="description" content="تصميم مواقع Premium — نماذج توضيحية بمستوى Portfolio. ناقش مشروعك مع تيقنورا." />
   <link rel="canonical" href="https://www.tiqnora.com/services/web-design.html" />
   <title>تصميم المواقع | تيقنورا</title>
+  <link rel="icon" type="image/png" href="../assets/tiqnora-logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=4.0.0" />
+  <link rel="stylesheet" href="../styles.css?v=5.2.0" />
+  <style>
+    :root {
+      --wd-gap: clamp(1rem, 3vw, 2rem);
+    }
+    .wd-page { overflow-x: hidden; }
+
+    /* ===== HERO ===== */
+    .wd-hero {
+      position: relative;
+      min-height: min(88vh, 760px);
+      display: flex; align-items: center;
+      padding: 6.5rem 0 2.5rem;
+    }
+    .wd-hero::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 70% 55% at 75% 15%, rgba(10,92,255,.22), transparent 55%),
+        radial-gradient(ellipse 45% 40% at 15% 85%, rgba(0,229,255,.08), transparent 50%);
+    }
+    .wd-hero-grid {
+      position: relative; z-index: 1;
+      display: grid; gap: 2rem; align-items: center;
+    }
+    @media (min-width: 1024px) {
+      .wd-hero-grid { grid-template-columns: 0.95fr 1.15fr; gap: 1.5rem; }
+    }
+    .wd-kicker {
+      display: inline-block; font-size: .72rem; font-weight: 700;
+      letter-spacing: .14em; color: var(--cyan); margin-bottom: .85rem;
+    }
+    .wd-hero h1 {
+      font-size: clamp(2.35rem, 5.2vw, 3.65rem);
+      line-height: 1.1; letter-spacing: -.03em; margin: 0 0 1rem; font-weight: 700;
+    }
+    .wd-hero h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, #00E5FF, #5BA8FF);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .wd-hero-lead {
+      font-size: 1.05rem; color: var(--text-soft); max-width: 26rem;
+      margin: 0 0 1.5rem; line-height: 1.65;
+    }
+    .wd-hero-ctas { display: flex; flex-wrap: wrap; gap: .7rem; }
+
+    /* Device composition */
+    .stage {
+      position: relative; height: 400px; max-width: 540px; width: 100%; margin: 0 auto;
+    }
+    .br {
+      position: absolute; inset-inline-start: 0; top: 4%; width: 84%;
+      border-radius: 14px; background: #0a1324;
+      border: 1px solid rgba(0,229,255,.22);
+      box-shadow: 0 28px 70px rgba(0,0,0,.55);
+      overflow: hidden; z-index: 1;
+      animation: rise .9s ease both;
+    }
+    .br-bar {
+      height: 34px; background: #101a30; display: flex; align-items: center;
+      gap: 5px; padding: 0 11px; border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    .br-bar span { width: 8px; height: 8px; border-radius: 50%; }
+    .br-bar span:nth-child(1){background:#ff5f57}
+    .br-bar span:nth-child(2){background:#febc2e}
+    .br-bar span:nth-child(3){background:#28c840}
+    .br-url {
+      flex: 1; height: 16px; margin-inline-start: 8px; border-radius: 5px;
+      background: rgba(255,255,255,.05);
+    }
+    .ph {
+      position: absolute; inset-inline-end: 2%; bottom: 0; width: 132px; height: 268px;
+      border-radius: 20px; background: #070d18;
+      border: 2px solid rgba(0,229,255,.4);
+      box-shadow: 0 22px 48px rgba(0,0,0,.55); z-index: 2;
+      padding: 10px 8px; animation: rise 1s .12s ease both;
+    }
+    .ph-notch {
+      width: 42px; height: 5px; border-radius: 99px; background: rgba(255,255,255,.12);
+      margin: 0 auto 8px;
+    }
+    .ph-body { height: calc(100% - 14px); border-radius: 12px; overflow: hidden; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(22px); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .br, .ph { animation: none; }
+    }
+
+    /* Mini UI atoms used inside mockups */
+    .m-nav {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.06);
+      font-size: 9px; color: rgba(255,255,255,.55); letter-spacing: .04em;
+    }
+    .m-nav strong { color: #fff; font-size: 10px; letter-spacing: .06em; }
+    .m-nav-links { display: flex; gap: 10px; }
+    .m-hero {
+      padding: 18px 14px 14px;
+    }
+    .m-hero h4 {
+      margin: 0 0 6px; font-size: 13px; line-height: 1.25; color: #fff; font-weight: 700;
+    }
+    .m-hero p {
+      margin: 0 0 10px; font-size: 9px; line-height: 1.45; color: rgba(255,255,255,.55);
+      max-width: 85%;
+    }
+    .m-btn {
+      display: inline-block; padding: 5px 12px; border-radius: 99px;
+      font-size: 9px; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, #0A5CFF, #0080FF);
+    }
+    .m-btn.ghost {
+      background: transparent; border: 1px solid rgba(255,255,255,.2); color: rgba(255,255,255,.8);
+      margin-inline-start: 6px;
+    }
+    .m-row {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 14px 14px;
+    }
+    .m-card {
+      border-radius: 8px; border: 1px solid rgba(255,255,255,.07);
+      background: rgba(255,255,255,.04); padding: 8px; min-height: 52px;
+    }
+    .m-card .thumb {
+      height: 28px; border-radius: 5px; margin-bottom: 6px;
+      background: rgba(255,255,255,.08);
+    }
+    .m-card .line { height: 5px; border-radius: 3px; background: rgba(255,255,255,.12); margin-bottom: 4px; }
+    .m-card .line.s { width: 55%; background: rgba(255,255,255,.07); }
+
+    /* Theme surfaces for concept mockups */
+    .ui-lux { background: linear-gradient(180deg, #0c0b10 0%, #14111a 100%); }
+    .ui-lux .m-nav strong { color: #d4af37; }
+    .ui-lux .m-btn { background: linear-gradient(135deg, #c9a227, #a67c00); color: #1a1400; }
+    .ui-lux .m-card .thumb { background: linear-gradient(135deg, rgba(212,175,55,.25), rgba(80,60,20,.4)); }
+
+    .ui-rest { background: linear-gradient(180deg, #140e0c 0%, #1c1210 100%); }
+    .ui-rest .m-btn { background: linear-gradient(135deg, #c45c26, #a33d12); }
+    .ui-rest .m-card .thumb { background: linear-gradient(135deg, rgba(200,90,40,.3), rgba(60,30,15,.5)); }
+
+    .ui-saas { background: linear-gradient(180deg, #071222 0%, #0c1c34 100%); }
+    .ui-saas .m-btn { background: linear-gradient(135deg, #00c6ff, #0A5CFF); color: #031018; }
+    .ui-saas .m-card .thumb { background: linear-gradient(135deg, rgba(0,229,255,.2), rgba(10,92,255,.25)); }
+
+    .ui-corp { background: linear-gradient(180deg, #0b1018 0%, #121a28 100%); }
+    .ui-corp .m-btn { background: #2b5cff; }
+    .ui-corp .m-card .thumb { background: rgba(100,140,200,.15); }
+
+    .ui-ecom { background: linear-gradient(180deg, #100a16 0%, #1a1028 100%); }
+    .ui-ecom .m-btn { background: linear-gradient(135deg, #9b5cff, #5b2db3); }
+    .ui-ecom .m-card .thumb { background: linear-gradient(135deg, rgba(155,92,255,.3), rgba(40,20,70,.5)); }
+
+    /* Phone mini UI */
+    .p-ui { height: 100%; padding: 8px; font-size: 8px; color: rgba(255,255,255,.7); }
+    .p-ui .p-brand { font-weight: 700; color: #fff; font-size: 9px; margin-bottom: 8px; }
+    .p-ui .p-title { font-size: 11px; font-weight: 700; color: #fff; line-height: 1.2; margin-bottom: 4px; }
+    .p-ui .p-sub { font-size: 7.5px; line-height: 1.35; margin-bottom: 8px; opacity: .65; }
+    .p-ui .p-cta {
+      display: block; text-align: center; padding: 6px; border-radius: 99px;
+      background: #0A5CFF; color: #fff; font-weight: 700; font-size: 8px; margin-bottom: 8px;
+    }
+    .p-ui .p-block {
+      height: 36px; border-radius: 7px; background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.06); margin-bottom: 6px;
+    }
+
+    /* ===== CONCEPT SHOWCASES ===== */
+    .wd-sec { padding: 4rem 0; }
+    .wd-sec-alt { background: rgba(8,14,28,.55); }
+    .wd-head { max-width: 36rem; margin-bottom: 2rem; }
+    .wd-head .badge {
+      display: inline-flex; font-size: .7rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--cyan);
+      border: 1px solid rgba(0,229,255,.28); padding: .28rem .65rem; border-radius: 99px;
+      margin-bottom: .75rem;
+    }
+    .wd-head h2 { margin: 0 0 .5rem; font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -.02em; }
+    .wd-head p { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.65; }
+
+    .shot {
+      display: grid; gap: 1.25rem; align-items: center;
+      margin-bottom: 2.75rem;
+    }
+    @media (min-width: 900px) {
+      .shot { grid-template-columns: 1.35fr .85fr; gap: 1.75rem; }
+      .shot.reverse { direction: ltr; }
+      .shot.reverse > * { direction: rtl; }
+    }
+    .shot-frame {
+      border-radius: 16px; border: 1px solid rgba(0,229,255,.18);
+      background: #0a1324; overflow: hidden;
+      box-shadow: 0 24px 60px rgba(0,0,0,.4);
+      transition: transform .35s ease, box-shadow .35s ease;
+    }
+    .shot-frame:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 32px 70px rgba(0,0,0,.5);
+    }
+    .shot-side {
+      position: relative;
+    }
+    .shot-phone {
+      width: 128px; height: 250px; border-radius: 18px;
+      border: 2px solid rgba(0,229,255,.35); background: #070d18;
+      padding: 9px 7px; margin: 0 auto;
+      box-shadow: 0 18px 40px rgba(0,0,0,.45);
+    }
+    .shot-meta { margin-top: 1.1rem; text-align: center; }
+    .shot-meta .tag {
+      display: inline-block; font-size: .68rem; font-weight: 700;
+      padding: .2rem .5rem; border-radius: 6px; margin-bottom: .4rem;
+      background: rgba(0,229,255,.1); color: var(--cyan); border: 1px solid rgba(0,229,255,.2);
+    }
+    .shot-meta h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
+    .shot-meta p { margin: 0; font-size: .85rem; color: var(--muted); line-height: 1.5; }
+
+    /* Larger mock content inside shot frames */
+    .big-nav {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.06);
+      font-size: 11px; color: rgba(255,255,255,.5);
+    }
+    .big-nav .logo { font-weight: 700; color: #fff; font-size: 12px; letter-spacing: .08em; }
+    .big-nav .links { display: flex; gap: 14px; }
+    .big-hero { padding: 28px 20px 20px; }
+    .big-hero h3 {
+      margin: 0 0 8px; font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+      color: #fff; line-height: 1.2; font-weight: 700; max-width: 16ch;
+    }
+    .big-hero p {
+      margin: 0 0 14px; font-size: 12px; color: rgba(255,255,255,.55);
+      max-width: 32ch; line-height: 1.5;
+    }
+    .big-cta {
+      display: inline-block; padding: 8px 16px; border-radius: 99px;
+      font-size: 11px; font-weight: 700; color: #fff;
+    }
+    .big-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+      padding: 0 18px 18px;
+    }
+    .big-card {
+      border-radius: 10px; border: 1px solid rgba(255,255,255,.07);
+      background: rgba(255,255,255,.035); overflow: hidden;
+    }
+    .big-card .img {
+      height: 56px;
+    }
+    .big-card .txt { padding: 8px 9px 10px; }
+    .big-card .txt b { display: block; font-size: 11px; color: #fff; margin-bottom: 3px; }
+    .big-card .txt span { font-size: 9px; color: rgba(255,255,255,.45); }
+
+    /* Theme accents for big cards */
+    .lux .logo { color: #d4af37 !important; }
+    .lux .big-cta { background: linear-gradient(135deg, #c9a227, #8a6a00); color: #1a1400; }
+    .lux .big-card .img { background: linear-gradient(135deg, #3a3018, #1a150c); }
+    .lux .big-hero { background: radial-gradient(ellipse at 30% 20%, rgba(212,175,55,.12), transparent 55%); }
+
+    .rest .big-cta { background: linear-gradient(135deg, #c45c26, #8a2e0c); }
+    .rest .big-card .img { background: linear-gradient(135deg, #3a2010, #1a1008); }
+    .rest .big-hero { background: radial-gradient(ellipse at 70% 0%, rgba(196,92,38,.14), transparent 50%); }
+
+    .saas .big-cta { background: linear-gradient(135deg, #00c6ff, #0A5CFF); color: #031018; }
+    .saas .big-card .img { background: linear-gradient(135deg, #0a2840, #061828); }
+    .saas .big-hero { background: radial-gradient(ellipse at 20% 0%, rgba(0,198,255,.12), transparent 50%); }
+
+    .corp .big-cta { background: #2b5cff; }
+    .corp .big-card .img { background: linear-gradient(135deg, #1a2840, #0c1420); }
+
+    .ecom .big-cta { background: linear-gradient(135deg, #9b5cff, #5b2db3); }
+    .ecom .big-card .img { background: linear-gradient(135deg, #2a1840, #140c20); }
+    .ecom .big-hero { background: radial-gradient(ellipse at 80% 10%, rgba(155,92,255,.14), transparent 50%); }
+
+    /* Process + CTA reuse site styles */
+    .reveal { opacity: 1; }
+    @media (prefers-reduced-motion: no-preference) {
+      .reveal { opacity: 0; transform: translateY(16px); transition: opacity .55s ease, transform .55s ease; }
+      .reveal.in { opacity: 1; transform: none; }
+    }
+
+    @media (max-width: 700px) {
+      .wd-hero { min-height: auto; padding: 5.5rem 0 1.5rem; }
+      .stage { height: 320px; }
+      .br { width: 78%; }
+      .ph { width: 108px; height: 220px; }
+      .shot-phone { width: 110px; height: 220px; }
+      .big-hero { padding: 18px 14px 14px; }
+      .big-grid { grid-template-columns: 1fr 1fr; }
+      .big-grid .big-card:last-child { display: none; }
+      .m-row { grid-template-columns: 1fr 1fr; }
+      .m-row .m-card:last-child { display: none; }
+    }
+  </style>
 </head>
-<body>
+<body class="wd-page">
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="/">
-        <span class="brand-mark">T</span>
-        <span>تيقنورا</span>
+      <a class="brand" href="../">
+        <img src="../assets/tiqnora-logo.png" alt="Tiqnora AI" width="36" height="36" />
+        <span class="brand-text">تيقنورا</span>
       </a>
-      <nav class="nav" aria-label="القائمة الرئيسية">
-        <a href="/#systems">المنظومات</a>
-        <a href="web-design.html">تصميم المواقع</a>
+      <button class="menu-toggle" type="button" id="menu-btn" aria-label="القائمة"><span></span><span></span><span></span></button>
+      <nav id="site-nav" class="site-nav">
+        <a href="../#systems">المنظومات</a>
+        <a href="web-design.html" aria-current="page">تصميم المواقع</a>
         <a href="ai-agents.html">وكلاء AI</a>
         <a href="social-automation.html">أتمتة السوشيال</a>
-        <a href="/#contact">تواصل</a>
+        <a href="../shop.html">المتجر</a>
+        <a href="../#contact">تواصل</a>
       </nav>
-      <div class="header-actions">
-        <a class="btn btn-primary" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D8%AD%D9%88%D9%84%20%D8%AA%D8%B5%D9%85%D9%8A%D9%85%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">ناقش مشروعك</a>
-        <button class="menu-toggle" type="button" aria-label="فتح القائمة" id="menu-btn"><span></span><span></span><span></span></button>
+      <div class="nav-actions">
+        <a class="btn btn-primary header-cta" href="https://wa.me/966551341398?text=%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D8%AA%D8%B5%D9%85%D9%8A%D9%85%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">ناقش مشروعك</a>
       </div>
     </div>
   </header>
-  <nav class="mobile-nav" id="mobile-nav">
-    <a href="/#systems">المنظومات</a>
-    <a href="web-design.html">تصميم المواقع</a>
-    <a href="ai-agents.html">وكلاء AI</a>
-    <a href="social-automation.html">أتمتة السوشيال</a>
-    <a href="/#contact">تواصل</a>
-  </nav>
 
   <main>
-    <section class="page-hero">
-      <div class="container">
-        <span class="section-label">المنظومة 01</span>
-        <h1>تصميم مواقع بمستوى عالمي</h1>
-        <p>مواقع سريعة، واضحة، ومحوّلة — مصممة لتعكس هويتك وتُقنع الزائر خلال ثوانٍ، بأداء يناسب الجوال أولاً.</p>
-        <div class="hero-ctas" style="justify-content:center">
-          <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%84%D8%AA%D8%B5%D9%85%D9%8A%D9%85%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">اطلب عرض سعر مخصص</a>
-          <a class="btn btn-ghost btn-lg" href="https://wa.me/966551341398" target="_blank" rel="noopener">ناقش مشروعك معنا</a>
-        </div>
-      </div>
-    </section>
-
-    <div class="container">
-      <div class="mockup-frame" aria-hidden="true">
-        <div class="mockup-bar">
-          <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
-        </div>
-        <div class="mockup-screen">
-          <div style="text-align:center;padding:2rem">
-            <div style="width:48px;height:48px;margin:0 auto 1rem;border-radius:12px;background:linear-gradient(135deg,#0A5CFF,#00E5FF)"></div>
-            <strong style="color:#00E5FF;display:block;margin-bottom:0.35rem">معاينة حية خفيفة</strong>
-            <span>موك أب CSS فقط — بدون فيديو أو ملفات ثقيلة</span>
+    <!-- HERO -->
+    <section class="wd-hero">
+      <div class="container wd-hero-grid">
+        <div>
+          <span class="wd-kicker">WEB DESIGN · DEMO</span>
+          <h1>مواقع تُقنع<br><em>خلال ثوانٍ</em></h1>
+          <p class="wd-hero-lead">واجهات فاخرة ومسار تحويل واضح — نماذج توضيحية من تيقنورا تُظهر مستوى التنفيذ قبل أن نبني موقعك.</p>
+          <div class="wd-hero-ctas">
+            <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">اطلب عرض سعر</a>
+            <a class="btn btn-ghost btn-lg" href="#concepts">شاهد النماذج</a>
           </div>
         </div>
-      </div>
-    </div>
-
-    <section class="section">
-      <div class="container">
-        <div class="section-header">
-          <span class="section-label">قبل وبعد</span>
-          <h2>من موقع عادي إلى نظام تحويل</h2>
-        </div>
-        <div class="before-after">
-          <div class="ba-card">
-            <h3>قبل</h3>
-            <ul>
-              <li>صفحات بطيئة وصور غير محسّنة</li>
-              <li>رسالة غير واضحة في أول 5 ثوانٍ</li>
-              <li>مسار تحويل مشتت أو غير موجود</li>
-              <li>تصميم لا يعكس الثقة أو الهوية</li>
-            </ul>
+        <div class="stage" aria-hidden="true">
+          <div class="br">
+            <div class="br-bar"><span></span><span></span><span></span><div class="br-url"></div></div>
+            <div class="ui-saas">
+              <div class="m-nav"><strong>NOVA CLOUD</strong><div class="m-nav-links"><span>Product</span><span>Pricing</span><span>Docs</span></div></div>
+              <div class="m-hero">
+                <h4>Ship faster.<br>Scale safer.</h4>
+                <p>Infrastructure that stays out of your way.</p>
+                <span class="m-btn">Start free</span><span class="m-btn ghost">Docs</span>
+              </div>
+              <div class="m-row">
+                <div class="m-card"><div class="thumb"></div><div class="line"></div><div class="line s"></div></div>
+                <div class="m-card"><div class="thumb"></div><div class="line"></div><div class="line s"></div>
+                <div class="m-card"><div class="thumb"></div><div class="line"></div><div class="line s"></div>
+              </div>
+            </div>
           </div>
-          <div class="ba-card">
-            <h3>بعد تيقنورا</h3>
-            <ul>
-              <li>أداء عالي وهدف Lighthouse 95+</li>
-              <li>هيرو يوصل الفكرة فوراً</li>
-              <li>CTA واضحة: ناقش أو اطلب عرضاً</li>
-              <li>هوية سايبر فخمة ومتسقة</li>
-            </ul>
+          <div class="ph">
+            <div class="ph-notch"></div>
+            <div class="ph-body ui-saas">
+              <div class="p-ui">
+                <div class="p-brand">NOVA</div>
+                <div class="p-title">Ship faster</div>
+                <div class="p-sub">Deploy in minutes with clear dashboards.</div>
+                <div class="p-cta">Start free</div>
+                <div class="p-block"></div>
+                <div class="p-block"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section" style="background:var(--navy-900)">
+    <!-- CONCEPTS -->
+    <section class="wd-sec" id="concepts">
       <div class="container">
-        <div class="section-header">
-          <span class="section-label">نطاق الخدمة</span>
-          <h2>ماذا يشمل تصميم الموقع معنا؟</h2>
-          <p>وصف قصير بدون أرقام ثابتة — النطاق يُفصَّل بعد جلسة الاكتشاف.</p>
+        <div class="wd-head reveal">
+          <span class="badge">Concept · Demo only</span>
+          <h2>نماذج تصميم توضيحية</h2>
+          <p>واجهات أصلية من تيقنورا لإظهار مستوى التنفيذ. <strong>ليست أعمال عملاء ولا نتائج تجارية.</strong> مشروعك يُبنى على هويتك ونطاقك.</p>
         </div>
-        <div class="systems-grid">
-          <article class="system-card">
-            <h3>هيكلة وتجربة</h3>
-            <p>خريطة صفحات، تدفق زائر واضح، وهيرو يبيع الفكرة خلال ثوانٍ.</p>
-          </article>
-          <article class="system-card">
-            <h3>واجهة وعلامة</h3>
-            <p>تصميم RTL فاخر، تايبوغرافي قوي، ومساحات مريحة على كل الأجهزة.</p>
-          </article>
-          <article class="system-card">
-            <h3>أداء وSEO أساسي</h3>
-            <p>تحميل سريع، بيانات منظمة، وروابط جاهزة للظهور في البحث.</p>
-          </article>
+
+        <!-- LUXURY -->
+        <div class="shot reveal">
+          <div class="shot-frame lux">
+            <div class="br-bar"><span></span><span></span><span></span><div class="br-url"></div></div>
+            <div class="big-nav"><span class="logo">MAISON</span><div class="links"><span>Collection</span><span>Atelier</span><span>Contact</span></div></div>
+            <div class="big-hero">
+              <h3>Quiet luxury.<br>Defined lines.</h3>
+              <p>Seasonal pieces composed for presence, not noise.</p>
+              <span class="big-cta">Explore collection</span>
+            </div>
+            <div class="big-grid">
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Silk Edit</b><span>Evening · Limited</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Noir Line</b><span>Essentials</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Atelier</b><span>Bespoke</span></div></div>
+            </div>
+          </div>
+          <div class="shot-side">
+            <div class="shot-phone">
+              <div class="ph-notch"></div>
+              <div class="ph-body ui-lux">
+                <div class="p-ui">
+                  <div class="p-brand" style="color:#d4af37">MAISON</div>
+                  <div class="p-title">Quiet luxury</div>
+                  <div class="p-sub">Defined lines for the season.</div>
+                  <div class="p-cta" style="background:linear-gradient(135deg,#c9a227,#8a6a00);color:#1a1400">Collection</div>
+                  <div class="p-block" style="background:rgba(212,175,55,.12)"></div>
+                  <div class="p-block"></div>
+                </div>
+              </div>
+            </div>
+            <div class="shot-meta">
+              <span class="tag">DEMO · Concept</span>
+              <h3>Luxury / Boutique</h3>
+              <p>تباين هادئ، تايبوغرافي أنيق، ومساحات تتنفس — لهوية راقية.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- RESTAURANT -->
+        <div class="shot reverse reveal">
+          <div class="shot-frame rest">
+            <div class="br-bar"><span></span><span></span><span></span><div class="br-url"></div></div>
+            <div class="big-nav"><span class="logo">EMBER</span><div class="links"><span>Menu</span><span>Reserve</span><span>Story</span></div></div>
+            <div class="big-hero">
+              <h3>Fire, spice<br>& late nights.</h3>
+              <p>A dining room designed for long tables and longer evenings.</p>
+              <span class="big-cta">Reserve a table</span>
+            </div>
+            <div class="big-grid">
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Wood-fired</b><span>Mains</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Garden</b><span>Starters</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Cellar</b><span>Drinks</span></div></div>
+            </div>
+          </div>
+          <div class="shot-side">
+            <div class="shot-phone">
+              <div class="ph-notch"></div>
+              <div class="ph-body ui-rest">
+                <div class="p-ui">
+                  <div class="p-brand">EMBER</div>
+                  <div class="p-title">Reserve tonight</div>
+                  <div class="p-sub">Tables from 6 PM · Open kitchen</div>
+                  <div class="p-cta" style="background:#c45c26">Book table</div>
+                  <div class="p-block" style="background:rgba(196,92,38,.15)"></div>
+                  <div class="p-block"></div>
+                </div>
+              </div>
+            </div>
+            <div class="shot-meta">
+              <span class="tag">DEMO · Concept</span>
+              <h3>Restaurant / Hospitality</h3>
+              <p>دفء بصري، قائمة واضحة، وCTA حجز لا يضيع في الصفحة.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- SAAS -->
+        <div class="shot reveal">
+          <div class="shot-frame saas">
+            <div class="br-bar"><span></span><span></span><span></span><div class="br-url"></div></div>
+            <div class="big-nav"><span class="logo">NOVA CLOUD</span><div class="links"><span>Product</span><span>Pricing</span><span>Docs</span></div></div>
+            <div class="big-hero">
+              <h3>Ship faster.<br>Scale safer.</h3>
+              <p>Dashboards, alerts, and deploys in one calm workspace.</p>
+              <span class="big-cta">Start free</span>
+            </div>
+            <div class="big-grid">
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Deploy</b><span>CI · Edge</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Observe</b><span>Metrics</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Secure</b><span>Access</span></div></div>
+            </div>
+          </div>
+          <div class="shot-side">
+            <div class="shot-phone">
+              <div class="ph-notch"></div>
+              <div class="ph-body ui-saas">
+                <div class="p-ui">
+                  <div class="p-brand">NOVA</div>
+                  <div class="p-title">Status: Healthy</div>
+                  <div class="p-sub">12 services · 0 incidents</div>
+                  <div class="p-cta" style="background:linear-gradient(135deg,#00c6ff,#0A5CFF);color:#031018">Open app</div>
+                  <div class="p-block" style="background:rgba(0,198,255,.12)"></div>
+                  <div class="p-block"></div>
+                </div>
+              </div>
+            </div>
+            <div class="shot-meta">
+              <span class="tag">DEMO · Concept</span>
+              <h3>Technology / SaaS</h3>
+              <p>هيرو منتج، شبكة مزايا، ومسار تجربة واضح للتسجيل.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- CORPORATE -->
+        <div class="shot reverse reveal">
+          <div class="shot-frame corp">
+            <div class="br-bar"><span></span><span></span><span></span><div class="br-url"></div></div>
+            <div class="big-nav"><span class="logo">NORTHBRIDGE</span><div class="links"><span>Services</span><span>Industries</span><span>Contact</span></div></div>
+            <div class="big-hero">
+              <h3>Clarity for<br>complex decisions.</h3>
+              <p>Advisory and systems for teams that need a steady hand.</p>
+              <span class="big-cta">Talk to us</span>
+            </div>
+            <div class="big-grid">
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Strategy</b><span>Workshops</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Systems</b><span>Delivery</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Support</b><span>Retainers</span></div></div>
+            </div>
+          </div>
+          <div class="shot-side">
+            <div class="shot-phone">
+              <div class="ph-notch"></div>
+              <div class="ph-body ui-corp">
+                <div class="p-ui">
+                  <div class="p-brand">NORTHBRIDGE</div>
+                  <div class="p-title">Book a consult</div>
+                  <div class="p-sub">30 min · No commitment</div>
+                  <div class="p-cta">Schedule</div>
+                  <div class="p-block"></div>
+                  <div class="p-block"></div>
+                </div>
+              </div>
+            </div>
+            <div class="shot-meta">
+              <span class="tag">DEMO · Concept</span>
+              <h3>Corporate</h3>
+              <p>هيكل هادئ، خدمات مرتبة، ونقطة تواصل واحدة واضحة.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ECOMMERCE -->
+        <div class="shot reveal">
+          <div class="shot-frame ecom">
+            <div class="br-bar"><span></span><span></span><span></span><div class="br-url"></div></div>
+            <div class="big-nav"><span class="logo">PULSE STORE</span><div class="links"><span>Shop</span><span>New</span><span>Cart (0)</span></div></div>
+            <div class="big-hero">
+              <h3>Gear that<br>keeps up.</h3>
+              <p>Curated tech essentials with fast checkout on any device.</p>
+              <span class="big-cta">Shop now</span>
+            </div>
+            <div class="big-grid">
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Audio</b><span>From 199</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Wearables</b><span>From 249</span></div></div>
+              <div class="big-card"><div class="img"></div><div class="txt"><b>Accessories</b><span>From 49</span></div></div>
+            </div>
+          </div>
+          <div class="shot-side">
+            <div class="shot-phone">
+              <div class="ph-notch"></div>
+              <div class="ph-body ui-ecom">
+                <div class="p-ui">
+                  <div class="p-brand">PULSE</div>
+                  <div class="p-title">New drops</div>
+                  <div class="p-sub">Free shipping over 300</div>
+                  <div class="p-cta" style="background:linear-gradient(135deg,#9b5cff,#5b2db3)">Shop</div>
+                  <div class="p-block" style="background:rgba(155,92,255,.15)"></div>
+                  <div class="p-block"></div>
+                </div>
+              </div>
+            </div>
+            <div class="shot-meta">
+              <span class="tag">DEMO · Concept</span>
+              <h3>Ecommerce</h3>
+              <p>عرض منتجات، أسعار ظاهرة، ومسار شراء مختصر على الجوال.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- METHOD -->
+    <section class="wd-sec wd-sec-alt">
+      <div class="container">
+        <div class="wd-head reveal">
+          <span class="badge">Process</span>
+          <h2>من الفكرة إلى الإطلاق</h2>
+        </div>
+        <div class="process-steps">
+          <div class="step reveal"><div class="step-num">01</div><h3>اكتشاف</h3><p>نفهم النشاط والجمهور والهدف.</p></div>
+          <div class="step reveal"><div class="step-num">02</div><h3>تصميم</h3><p>اتجاه بصري وتجربة قبل البناء.</p></div>
+          <div class="step reveal"><div class="step-num">03</div><h3>بناء</h3><p>تنفيذ متجاوب جاهز للمحتوى.</p></div>
+          <div class="step reveal"><div class="step-num">04</div><h3>إطلاق</h3><p>نشر ومراجعة حسب النطاق.</p></div>
         </div>
       </div>
     </section>
 
     <div class="container" style="padding-bottom:4rem">
-      <div class="cta-banner">
-        <h2>جاهز لموقع يعمل بثقة؟</h2>
-        <p>ناقش مشروعك أو اطلب عرض سعر مخصص — بدون التزام مسبق.</p>
+      <div class="cta-banner reveal">
+        <h2>هل تريد موقعاً بهذا المستوى؟</h2>
+        <p>هذه نماذج توضيحية — موقعك يُصمَّم لهويتك. ناقش المشروع أو اطلب عرض سعر.</p>
         <div class="cta-actions">
-          <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D8%A3%D8%B1%D9%8A%D8%AF%20%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D8%AA%D8%B5%D9%85%D9%8A%D9%85%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">ناقش مشروعك معنا</a>
+          <a class="btn btn-primary btn-lg" href="https://wa.me/966551341398?text=%D9%85%D9%86%D8%A7%D9%82%D8%B4%D8%A9%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">ناقش مشروعك معنا</a>
           <a class="btn btn-ghost btn-lg" href="https://wa.me/966551341398?text=%D8%B9%D8%B1%D8%B6%20%D8%B3%D8%B9%D8%B1%20%D9%85%D9%88%D9%82%D8%B9" target="_blank" rel="noopener">اطلب عرض سعر مخصص</a>
         </div>
       </div>
@@ -135,17 +606,21 @@
 
   <footer class="site-footer">
     <div class="container">
-      <div class="footer-bottom" style="border:0;padding-top:0">
-        <span>© <span id="year"></span> Tiqnora AI</span>
-        <a href="/">العودة للرئيسية</a>
+      <div class="footer-bottom" style="border:0;padding-top:1.5rem">
+        <span>© <span class="y"></span> Tiqnora AI</span>
+        <span>المدينة المنورة، المملكة العربية السعودية</span>
+        <a href="../">العودة للرئيسية</a>
       </div>
     </div>
   </footer>
   <script>
-    document.getElementById('year').textContent = new Date().getFullYear();
-    const btn = document.getElementById('menu-btn');
-    const nav = document.getElementById('mobile-nav');
-    if (btn) btn.addEventListener('click', () => nav.classList.toggle('open'));
+    document.querySelectorAll('.y').forEach(el => el.textContent = new Date().getFullYear());
+    const btn = document.getElementById('menu-btn'), nav = document.getElementById('site-nav');
+    btn?.addEventListener('click', () => nav.classList.toggle('open'));
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold: 0.08 });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
   </script>
 </body>
 </html>

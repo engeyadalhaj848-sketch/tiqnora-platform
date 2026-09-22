@@ -56,7 +56,7 @@
   }
   function renderShell() {
     app.className = 'app-shell';
-    app.innerHTML = `<header class="topbar"><div class="brand"><img src="../../assets/tiqnora-logo.png" alt="Tiqnora AI"><div><strong>Tiqnora AI Workforce</strong><small>INTERNAL OPERATIONS</small></div></div><div class="top-actions"><span class="user-chip">${esc(me.full_name || me.email)}</span><a class="btn btn-sm" href="/admin.html"><span class="back-label">لوحة الإدارة</span> ←</a><button class="btn btn-sm" id="logout">خروج</button></div></header>
+    app.innerHTML = `<header class="topbar"><div class="brand"><img src="/assets/tiqnora-logo.png" alt="Tiqnora AI"><div><strong>Tiqnora AI Workforce</strong><small>INTERNAL OPERATIONS</small></div></div><div class="top-actions"><span class="user-chip">${esc(me.full_name || me.email)}</span><a class="btn btn-sm" href="/admin.html"><span class="back-label">لوحة الإدارة</span> ←</a><button class="btn btn-sm" id="logout">خروج</button></div></header>
     <main class="main"><section class="hero"><div><span class="eyebrow">فريقك التنفيذي الذكي</span><h1>إدارة Tiqnora بقدرات AI متخصصة</h1><p>وجّه الموظفين، تابع المهام، واحتفظ بمعرفة الشركة داخل مساحة إدارية آمنة وقابلة للتوسع.</p></div><span class="secure-badge">● مساحة إدارية محمية</span></section>
     <nav class="tabs" aria-label="أقسام فريق العمل"><button class="tab active" data-view="overview">نظرة عامة</button><button class="tab" data-view="chat">المحادثات</button><button class="tab" data-view="tasks">المهام</button><button class="tab" data-view="memory">الذاكرة</button></nav><section class="view" id="view"></section></main>
     <dialog class="dialog" id="dialog"><div class="dialog-body" id="dialog-body"></div></dialog>`;
@@ -77,7 +77,10 @@
   }
   function agentCard(a) {
     const meta = labels[a.slug] || [a.department, 'AI', '#6de8dc'], count = state.counts[a.id] || { tasks:0, memory:0 };
-    return `<article class="agent-card" style="--glow:${meta[2]}"><div class="agent-head"><div class="agent-identity"><span class="agent-avatar">${meta[1]}</span><div><h2>${esc(a.name_ar || a.name)}</h2><span class="dept">${esc(meta[0])}</span></div></div><span class="status">${a.status === 'active' && a.is_enabled ? 'نشط' : 'متوقف'}</span></div><p class="agent-desc">${esc(a.description_ar || a.description)}</p><div class="agent-metrics"><div class="metric"><strong>${count.tasks}</strong><span>مهام مفتوحة</span></div><div class="metric"><strong>${count.memory}</strong><span>عناصر ذاكرة</span></div><div class="metric"><strong>${esc(a.provider)}</strong><span>المزود</span></div></div><div class="agent-actions"><button class="btn btn-primary" data-chat="${a.id}">بدء محادثة</button><button class="btn" data-task-agent="${a.id}">إضافة مهمة</button></div></article>`;
+    const isOn = a.status === 'active' && a.is_enabled;
+    const statusLabel = isOn ? 'نشط' : (a.is_enabled === false ? 'معطّل' : 'متوقف');
+    const statusStyle = isOn ? '' : 'style="color:var(--muted);border-color:var(--line);background:transparent"';
+    return `<article class="agent-card" style="--glow:${meta[2]}"><div class="agent-head"><div class="agent-identity"><span class="agent-avatar">${meta[1]}</span><div><h2>${esc(a.name_ar || a.name)}</h2><span class="dept">${esc(meta[0])}</span></div></div><span class="status" ${statusStyle}>${statusLabel}</span></div><p class="agent-desc">${esc(a.description_ar || a.description)}</p><div class="agent-metrics"><div class="metric"><strong>${count.tasks}</strong><span>مهام مفتوحة</span></div><div class="metric"><strong>${count.memory}</strong><span>عناصر ذاكرة</span></div><div class="metric"><strong>${esc(a.provider || '—')}</strong><span>المزود</span></div></div><div class="agent-actions"><button class="btn btn-primary" data-chat="${a.id}">بدء محادثة</button><button class="btn" data-task-agent="${a.id}">إضافة مهمة</button></div></article>`;
   }
   function pickerHtml() { return agents.map(a => `<button class="picker-item ${a.id === selectedAgent?.id ? 'active' : ''}" data-pick="${a.id}">${esc(a.name_ar || a.name)}<small>${esc(labels[a.slug]?.[0] || a.department)}</small></button>`).join(''); }
   function renderChat() {

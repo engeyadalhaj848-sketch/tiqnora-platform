@@ -53,7 +53,7 @@
 
   function loadSupabaseClient(index = 0) {
     const sources = [
-      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd.min.js',
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
       'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js'
     ];
     if (window.supabase?.createClient) {
