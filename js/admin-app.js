@@ -1963,7 +1963,7 @@ VIEWS.commerce = async v => {
     else { toast('تم إعداد طلب المورد (draft/ready) — بدون إرسال تلقائي'); VIEWS.commerce(v); }
   });
 
-  $('[data-submit-ae]').forEach(b=>b.onclick=async()=>{
+  $$('[data-submit-ae]').forEach(b=>b.onclick=async()=>{
     if (!confirm('إنشاء طلب فعلي لدى AliExpress الآن؟ سيتم إنشاء طلب المورد فقط بعد اعتمادك، ولن يتم الدفع تلقائياً.')) return;
     const { data: { session } } = await db.auth.getSession();
     if (!session?.access_token) return toast('انتهت جلسة الأدمن — سجّل الدخول من جديد', false);
