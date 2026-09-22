@@ -121,7 +121,7 @@ const NAV = [
   { group: 'عام' },
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
   { id: 'analytics', ic: '▦', label: 'التحليلات' },
-  { id: 'growth', ic: '↗', label: 'النمو والسوق' },
+  { id: 'growth', ic: '↗', label: 'Growth · Prospects' },
   { id: 'blog', ic: '✎', label: 'المدونة SEO' },
   { id: 'notifications', ic: '◉', label: 'الإشعارات' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
@@ -2546,13 +2546,123 @@ VIEWS.notifications = async v => {
 
 
 VIEWS.growth = async v => {
-  v.innerHTML = `<div class="card"><h2>معمارية النمو (Phase 4)</h2>
+  v.innerHTML = `
+    <div class="card"><div class="card-head"><h2 style="margin:0">Growth · Prospects</h2>
+      <span class="card-desc" style="margin:0">اكتشاف فرص محلية — بدون إرسال تلقائي</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0">
+        <select id="pf-priority"><option value="">كل الأولويات</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select>
+        <select id="pf-status"><option value="">كل الحالات</option>
+          <option>new</option><option>audited</option><option>qualified</option><option>contact_ready</option>
+          <option>contacted</option><option>replied</option><option>won</option><option>lost</option><option>skip</option>
+        </select>
+        <input id="pf-city" placeholder="المدينة" style="max-width:140px" />
+        <input id="pf-cat" placeholder="التصنيف" style="max-width:140px" />
+        <select id="pf-web"><option value="">الموقع؟</option><option value="1">يوجد موقع</option><option value="0">بدون موقع</option></select>
+        <button class="btn-sm" id="pf-reload">تحديث</button>
+      </div>
+      <div id="g-prospects"><p style="color:var(--muted)">جارٍ التحميل…</p></div>
+    </div>
+    <div class="card"><h2>مسودات التواصل (Outreach)</h2>
+      <p class="card-desc">status=draft حتى يوافق Admin. لا يوجد إرسال مباشر من هنا.</p>
+      <div id="g-outreach"></div>
+    </div>
+    <div class="card"><h2>معمارية النمو (Commerce Phase 4)</h2>
     <p class="card-desc">Marketplace + Dropshipping research — بدون شراء تلقائي أو دفع حي.</p>
     <div id="g-stats"></div></div>
     <div class="card"><h2>موردو الدروبشيبينغ</h2><div id="g-sup"></div></div>
     <div class="card"><h2>بحث منتجات (Dropship Research)</h2><div id="g-res"></div></div>
     <div class="card"><h2>Marketplace Listings</h2><div id="g-list"></div></div>
     <div class="card"><h2>Demo Workflows</h2><div id="g-demo"></div></div>`;
+
+  const loadProspects = async () => {
+    const box = $('#g-prospects');
+    const out = $('#g-outreach');
+    if (!box) return;
+    try {
+      let q = db.from('prospects').select('*').order('opportunity_score', { ascending: false }).limit(100);
+      const pr = $('#pf-priority')?.value; if (pr) q = q.eq('priority', pr);
+      const st = $('#pf-status')?.value; if (st) q = q.eq('status', st);
+      const city = $('#pf-city')?.value?.trim(); if (city) q = q.ilike('city', `%${city}%`);
+      const cat = $('#pf-cat')?.value?.trim(); if (cat) q = q.ilike('category', `%${cat}%`);
+      const web = $('#pf-web')?.value; if (web === '1') q = q.eq('website_exists', true); if (web === '0') q = q.eq('website_exists', false);
+      const { data, error } = await q;
+      if (error) {
+        box.innerHTML = `<p style="color:var(--warn)">جدول prospects غير متاح بعد. شغّل migration 044. (${esc(error.message)})</p>`;
+      } else if (!(data||[]).length) {
+        box.innerHTML = '<p style="color:var(--muted)">لا Prospects بعد. أضف عبر الاستيراد/التدقيق لاحقاً.</p>';
+      } else {
+        box.innerHTML = tbl(
+          ['الشركة','التصنيف','المدينة','الموقع','النقاط','الأولوية','الحالة','فرص ناقصة','مصدر','إجراء'],
+          data.map(r => `<tr>
+            <td><b>${esc(r.business_name)}</b>${r.phone?`<br><small dir="ltr">${esc(r.phone)}</small>`:''}</td>
+            <td>${esc(r.category||'—')}</td>
+            <td>${esc(r.city||'—')}</td>
+            <td>${r.website?`<a href="${esc(r.website)}" target="_blank" rel="noopener" dir="ltr">رابط</a>`:'—'}</td>
+            <td>${r.opportunity_score??0}</td>
+            <td><span class="badge">${esc(r.priority)}</span></td>
+            <td>${esc(r.status)}</td>
+            <td style="max-width:180px;font-size:.8rem">${esc((r.missing_opportunities||[]).join(' · ')||r.audit_summary||'—')}</td>
+            <td>${esc(r.source||'—')}</td>
+            <td style="white-space:nowrap">
+              <button class="btn-sm" data-p-status="${r.id}" data-to="audited">Audit</button>
+              <button class="btn-sm" data-p-draft="${r.id}">مسودة تواصل</button>
+              <button class="btn-sm" data-p-status="${r.id}" data-to="contact_ready">Approve</button>
+              <button class="btn-sm" data-p-status="${r.id}" data-to="skip">Skip</button>
+              <button class="btn-sm" data-p-status="${r.id}" data-to="contacted">Contacted</button>
+            </td>
+          </tr>`).join('')
+        );
+        $$('[data-p-status]').forEach(b => b.onclick = async () => {
+          const { error } = await db.from('prospects').update({ status: b.dataset.to, updated_at: new Date().toISOString() }).eq('id', b.dataset.pStatus);
+          if (error) toast(error.message); else { toast('تم تحديث الحالة'); loadProspects(); }
+        });
+        $$('[data-p-draft]').forEach(b => b.onclick = async () => {
+          const row = data.find(x => x.id === b.dataset.pDraft);
+          if (!row) return;
+          const gaps = (row.missing_opportunities||[]).join('، ') || row.audit_summary || 'تحسين الحضور الرقمي';
+          const msg = `مرحباً ${row.business_name}،
+لاحظنا فرصة لتحسين (${gaps}). نساعد المنشآت في المدينة المنورة على ترتيب الموقع/التواصل الرقمي حسب الاحتياج الفعلي.
+إن رغبت بنقاش مختصر دون التزام: واتساب تيقنورا.
+— فريق تيقنورا`;
+          const { error } = await db.from('outreach_drafts').insert({
+            prospect_id: row.id,
+            channel: 'whatsapp',
+            subject: `تواصل بخصوص ${row.business_name}`,
+            message: msg,
+            status: 'draft'
+          });
+          if (error) toast(error.message||'تعذر إنشاء المسودة'); else { toast('مسودة تواصل (draft) — بانتظار موافقة'); loadProspects(); }
+        });
+      }
+      const { data: drafts } = await db.from('outreach_drafts').select('*,prospects(business_name)').order('created_at',{ascending:false}).limit(40);
+      if (out) {
+        if (!drafts || !drafts.length) out.innerHTML = '<p style="color:var(--muted)">لا مسودات بعد</p>';
+        else out.innerHTML = tbl(['الشركة','القناة','الحالة','رسالة','إجراء'], drafts.map(d => `<tr>
+          <td>${esc(d.prospects?.business_name||d.prospect_id)}</td>
+          <td>${esc(d.channel)}</td>
+          <td>${esc(d.status)}</td>
+          <td style="max-width:280px;font-size:.85rem;white-space:pre-wrap">${esc((d.message||'').slice(0,220))}</td>
+          <td>${d.status==='draft'?`<button class="btn-sm btn-primary" data-approve-draft="${d.id}">اعتماد</button> <button class="btn-sm" data-skip-draft="${d.id}">تخطي</button>`:'—'}</td>
+        </tr>`).join(''));
+        $$('[data-approve-draft]').forEach(b => b.onclick = async () => {
+          const { data: me } = await db.auth.getUser();
+          const { error } = await db.from('outreach_drafts').update({
+            status: 'approved', approved_at: new Date().toISOString(), approved_by: me?.user?.id || null
+          }).eq('id', b.dataset.approveDraft);
+          if (error) toast(error.message); else { toast('تم الاعتماد — الإرسال اليدوي لاحقاً'); loadProspects(); }
+        });
+        $$('[data-skip-draft]').forEach(b => b.onclick = async () => {
+          await db.from('outreach_drafts').update({ status: 'skipped' }).eq('id', b.dataset.skipDraft);
+          loadProspects();
+        });
+      }
+    } catch (e) {
+      box.innerHTML = `<p style="color:var(--danger)">${esc(e.message)}</p>`;
+    }
+  };
+  $('#pf-reload')?.addEventListener('click', loadProspects);
+  loadProspects();
+
   const safe = async (fn) => { try { return await fn(); } catch (e) { return { data: null, error: e }; } };
   const sup = await safe(() => db.from('commerce_suppliers').select('*').order('provider'));
   const res = await safe(() => db.from('dropship_research').select('*').order('created_at',{ascending:false}).limit(30));
