@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 
 const providers = {
-  meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_manage_engagement,pages_manage_posts,pages_messaging,instagram_basic,instagram_manage_comments,instagram_manage_messages,business_management' },
+  meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_comments' },
   whatsapp: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,whatsapp_business_management,whatsapp_business_messaging' },
   tiktok: { auth: 'https://www.tiktok.com/v2/auth/authorize/', token: 'https://open.tiktokapis.com/v2/oauth/token/', scopes: 'user.info.basic,video.upload,video.publish' },
   linkedin: { auth: 'https://www.linkedin.com/oauth/v2/authorization', token: 'https://www.linkedin.com/oauth/v2/accessToken', scopes: 'openid profile w_member_social r_organization_social w_organization_social' }
@@ -719,7 +719,17 @@ export default async function handler(req, res) {
     const url = new URL(cfg.auth);
     // TikTok's OAuth authorize endpoint requires client_key; other providers use client_id.
     url.searchParams.set(provider === 'tiktok' ? 'client_key' : 'client_id', clientId);
-    url.searchParams.set('redirect_uri', redirect); url.searchParams.set('response_type', 'code'); url.searchParams.set('scope', scopes); url.searchParams.set('state', state);
+    url.searchParams.set('redirect_uri', redirect);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('state', state);
+    // Facebook Login for Business: use config_id (permissions live in Meta dashboard config).
+    // Do NOT send scope when config_id is present — avoids Invalid Scopes errors.
+    const metaConfigId = String(process.env.META_LOGIN_CONFIG_ID || '').trim();
+    if (provider === 'meta' && metaConfigId) {
+      url.searchParams.set('config_id', metaConfigId);
+    } else {
+      url.searchParams.set('scope', scopes);
+    }
     return res.redirect(url.toString());
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
