@@ -73,8 +73,13 @@
     const note = document.createElement('p');
     note.className = 'card-desc';
     note.style.marginTop = '12px';
-    note.textContent = 'إذا ظهر خطأ إعداد، أضف بيانات التطبيق المطلوبة في Vercel Environment Variables ثم أعد المحاولة.';
+    note.textContent = 'إذا ظهر خطأ إعداد، أضف META_APP_ID / META_APP_SECRET / META_REDIRECT_URI / SOCIAL_TOKEN_ENCRYPTION_KEY في Vercel ثم أعد المحاولة. بعد الربط يجب أن يظهر Facebook Page و Instagram في جدول الاتصالات.';
     card.appendChild(note);
+    const webhookNote = document.createElement('p');
+    webhookNote.className = 'card-desc';
+    webhookNote.style.marginTop = '6px';
+    webhookNote.textContent = 'Webhook Meta: ' + location.origin + '/api/webhooks/meta  (أو /api/social/webhook?platform=meta)';
+    card.appendChild(webhookNote);
   }
 
   function addTikTokUploadCard(view, db) {
@@ -811,7 +816,7 @@
 
     const eventsCard = addCard(root, 'فلترة الأحداث بالتاريخ', 'الفلاتر الأساسية للمنصة والحالة والنية موجودة أعلى الصفحة.');
     const dateInput = document.createElement('input'); dateInput.type = 'date'; dateInput.id = 'social-date-filter'; eventsCard.appendChild(dateInput);
-    const eventsTable = makeTable(['المنصة', 'العميل', 'المحتوى', 'النية', 'الحالة', 'وقت الاستلام']);
+    const eventsTable = makeTable(['المنصة', 'العميل', 'المحتوى', 'النية', 'الحالة', 'وقت الاستلام', 'إجراء']);
     eventsCard.appendChild(eventsTable.wrap);
 
     async function refresh() {
@@ -872,6 +877,45 @@
           const row = document.createElement('tr');
           addCell(row, item.platform); addCell(row, item.author_name); addCell(row, item.content); addCell(row, item.intent, 'ltr');
           addCell(row, labels[item.processing_status] || item.processing_status); addCell(row, dateText(item.received_at));
+          const actionCell = document.createElement('td');
+          const canReply = ['facebook', 'instagram', 'whatsapp'].includes(String(item.platform || ''))
+            && !String(item.event_type || '').includes('sent')
+            && !String(item.event_type || '').includes('replied')
+            && !String(item.event_type || '').includes('echo');
+          if (canReply) {
+            const replyBtn = document.createElement('button');
+            replyBtn.className = 'btn-sm';
+            replyBtn.type = 'button';
+            replyBtn.textContent = 'رد';
+            replyBtn.onclick = async () => {
+              const text = window.prompt('اكتب الرد الذي سيُرسل عبر ' + item.platform + ':', '');
+              if (!text || !String(text).trim()) return;
+              replyBtn.disabled = true;
+              replyBtn.textContent = 'جارٍ…';
+              try {
+                const session = await window.TiqnoraDB?.client?.auth?.getSession?.();
+                const token = session?.data?.session?.access_token;
+                if (!token) throw new Error('يجب تسجيل الدخول كمسؤول');
+                const r = await fetch('/api/social/reply', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                  body: JSON.stringify({ event_id: item.id, message: String(text).trim() })
+                });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(j.error || j.code || ('HTTP ' + r.status));
+                replyBtn.textContent = 'تم';
+                await refresh();
+              } catch (e) {
+                alert('فشل الرد: ' + (e.message || e));
+                replyBtn.disabled = false;
+                replyBtn.textContent = 'رد';
+              }
+            };
+            actionCell.appendChild(replyBtn);
+          } else {
+            actionCell.textContent = '—';
+          }
+          row.appendChild(actionCell);
           eventsTable.body.appendChild(row);
         });
       };

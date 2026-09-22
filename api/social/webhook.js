@@ -262,7 +262,18 @@ function normalizeWhatsApp(payload) {
         const authorId = String(message?.from || '');
         const contact = contacts.get(authorId) || {};
         const type = String(message?.type || 'text');
-        const text = message?.text?.body || message?.button?.text || message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title || `[${type}]`;
+        let text = message?.text?.body
+          || message?.button?.text
+          || message?.interactive?.button_reply?.title
+          || message?.interactive?.list_reply?.title
+          || null;
+        if (!text && type === 'image') text = message?.image?.caption || '[image]';
+        if (!text && type === 'video') text = message?.video?.caption || '[video]';
+        if (!text && type === 'document') text = message?.document?.filename || message?.document?.caption || '[document]';
+        if (!text && type === 'audio') text = '[audio]';
+        if (!text && type === 'location') text = message?.location ? `[location ${message.location.latitude},${message.location.longitude}]` : '[location]';
+        if (!text && type === 'contacts') text = '[contacts]';
+        if (!text) text = `[${type}]`;
         if (!message?.id) continue;
         events.push({
           platform: 'whatsapp',
@@ -278,6 +289,26 @@ function normalizeWhatsApp(payload) {
           detected_intent: null,
           detected_intent_confidence: null,
           raw_payload: { adapter: 'whatsapp_cloud', entry_id: entry?.id, field: change?.field, value: { metadata, message, contact } }
+        });
+      }
+
+      for (const status of value?.statuses || []) {
+        if (!status?.id) continue;
+        const st = String(status.status || 'unknown').toLowerCase();
+        events.push({
+          platform: 'whatsapp',
+          event_type: `message.status.${st}`,
+          external_event_id: `status-${status.id}-${st}-${status.timestamp || ''}`,
+          external_parent_id: String(status.id),
+          author_external_id: status?.recipient_id ? String(status.recipient_id) : null,
+          author_name: null,
+          content: st,
+          permalink: null,
+          occurred_at: toIso(status?.timestamp),
+          account_external_id: String(metadata?.phone_number_id || ''),
+          detected_intent: null,
+          detected_intent_confidence: null,
+          raw_payload: { adapter: 'whatsapp_cloud', kind: 'status', entry_id: entry?.id, status }
         });
       }
     }

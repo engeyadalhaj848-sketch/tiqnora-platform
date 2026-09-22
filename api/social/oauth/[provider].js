@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 
 const providers = {
-  meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_manage_comments,instagram_manage_messages,pages_messaging' },
+  meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_manage_engagement,pages_manage_posts,pages_messaging,instagram_basic,instagram_manage_comments,instagram_manage_messages,business_management' },
   whatsapp: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,whatsapp_business_management,whatsapp_business_messaging' },
   tiktok: { auth: 'https://www.tiktok.com/v2/auth/authorize/', token: 'https://open.tiktokapis.com/v2/oauth/token/', scopes: 'user.info.basic,video.upload,video.publish' },
   linkedin: { auth: 'https://www.linkedin.com/oauth/v2/authorization', token: 'https://www.linkedin.com/oauth/v2/accessToken', scopes: 'openid profile w_member_social r_organization_social w_organization_social' }
@@ -79,6 +79,80 @@ async function graphPost(path, accessToken, payload = {}) {
   const body = await r.json().catch(() => ({}));
   if (!r.ok || body?.error) throw new Error(body?.error?.message || `Meta Graph API failed (${r.status})`);
   return body;
+}
+
+
+async function exchangeLongLivedUserToken(shortToken) {
+  const clientId = process.env.META_APP_ID;
+  const clientSecret = process.env.META_APP_SECRET;
+  if (!clientId || !clientSecret || !shortToken) return { accessToken: shortToken, expiresIn: null };
+  const url = new URL('https://graph.facebook.com/v22.0/oauth/access_token');
+  url.searchParams.set('grant_type', 'fb_exchange_token');
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('client_secret', clientSecret);
+  url.searchParams.set('fb_exchange_token', shortToken);
+  const r = await fetch(url.toString(), { headers: { 'Cache-Control': 'no-cache' } });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || body?.error || !body.access_token) {
+    console.warn('Meta long-lived token exchange failed', { code: body?.error?.code, message: body?.error?.message });
+    return { accessToken: shortToken, expiresIn: null };
+  }
+  return { accessToken: body.access_token, expiresIn: body.expires_in ? Number(body.expires_in) : null };
+}
+
+async function discoverMetaAccounts(accessToken) {
+  const discovered = [];
+  let pages;
+  try {
+    pages = await graphGet('me/accounts?fields=id,name,access_token,tasks,instagram_business_account{id,username,name,profile_picture_url}&limit=100', accessToken);
+  } catch (e) {
+    console.warn('Meta me/accounts failed', { message: e.message });
+    pages = { data: [] };
+  }
+
+  for (const page of pages?.data || []) {
+    if (!page?.id || !page?.access_token) continue;
+    let subscribed = false;
+    try {
+      const sub = await graphPost(`${page.id}/subscribed_apps`, page.access_token, {
+        subscribed_fields: 'messages,messaging_postbacks,messaging_optins,message_deliveries,message_reads,message_echoes,feed,mention,name,picture'
+      });
+      subscribed = sub?.success === true;
+    } catch (e) {
+      console.warn('Meta page subscribe failed', { page_id: page.id, message: e.message });
+      subscribed = false;
+    }
+
+    const ig = page.instagram_business_account || null;
+    discovered.push({
+      platform: 'facebook',
+      external_account_id: String(page.id),
+      account_name: page.name || `Facebook Page ${page.id}`,
+      page_access_token: page.access_token,
+      tasks: page.tasks || [],
+      webhook_subscribed: subscribed,
+      instagram_business_account_id: ig?.id ? String(ig.id) : null,
+      instagram_username: ig?.username || null,
+      instagram_name: ig?.name || null,
+      instagram_profile_picture_url: ig?.profile_picture_url || null
+    });
+
+    if (ig?.id) {
+      // Instagram messaging/comments ride on the Page access token when linked.
+      discovered.push({
+        platform: 'instagram',
+        external_account_id: String(ig.id),
+        account_name: ig.username ? `@${ig.username}` : (ig.name || `Instagram ${ig.id}`),
+        page_id: String(page.id),
+        page_name: page.name || null,
+        page_access_token: page.access_token,
+        webhook_subscribed: subscribed,
+        username: ig.username || null,
+        profile_picture_url: ig.profile_picture_url || null
+      });
+    }
+  }
+  return discovered;
 }
 
 async function discoverWhatsAppAccounts(accessToken) {
@@ -482,7 +556,7 @@ export default async function handler(req, res) {
     if (missing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing });
     const body = provider === 'tiktok' ? new URLSearchParams({ client_key: clientId, client_secret: clientSecret, code: req.query.code, grant_type: 'authorization_code', redirect_uri: redirect }) : new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code: req.query.code, redirect_uri: redirect, grant_type: 'authorization_code' });
     const tokenRes = await fetch(cfg.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }); const token = await tokenRes.json(); if (!tokenRes.ok || !(token.access_token || token.data?.access_token)) throw new Error(token.error_description || token.error?.message || 'Token exchange failed');
-    const access = token.access_token || token.data.access_token;
+    let access = token.access_token || token.data.access_token;
     const encrypted = encrypt(access);
     const refreshToken = token.refresh_token || token.data?.refresh_token || null;
     const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
@@ -503,7 +577,65 @@ export default async function handler(req, res) {
     await supa('social_provider_tokens?on_conflict=organization_id,provider', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(tokenRow) });
 
     let accountMetadata = null;
-    if (provider === 'tiktok') {
+    if (provider === 'meta') {
+      const exchanged = await exchangeLongLivedUserToken(access);
+      if (exchanged.accessToken && exchanged.accessToken !== access) {
+        const longEncrypted = encrypt(exchanged.accessToken);
+        const patch = {
+          ciphertext: longEncrypted.ciphertext,
+          iv: longEncrypted.iv,
+          tag: longEncrypted.tag,
+          expires_at: exchanged.expiresIn ? new Date(Date.now() + exchanged.expiresIn * 1000).toISOString() : null,
+          updated_at: new Date().toISOString()
+        };
+        await supa(`social_provider_tokens?organization_id=eq.${encodeURIComponent(org)}&provider=eq.meta`, {
+          method: 'PATCH',
+          body: JSON.stringify(patch)
+        });
+        access = exchanged.accessToken;
+      }
+
+      const accounts = await discoverMetaAccounts(access);
+      for (const account of accounts) {
+        const { page_access_token, platform, external_account_id, account_name, ...settingsRest } = account;
+        // Store page token encrypted inside settings so outbound replies work without exposing secrets to the browser.
+        let tokenVault = null;
+        if (page_access_token) {
+          try { tokenVault = encrypt(page_access_token); } catch (_) { tokenVault = null; }
+        }
+        await supa('social_connections?on_conflict=organization_id,platform,external_account_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({
+            organization_id: org,
+            platform,
+            external_account_id,
+            account_name,
+            status: 'active',
+            capabilities: {
+              inbox: true,
+              messaging: platform === 'facebook' || platform === 'instagram',
+              comments: true,
+              webhooks: Boolean(account.webhook_subscribed)
+            },
+            settings: {
+              ...settingsRest,
+              page_access_token_enc: tokenVault || null,
+              token_present: Boolean(tokenVault)
+            },
+            connected_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        });
+      }
+      accountMetadata = {
+        pages_found: accounts.filter(a => a.platform === 'facebook').length,
+        instagram_found: accounts.filter(a => a.platform === 'instagram').length,
+        page_ids: accounts.filter(a => a.platform === 'facebook').map(a => a.external_account_id),
+        instagram_ids: accounts.filter(a => a.platform === 'instagram').map(a => a.external_account_id),
+        webhook_subscribed: accounts.some(a => a.webhook_subscribed)
+      };
+    } else if (provider === 'tiktok') {
       const user = await fetchTikTokUser(access);
       if (user?.open_id) {
         accountMetadata = { open_id: user.open_id, union_id: user.union_id || null, display_name: user.display_name || null, avatar_url: user.avatar_url || null };
