@@ -1,7 +1,8 @@
 import { runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import {
   handleTelegramUpdate,
-  isTelegramConfigured,
+  telegramConfigurationStatus,
+  telegramTargetChatId,
   verifyTelegramWebhook
 } from '../../lib/telegram-command-center.js';
 
@@ -30,8 +31,8 @@ async function query(table, params) {
 
 async function telegram(text) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) throw new Error('Telegram variables are not configured');
+  const chatId = await telegramTargetChatId();
+  if (!token || !chatId) throw new Error('Telegram bot is not paired yet');
   const r = await fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -42,7 +43,8 @@ async function telegram(text) {
 }
 
 async function telegramIfConfigured(text) {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) return false;
+  const status = await telegramConfigurationStatus();
+  if (!status.configured) return false;
   await telegram(text);
   return true;
 }
@@ -172,11 +174,18 @@ export default async function handler(req, res) {
   const route = String(req.query?.route || '');
 
   if (route === 'telegram_health') {
+    const status = await telegramConfigurationStatus().catch(() => ({
+      configured: false,
+      bot_token_configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+      chat_id_configured: false,
+      paired_in_database: false
+    }));
     return json(res, 200, {
       ok: true,
-      telegram_configured: isTelegramConfigured(),
-      bot_token_configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
-      chat_id_configured: Boolean(process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_ALLOWED_CHAT_IDS),
+      telegram_configured: status.configured,
+      bot_token_configured: status.bot_token_configured,
+      chat_id_configured: status.chat_id_configured,
+      paired_in_database: status.paired_in_database,
       webhook_url: 'https://tiqnora.com/api/telegram/webhook'
     });
   }
