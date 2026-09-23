@@ -879,9 +879,7 @@
           addCell(row, labels[item.processing_status] || item.processing_status); addCell(row, dateText(item.received_at));
           const actionCell = document.createElement('td');
           const canReply = ['facebook', 'instagram', 'whatsapp'].includes(String(item.platform || ''))
-            && !String(item.event_type || '').includes('sent')
-            && !String(item.event_type || '').includes('replied')
-            && !String(item.event_type || '').includes('echo');
+            && ['comment.created', 'message.received'].includes(String(item.event_type || ''));
           if (canReply) {
             const replyBtn = document.createElement('button');
             replyBtn.className = 'btn-sm';
