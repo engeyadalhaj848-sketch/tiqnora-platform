@@ -68,7 +68,7 @@ async function configureTelegramCommandCenter() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: 'https://tiqnora.com/api/telegram/webhook',
+          url: 'https://www.tiqnora.com/api/telegram/webhook',
           secret_token: secret,
           allowed_updates: ['message', 'edited_message'],
           drop_pending_updates: false
@@ -100,7 +100,7 @@ async function configureTelegramCommandCenter() {
     if (!webhookResponse.ok || webhook?.ok === false) {
       console.warn('Telegram setWebhook failed:', webhook?.description || webhookResponse.status);
     } else {
-      console.log('Telegram webhook configured → https://tiqnora.com/api/telegram/webhook');
+      console.log('Telegram webhook configured → https://www.tiqnora.com/api/telegram/webhook');
     }
     if (!commandsResponse.ok || commands?.ok === false) {
       console.warn('Telegram setMyCommands failed:', commands?.description || commandsResponse.status);
