@@ -53,13 +53,9 @@ async function configureTelegramCommandCenter() {
   if (process.env.VERCEL_ENV !== 'production') return;
 
   const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
-  const authorizedChats = [
-    String(process.env.TELEGRAM_CHAT_ID || '').trim(),
-    ...String(process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(x => x.trim())
-  ].filter(Boolean);
 
-  if (!token || !authorizedChats.length) {
-    console.log('Telegram Command Center setup skipped: TELEGRAM_BOT_TOKEN / authorized chat is not configured.');
+  if (!token) {
+    console.log('Telegram Command Center setup skipped: TELEGRAM_BOT_TOKEN is not configured.');
     return;
   }
 
@@ -84,6 +80,7 @@ async function configureTelegramCommandCenter() {
         body: JSON.stringify({
           commands: [
             { command: 'start', description: 'فتح مركز أوامر Tiqnora' },
+            { command: 'pair', description: 'اقتران حسابك بالمنصة' },
             { command: 'agents', description: 'عرض الوكلاء النشطين' },
             { command: 'auto', description: 'توجيه الطلب تلقائياً' },
             { command: 'status', description: 'حالة المنصة الآن' },
