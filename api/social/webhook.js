@@ -160,12 +160,12 @@ function normalizeMeta(payload) {
           const eid = value?.id || value?.comment_id || value?.media_id || `${accountId}-${field}-${entry?.time || Date.now()}`;
           events.push({
             platform: object === 'instagram' ? 'instagram' : platform,
-            event_type: field === 'live_comments' ? 'comment.created' : field,
+            event_type: field,
             external_event_id: field === 'live_comments' ? String(eid) : `${field}:${eid}`,
             external_parent_id: value?.media_id ? String(value.media_id) : null,
             author_external_id: String(value?.from?.id || value?.sender_id || ''),
-            author_name: value?.from?.username || value?.from?.name || null,
-            content: value?.text || value?.message || null,
+            author_name: value?.from?.username || value?.from?.name || value?.username || null,
+            content: value?.text || value?.message || (field === 'mentions' ? 'إشارة إلى حساب Tiqnora AI على Instagram' : null),
             permalink: value?.permalink || null,
             occurred_at: toIso(value?.timestamp || entry?.time),
             account_external_id: accountId,
