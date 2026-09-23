@@ -1,4 +1,9 @@
 import { runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
+import {
+  handleTelegramUpdate,
+  isTelegramConfigured,
+  verifyTelegramWebhook
+} from '../../lib/telegram-command-center.js';
 
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -163,6 +168,33 @@ async function runDailyReport(res) {
 
 export default async function handler(req, res) {
   if (!['GET', 'POST'].includes(req.method)) return json(res, 405, { error: 'Method not allowed' });
+
+  const route = String(req.query?.route || '');
+
+  if (route === 'telegram_health') {
+    return json(res, 200, {
+      ok: true,
+      telegram_configured: isTelegramConfigured(),
+      bot_token_configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+      chat_id_configured: Boolean(process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_ALLOWED_CHAT_IDS),
+      webhook_url: 'https://tiqnora.com/api/telegram/webhook'
+    });
+  }
+
+  if (route === 'telegram_webhook') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST required' });
+    if (!verifyTelegramWebhook(req)) return json(res, 401, { error: 'Invalid Telegram webhook secret' });
+
+    try {
+      const result = await handleTelegramUpdate(req.body || {});
+      return json(res, 200, { ok: true, result });
+    } catch (error) {
+      console.error('Telegram command center failed', { message: error.message, stack: error.stack });
+      // Return 200 after logging to avoid Telegram retry storms for application errors.
+      return json(res, 200, { ok: false, error: error.message });
+    }
+  }
+
   if (!isAuthorizedCron(req)) return json(res, 401, { error: 'Unauthorized' });
 
   try {
