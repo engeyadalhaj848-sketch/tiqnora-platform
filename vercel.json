@@ -2,6 +2,10 @@
   "crons": [
     {
       "path": "/api/reports/telegram",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/reports/telegram",
       "schedule": "0 18 * * *"
     }
   ],
@@ -349,5 +353,10 @@
     }
   ],
   "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "functions": {
+    "api/reports/telegram.js": {
+      "maxDuration": 300
+    }
+  }
 }
