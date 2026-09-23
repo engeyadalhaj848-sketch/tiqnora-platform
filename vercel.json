@@ -152,6 +152,14 @@
   ],
   "rewrites": [
     {
+      "source": "/api/telegram/webhook",
+      "destination": "/api/reports/telegram?route=telegram_webhook"
+    },
+    {
+      "source": "/api/telegram/health",
+      "destination": "/api/reports/telegram?route=telegram_health"
+    },
+    {
       "source": "/api/aliexpress/connect",
       "destination": "/api/billing/providers?route=aliexpress_connect"
     },

@@ -1,4 +1,5 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const output = 'dist';
 rmSync(output, { recursive: true, force: true });
@@ -48,4 +49,69 @@ if (existsSync('public/customer-sw.js')) {
   cpSync('public/customer-sw.js', `${output}/customer-sw.js`);
 }
 
+async function configureTelegramCommandCenter() {
+  if (process.env.VERCEL_ENV !== 'production') return;
+
+  const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  const authorizedChats = [
+    String(process.env.TELEGRAM_CHAT_ID || '').trim(),
+    ...String(process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(x => x.trim())
+  ].filter(Boolean);
+
+  if (!token || !authorizedChats.length) {
+    console.log('Telegram Command Center setup skipped: TELEGRAM_BOT_TOKEN / authorized chat is not configured.');
+    return;
+  }
+
+  const secret = createHash('sha256').update(`tiqnora-telegram-webhook:${token}`).digest('hex');
+  const api = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
+
+  try {
+    const [webhookResponse, commandsResponse] = await Promise.all([
+      fetch(`${api}/setWebhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: 'https://tiqnora.com/api/telegram/webhook',
+          secret_token: secret,
+          allowed_updates: ['message', 'edited_message'],
+          drop_pending_updates: false
+        })
+      }),
+      fetch(`${api}/setMyCommands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: [
+            { command: 'start', description: 'فتح مركز أوامر Tiqnora' },
+            { command: 'agents', description: 'عرض الوكلاء النشطين' },
+            { command: 'auto', description: 'توجيه الطلب تلقائياً' },
+            { command: 'status', description: 'حالة المنصة الآن' },
+            { command: 'prospects', description: 'أفضل فرص المبيعات' },
+            { command: 'tasks', description: 'المهام المفتوحة' },
+            { command: 'scan', description: 'البحث الآن عن عملاء' },
+            { command: 'run', description: 'تشغيل مهام الوكلاء الآن' },
+            { command: 'report', description: 'تقرير فوري' },
+            { command: 'help', description: 'شرح الأوامر' }
+          ]
+        })
+      })
+    ]);
+
+    const webhook = await webhookResponse.json().catch(() => ({}));
+    const commands = await commandsResponse.json().catch(() => ({}));
+    if (!webhookResponse.ok || webhook?.ok === false) {
+      console.warn('Telegram setWebhook failed:', webhook?.description || webhookResponse.status);
+    } else {
+      console.log('Telegram webhook configured → https://tiqnora.com/api/telegram/webhook');
+    }
+    if (!commandsResponse.ok || commands?.ok === false) {
+      console.warn('Telegram setMyCommands failed:', commands?.description || commandsResponse.status);
+    }
+  } catch (error) {
+    console.warn('Telegram Command Center setup failed:', error.message);
+  }
+}
+
+await configureTelegramCommandCenter();
 console.log('Build complete → dist/');
