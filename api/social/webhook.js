@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export const config = { api: { bodyParser: false } };
 
@@ -154,6 +154,54 @@ function normalizeMeta(payload) {
         const value = change?.value || {};
         const platform = object === 'instagram' ? 'instagram' : (object === 'page' || object === 'facebook' ? 'facebook' : (object || 'facebook'));
 
+        // Classify by webhook field before inspecting comment_id. Instagram
+        // mentions carry comment_id but are distinct from comments.
+        if (field === 'mentions' || field === 'story_insights' || field === 'live_comments') {
+          const eid = value?.id || value?.comment_id || value?.media_id || `${accountId}-${field}-${entry?.time || Date.now()}`;
+          events.push({
+            platform: object === 'instagram' ? 'instagram' : platform,
+            event_type: field === 'live_comments' ? 'comment.created' : field,
+            external_event_id: field === 'live_comments' ? String(eid) : `${field}:${eid}`,
+            external_parent_id: value?.media_id ? String(value.media_id) : null,
+            author_external_id: String(value?.from?.id || value?.sender_id || ''),
+            author_name: value?.from?.username || value?.from?.name || null,
+            content: value?.text || value?.message || null,
+            permalink: value?.permalink || null,
+            occurred_at: toIso(value?.timestamp || entry?.time),
+            account_external_id: accountId,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field }
+          });
+          continue;
+        }
+
+        // Page feed reactions may refer to a comment_id. Handle them before
+        // the comment branch and give each distinct change its own stable ID.
+        if (field === 'feed' && ['reaction', 'like'].includes(String(value?.item || '').toLowerCase())) {
+          const verb = String(value?.verb || value?.action || 'add').toLowerCase();
+          const actorId = String(value?.from?.id || value?.sender_id || value?.user_id || '');
+          const parentId = String(value?.comment_id || value?.post_id || '');
+          const reactionType = String(value?.reaction_type || value?.reaction || value?.item || 'like').toLowerCase();
+          const identity = { accountId, parentId, actorId, reactionType, verb, time: value?.created_time || entry?.time || null, value };
+          events.push({
+            platform,
+            event_type: ['remove', 'delete', 'deleted'].includes(verb) ? 'reaction.deleted' : 'reaction.created',
+            external_event_id: `reaction:${createHash('sha256').update(JSON.stringify(identity)).digest('hex')}`,
+            external_parent_id: parentId || null,
+            author_external_id: actorId || null,
+            author_name: value?.from?.name || null,
+            content: reactionType,
+            permalink: value?.permalink_url || null,
+            occurred_at: toIso(value?.created_time || entry?.time),
+            account_external_id: accountId,
+            detected_intent: null,
+            detected_intent_confidence: null,
+            raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field, item: value?.item, verb, reaction_type: reactionType }
+          });
+          continue;
+        }
+
         if (field === 'comments' || field === 'feed' || value?.item === 'comment' || value?.comment_id) {
           const isFacebookComment = value?.item === 'comment' || Boolean(value?.comment_id);
           const isInstagramComment = field === 'comments' && (value?.id || value?.comment_id);
@@ -192,26 +240,6 @@ function normalizeMeta(payload) {
             content: value?.message || value?.text || null,
             permalink: value?.permalink_url || value?.permalink || null,
             occurred_at: toIso(value?.created_time || value?.timestamp || entry?.time),
-            account_external_id: accountId,
-            detected_intent: null,
-            detected_intent_confidence: null,
-            raw_payload: { adapter: 'meta', object, entry_id: entry?.id, field }
-          });
-          continue;
-        }
-
-        if (field === 'mentions' || field === 'story_insights' || field === 'live_comments') {
-          const eid = value?.id || value?.comment_id || value?.media_id || `${accountId}-${field}-${entry?.time || Date.now()}`;
-          events.push({
-            platform: object === 'instagram' ? 'instagram' : platform,
-            event_type: field,
-            external_event_id: String(eid),
-            external_parent_id: value?.media_id ? String(value.media_id) : null,
-            author_external_id: String(value?.from?.id || value?.sender_id || ''),
-            author_name: value?.from?.username || value?.from?.name || null,
-            content: value?.text || value?.message || null,
-            permalink: value?.permalink || null,
-            occurred_at: toIso(value?.timestamp || entry?.time),
             account_external_id: accountId,
             detected_intent: null,
             detected_intent_confidence: null,
@@ -550,6 +578,8 @@ function getQuery(req) {
   } catch (_) {}
   return q;
 }
+
+export { normalizeMeta };
 
 export default async function handler(req, res) {
   const query = getQuery(req);
