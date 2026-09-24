@@ -1,4 +1,4 @@
-import { runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
+import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import {
   handleTelegramUpdate,
   telegramConfigurationStatus,
