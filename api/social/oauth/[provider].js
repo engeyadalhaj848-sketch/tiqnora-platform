@@ -155,51 +155,97 @@ async function discoverMetaAccounts(accessToken) {
   return discovered;
 }
 
-async function discoverWhatsAppAccounts(accessToken) {
-  const discovered = [];
+// A Phone Number ID alone is not proof that the number can use Cloud API.
+export function whatsAppPhoneIssue(phone) {
+  if (!phone?.id) return 'phone_missing';
+  const status = String(phone.status || '').toUpperCase();
+  if (status !== 'CONNECTED') return status ? 'phone_disconnected' : 'phone_status_unknown';
+  const platform = String(phone.platform_type || '').toUpperCase();
+  if (platform !== 'CLOUD_API') return platform ? 'not_cloud_api' : 'platform_unknown';
+  return null;
+}
+
+export function whatsAppIssueFromDiscovery(discovery) {
+  if (!discovery.wabas_found) return discovery.waba_lookup_failures ? 'waba_lookup_failed' : 'no_waba';
+  if (!discovery.phones_found) return discovery.phone_lookup_failures ? 'phone_lookup_failed' : 'no_phone';
+  return discovery.accounts.find(account => account.connection_issue)?.connection_issue || 'verification_unavailable';
+}
+
+export async function discoverWhatsAppAccounts(accessToken) {
+  const result = { accounts: [], wabas_found: 0, phones_found: 0, waba_lookup_failures: 0, phone_lookup_failures: 0 };
   const businesses = await graphGet('me/businesses?fields=id,name&limit=100', accessToken);
   for (const business of businesses?.data || []) {
     let wabas;
     try {
       wabas = await graphGet(`${business.id}/owned_whatsapp_business_accounts?fields=id,name,currency,timezone_id,message_template_namespace&limit=100`, accessToken);
-    } catch (_) {
+    } catch (e) {
+      result.waba_lookup_failures++;
+      console.warn('WhatsApp WABA discovery failed', { business_id: business.id, message: e.message });
       continue;
     }
     for (const waba of wabas?.data || []) {
-      let subscribed = false;
-      try {
-        const sub = await graphPost(`${waba.id}/subscribed_apps`, accessToken, {});
-        subscribed = sub?.success === true;
-      } catch (_) {
-        subscribed = false;
-      }
-
+      result.wabas_found++;
       let phones;
       try {
         phones = await graphGet(`${waba.id}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating,status,code_verification_status&limit=100`, accessToken);
-      } catch (_) {
-        phones = { data: [] };
+      } catch (e) {
+        result.phone_lookup_failures++;
+        console.warn('WhatsApp phone discovery failed', { waba_id: waba.id, message: e.message });
+        continue;
       }
+
+      const observed = [];
       for (const phone of phones?.data || []) {
-        discovered.push({
+        result.phones_found++;
+        let platform = {};
+        if (phone?.id) {
+          try {
+            // Meta's coexistence check uses platform_type=CLOUD_API even when is_on_biz_app is true.
+            platform = await graphGet(`${phone.id}?fields=platform_type,is_on_biz_app`, accessToken);
+          } catch (e) {
+            console.warn('WhatsApp phone platform check failed', { phone_number_id: phone.id, message: e.message });
+          }
+        }
+        const checked = {
+          ...phone,
+          platform_type: platform.platform_type || phone.platform_type || null,
+          is_on_biz_app: platform.is_on_biz_app ?? phone.is_on_biz_app ?? null
+        };
+        observed.push({ phone: checked, issue: whatsAppPhoneIssue(checked) });
+      }
+
+      let subscribed = false;
+      if (observed.some(item => !item.issue)) {
+        try {
+          const sub = await graphPost(`${waba.id}/subscribed_apps`, accessToken, {});
+          subscribed = sub?.success === true;
+        } catch (e) {
+          console.warn('WhatsApp WABA webhook subscription failed', { waba_id: waba.id, message: e.message });
+        }
+      }
+      for (const { phone, issue } of observed) {
+        result.accounts.push({
           business_id: business.id,
           business_name: business.name || null,
           waba_id: waba.id,
           waba_name: waba.name || null,
           waba_currency: waba.currency || null,
           waba_timezone_id: waba.timezone_id || null,
-          phone_number_id: phone.id,
+          phone_number_id: phone.id || null,
           display_phone_number: phone.display_phone_number || null,
           verified_name: phone.verified_name || null,
           quality_rating: phone.quality_rating || null,
           phone_status: phone.status || null,
           code_verification_status: phone.code_verification_status || null,
-          webhook_subscribed: subscribed
+          platform_type: phone.platform_type,
+          is_on_biz_app: phone.is_on_biz_app,
+          webhook_subscribed: subscribed,
+          connection_issue: issue || (subscribed ? null : 'webhook_subscription_failed')
         });
       }
     }
   }
-  return discovered;
+  return result;
 }
 
 function decrypt(ciphertext, iv, tag) {
@@ -840,8 +886,12 @@ export default async function handler(req, res) {
         });
       }
     } else if (provider === 'whatsapp') {
-      const accounts = await discoverWhatsAppAccounts(access);
-      for (const account of accounts) {
+      const discovery = await discoverWhatsAppAccounts(access);
+      const accounts = discovery.accounts;
+      const readyAccounts = accounts.filter(account => !account.connection_issue);
+      // Persist only verified Cloud API numbers. An incomplete reauthorization must not
+      // overwrite a previously working connection with incomplete Graph API data.
+      for (const account of readyAccounts) {
         await supa('social_connections?on_conflict=organization_id,platform,external_account_id', {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -860,9 +910,14 @@ export default async function handler(req, res) {
       }
       accountMetadata = {
         accounts_found: accounts.length,
-        phone_number_ids: accounts.map(x => x.phone_number_id),
+        ready_accounts_found: readyAccounts.length,
+        wabas_found: discovery.wabas_found,
+        phones_found: discovery.phones_found,
+        phone_number_ids: accounts.map(x => x.phone_number_id).filter(Boolean),
         waba_ids: [...new Set(accounts.map(x => x.waba_id))],
-        webhook_subscribed: accounts.some(x => x.webhook_subscribed)
+        webhook_subscribed: readyAccounts.length > 0,
+        connection_issue: readyAccounts.length ? null : whatsAppIssueFromDiscovery(discovery),
+        connection_issues: [...new Set(accounts.map(x => x.connection_issue).filter(Boolean))]
       };
     }
 
@@ -873,14 +928,16 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         provider,
         display_name: displayNames[provider] || provider,
-        enabled: true,
-        status: 'connected',
+        enabled: provider !== 'whatsapp' || accountMetadata.ready_accounts_found > 0,
+        status: provider === 'whatsapp' && !accountMetadata.ready_accounts_found ? 'error' : 'connected',
         mode: provider === 'tiktok' ? (process.env.TIKTOK_MODE || 'production') : 'production',
         last_checked_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         metadata: { scopes: grantedScopes, ...(accountMetadata || {}) }
       })
     });
+    // WhatsApp returns to the actual Social Inbox route, where its verified status is shown.
+    if (provider === 'whatsapp') return res.redirect('/admin.html#social-inbox');
     return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
