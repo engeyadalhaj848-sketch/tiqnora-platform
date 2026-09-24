@@ -10,6 +10,27 @@
   const text = (value) => value == null || value === '' ? '—' : String(value);
   const dateText = (value) => value ? new Date(value).toLocaleString('ar-SA') : '—';
 
+  const whatsAppIssues = {
+    no_waba: 'لم يظهر حساب WhatsApp Business ضمن الأعمال التي منحتها للتطبيق.',
+    waba_lookup_failed: 'تعذر قراءة حساب WhatsApp Business. تحقق من صلاحية إدارة واتساب ثم أعد الربط.',
+    no_phone: 'حساب WhatsApp Business موجود، لكن لا يحتوي على رقم هاتف.',
+    phone_lookup_failed: 'تعذر قراءة أرقام حساب WhatsApp Business. تحقق من الصلاحيات ثم أعد الربط.',
+    phone_missing: 'لم تُرجع Meta معرّفًا صالحًا لرقم الهاتف.',
+    phone_disconnected: 'رقم واتساب غير متصل في Meta. أكمل تسجيله ثم أعد الربط.',
+    phone_status_unknown: 'تعذر تأكيد حالة اتصال رقم واتساب لدى Meta.',
+    not_cloud_api: 'الرقم غير مفعّل على WhatsApp Cloud API. أكمل إعداد Cloud API أو التعايش مع تطبيق واتساب للأعمال.',
+    platform_unknown: 'تعذر تأكيد أن الرقم مفعّل على WhatsApp Cloud API.',
+    webhook_subscription_failed: 'تعذر اشتراك حساب واتساب في Webhook الرسائل. تحقق من إعداد Webhook والصلاحيات ثم أعد الربط.',
+    verification_unavailable: 'لم يكتمل التحقق من جاهزية رقم واتساب.'
+  };
+  function whatsAppConnectionVerified(connection) {
+    const settings = connection?.settings || {};
+    return connection?.status === 'active' &&
+      String(settings.phone_status || '').toUpperCase() === 'CONNECTED' &&
+      String(settings.platform_type || '').toUpperCase() === 'CLOUD_API' &&
+      settings.webhook_subscribed === true;
+  }
+
   function addCell(row, value, dir) {
     const cell = document.createElement('td');
     cell.textContent = text(value);
@@ -70,6 +91,11 @@
       grid.appendChild(item);
     });
     card.appendChild(grid);
+    const whatsAppStatus = document.createElement('p');
+    whatsAppStatus.id = 'whatsapp-connection-status';
+    whatsAppStatus.className = 'card-desc';
+    whatsAppStatus.style.marginTop = '12px';
+    card.appendChild(whatsAppStatus);
     const note = document.createElement('p');
     note.className = 'card-desc';
     note.style.marginTop = '12px';
@@ -820,13 +846,31 @@
     eventsCard.appendChild(eventsTable.wrap);
 
     async function refresh() {
-      const [connectionsRes, rulesRes, eventsRes] = await Promise.all([
+      const [connectionsRes, rulesRes, eventsRes, whatsAppRes] = await Promise.all([
         db.from('social_connections').select('*').order('created_at', { ascending: false }),
         db.from('social_automation_rules').select('*').order('created_at', { ascending: true }),
-        db.from('social_events').select('*').order('received_at', { ascending: false }).limit(250)
+        db.from('social_events').select('*').order('received_at', { ascending: false }).limit(250),
+        db.from('integration_connections').select('status,metadata').eq('provider', 'whatsapp').maybeSingle()
       ]);
 
       const connectionRows = connectionsRes.data || [];
+      const whatsAppRegistry = whatsAppRes.data || null;
+      const whatsAppReady = whatsAppRegistry?.status === 'connected'
+        ? connectionRows.find(item => String(item.platform || '').toLowerCase() === 'whatsapp' && whatsAppConnectionVerified(item))
+        : null;
+      const whatsAppIssueCodes = whatsAppRegistry?.metadata?.connection_issues?.length
+        ? whatsAppRegistry.metadata.connection_issues
+        : [whatsAppRegistry?.metadata?.connection_issue].filter(Boolean);
+      const whatsAppIssueText = [...new Set(whatsAppIssueCodes)]
+        .map(code => whatsAppIssues[code] || whatsAppIssues.verification_unavailable).join(' ');
+      const whatsAppStatus = root.querySelector('#whatsapp-connection-status');
+      if (whatsAppStatus) {
+        whatsAppStatus.textContent = whatsAppReady
+          ? 'رقم WhatsApp Cloud واشتراك Webhook جاهزان. تحقق برسالة فعلية من وصول المحادثات.'
+          : (whatsAppRegistry?.status === 'error'
+            ? `واتساب يحتاج إكمال الإعداد: ${whatsAppIssueText || whatsAppIssues.verification_unavailable}`
+            : 'واتساب غير مرتبط بعد برقم Cloud API مؤكّد وWebhook نشط.');
+      }
       const activeByPlatform = new Map();
       connectionRows.forEach(item => {
         const key = String(item.platform || '').toLowerCase();
@@ -834,13 +878,13 @@
       });
       root.querySelectorAll('[data-connect-platform]').forEach(button => {
         const key = String(button.dataset.connectPlatform || '').toLowerCase();
-        const connection = activeByPlatform.get(key);
+        const connection = key === 'whatsapp' ? whatsAppReady : activeByPlatform.get(key);
         if (connection?.status === 'active') {
           button.textContent = `متصل ✓${connection.account_name ? ' — ' + connection.account_name : ''}`;
           button.title = 'الحساب مرتبط بنجاح. اضغط لإعادة التفويض إذا احتجت.';
         } else {
           button.textContent = 'ربط الحساب';
-          button.title = '';
+          button.title = key === 'whatsapp' ? (whatsAppIssueText || 'يحتاج رقم Cloud API متصلًا واشتراك Webhook ناجحًا.') : '';
         }
         button.disabled = false;
       });
@@ -849,7 +893,8 @@
       connectionRows.forEach(item => {
         const row = document.createElement('tr');
         addCell(row, item.platform); addCell(row, item.account_name); addCell(row, item.external_account_id, 'ltr');
-        addCell(row, labels[item.status] || item.status); addCell(row, dateText(item.connected_at || item.created_at));
+        const status = item.platform === 'whatsapp' && item.status === 'active' && !whatsAppReady ? 'pending' : item.status;
+        addCell(row, labels[status] || status); addCell(row, dateText(item.connected_at || item.created_at));
         connectionTable.body.appendChild(row);
       });
       if (!connectionRows.length) { const row = document.createElement('tr'); const cell = addCell(row, 'لا توجد اتصالات محفوظة بعد.'); cell.colSpan = 5; connectionTable.body.appendChild(row); }
