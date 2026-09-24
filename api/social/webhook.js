@@ -534,6 +534,9 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
 async function generateAgentReply(event, rule) {
   const fallback = String(rule?.reply_template || 'شكرًا لتواصلك معنا. يسعدنا مساعدتك، أرسل لنا تفاصيل أكثر عن نشاطك.').replaceAll('{{author_name}}', event.author_name || '');
 
+  // Deterministic facts such as the official website should not be rewritten by AI.
+  if (rule?.intent === 'platform_link') return fallback.slice(0, 220);
+
   const prompt = [
     'أنت وكيل خدمة عملاء وسوشيال ميديا لمنصة Tiqnora AI في السعودية.',
     'اكتب ردًا عربيًا طبيعيًا ومختصرًا على تعليق العميل.',
@@ -674,6 +677,14 @@ function evaluateRule(rule, event) {
     const hasAuditCue = /(حلل|تحليل|قيم|تقييم|راجع|مراجع|شوف|تشوف|افحص|فحص|يحتاج|ناقص|تحسين|تطوير)/.test(text);
     if (hasSubject && hasAuditCue) {
       return { rule, confidence: 0.86, reason: 'arabic_semantic_fallback' };
+    }
+  }
+
+  if (rule.match_mode === 'intent_or_keyword' && rule.intent === 'platform_link') {
+    const asksForLink = /(رابط|لينك)/.test(text);
+    const mentionsPlatform = /(منصه|موقع|تيكنورا|tiqnora)/.test(text);
+    if (asksForLink && mentionsPlatform) {
+      return { rule, confidence: 0.93, reason: 'platform_link_fallback' };
     }
   }
 
