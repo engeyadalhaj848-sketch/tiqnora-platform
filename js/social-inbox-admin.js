@@ -31,6 +31,13 @@
       settings.webhook_subscribed === true;
   }
 
+  function whatsAppRowStatus(connection, registryStatus) {
+    if (String(connection?.platform || '').toLowerCase() !== 'whatsapp' || connection.status !== 'active') {
+      return connection?.status;
+    }
+    return registryStatus === 'connected' && whatsAppConnectionVerified(connection) ? 'active' : 'pending';
+  }
+
   function addCell(row, value, dir) {
     const cell = document.createElement('td');
     cell.textContent = text(value);
@@ -893,7 +900,7 @@
       connectionRows.forEach(item => {
         const row = document.createElement('tr');
         addCell(row, item.platform); addCell(row, item.account_name); addCell(row, item.external_account_id, 'ltr');
-        const status = item.platform === 'whatsapp' && item.status === 'active' && !whatsAppReady ? 'pending' : item.status;
+        const status = whatsAppRowStatus(item, whatsAppRegistry?.status);
         addCell(row, labels[status] || status); addCell(row, dateText(item.connected_at || item.created_at));
         connectionTable.body.appendChild(row);
       });
