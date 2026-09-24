@@ -15,15 +15,32 @@ function safeEqualText(a, b) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-function validMetaSignature(req, rawBody) {
-  // Environment-variable editors can accidentally preserve a trailing newline
-  // or surrounding whitespace. Meta app secrets themselves do not contain
-  // whitespace, so normalize only the secret — never the signed request body.
-  const secret = String(process.env.META_APP_SECRET || '').trim();
-  if (!secret) return false;
+function matchesMetaSignature(req, rawBody, secret) {
   const supplied = String(req.headers['x-hub-signature-256'] || '').trim();
   const expected = `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
   return safeEqualText(supplied, expected);
+}
+
+function validMetaSignature(req, rawBody, platform = 'meta') {
+  // Environment-variable editors can accidentally preserve a trailing newline
+  // or surrounding whitespace. Meta app secrets themselves do not contain
+  // whitespace, so normalize only the secret — never the signed request body.
+  const metaSecret = String(process.env.META_APP_SECRET || '').trim();
+  if (metaSecret && matchesMetaSignature(req, rawBody, metaSecret)) return true;
+
+  // Instagram Login has its own app ID and app secret. Accept that secret only
+  // for Instagram objects arriving on the Meta endpoint; it must never
+  // authenticate Page or WhatsApp events.
+  if (platform !== 'meta') return false;
+  const instagramSecret = String(process.env.INSTAGRAM_APP_SECRET || '').trim();
+  if (!instagramSecret) return false;
+  let object;
+  try {
+    object = String(JSON.parse(rawBody.toString('utf8'))?.object || '').toLowerCase();
+  } catch (_) {
+    return false;
+  }
+  return object === 'instagram' && matchesMetaSignature(req, rawBody, instagramSecret);
 }
 
 function validGenericSignature(req) {
@@ -579,7 +596,7 @@ function getQuery(req) {
   return q;
 }
 
-export { normalizeMeta };
+export { normalizeMeta, validMetaSignature };
 
 export default async function handler(req, res) {
   const query = getQuery(req);
@@ -615,7 +632,7 @@ export default async function handler(req, res) {
     rawBody = Buffer.concat(chunks);
   }
   const adapter = getAdapter(platform);
-  const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody) : adapter.verify(req);
+  const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody, platform) : adapter.verify(req);
   if (!verified) {
     if (['meta', 'whatsapp'].includes(platform)) {
       const signature = String(req.headers['x-hub-signature-256'] || '');
@@ -624,6 +641,7 @@ export default async function handler(req, res) {
         signature_length: signature.length,
         signature_format_ok: signature.startsWith('sha256='),
         app_secret_present: Boolean(process.env.META_APP_SECRET),
+        instagram_app_secret_present: Boolean(process.env.INSTAGRAM_APP_SECRET),
         raw_body_bytes: rawBody.length
       });
     }
