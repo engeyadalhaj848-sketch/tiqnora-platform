@@ -548,7 +548,18 @@ async function generateAgentReply(event, rule) {
   try {
     const result = await callSocialAI(prompt, { temperature: 0.45, maxTokens: 160 });
     const text = String(result?.text || '').replace(/\s+/g, ' ').trim();
-    return text ? text.slice(0, 220) : fallback;
+    const words = text.split(/\s+/).filter(Boolean);
+    const tooShort = text.length < 28 || words.length < 5;
+    const greetingOnly = /^(اهلا|أهلا|أهلاً|مرحبا|مرحباً|هلا|حياك)[!،,.\s]*$/i.test(text);
+    if (!text || tooShort || greetingOnly) {
+      console.warn('Social AI reply too short; using template fallback', {
+        provider: result?.provider || null,
+        length: text.length,
+        words: words.length
+      });
+      return fallback.slice(0, 220);
+    }
+    return text.slice(0, 220);
   } catch (error) {
     console.warn('Social AI reply generation failed; using template fallback', { message: error.message });
     return fallback;
@@ -767,6 +778,22 @@ async function createActionOnce({ organizationId, eventId, ruleId = null, action
 }
 
 async function processEvent(event, storedEvent, organizationId, rules) {
+  // Meta echoes comments authored by the connected Page/Instagram account
+  // back through the webhook. Treat those as outbound echoes so they never
+  // re-enter the customer inbox or trigger an auto-reply loop.
+  const ownAuthor = event.author_external_id
+    && event.account_external_id
+    && String(event.author_external_id) === String(event.account_external_id);
+  if (ownAuthor) {
+    if (storedEvent.processing_status === 'new') {
+      await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ processing_status: 'ignored' })
+      });
+    }
+    return { matched: false, queued: false, own_echo: true };
+  }
+
   const matches = rules.map(rule => evaluateRule(rule, event)).filter(Boolean).sort((a, b) => b.confidence - a.confidence);
   let match = matches[0];
 
