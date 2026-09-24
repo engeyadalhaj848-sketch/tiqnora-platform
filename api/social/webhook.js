@@ -560,6 +560,62 @@ function sourceFor(event) {
   return `${event.platform}_social`;
 }
 
+async function classifyEventWithAI(event, rules) {
+  const candidates = (rules || []).filter(rule =>
+    platformAllowed(rule, event.platform) &&
+    eventTypeAllowed(rule, event.event_type) &&
+    rule.intent
+  );
+  if (!candidates.length || !String(event.content || '').trim()) return null;
+
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) return null;
+
+  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const intents = candidates.map(rule => ({
+    intent: rule.intent,
+    name: rule.name,
+    keywords: Array.isArray(rule.keywords) ? rule.keywords : []
+  }));
+  const prompt = [
+    'Classify this Saudi Arabic social-media comment into one of the allowed intents.',
+    'Return ONLY compact JSON: {"intent":"...","confidence":0.0}.',
+    'If none applies, return {"intent":null,"confidence":0}.',
+    'Understand spelling variants, colloquial Arabic, feminine/masculine forms, missing spaces, and typos.',
+    'Do not invent an intent outside the allowed list.',
+    `Allowed intents: ${JSON.stringify(intents)}`,
+    `Platform: ${event.platform}`,
+    `Event type: ${event.event_type}`,
+    `Comment: ${String(event.content || '').slice(0, 1000)}`
+  ].join('\n');
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.05,
+          maxOutputTokens: 80,
+          responseMimeType: 'application/json'
+        }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error?.message || `Gemini classification failed (${response.status})`);
+    const raw = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join('').trim();
+    const parsed = JSON.parse(raw || '{}');
+    const confidence = Math.max(0, Math.min(1, Number(parsed?.confidence) || 0));
+    const rule = candidates.find(x => x.intent === parsed?.intent);
+    if (!rule || confidence < 0.72) return null;
+    return { rule, confidence, reason: 'ai_semantic' };
+  } catch (error) {
+    console.warn('Social AI intent classification failed', { message: error.message });
+    return null;
+  }
+}
+
 function toDbEvent(event, organizationId, connectionId) {
   return {
     organization_id: organizationId,
@@ -614,7 +670,14 @@ async function createActionOnce({ organizationId, eventId, ruleId = null, action
 
 async function processEvent(event, storedEvent, organizationId, rules) {
   const matches = rules.map(rule => evaluateRule(rule, event)).filter(Boolean).sort((a, b) => b.confidence - a.confidence);
-  const match = matches[0];
+  let match = matches[0];
+
+  // Keyword matching stays fast and deterministic. When it misses an
+  // actionable inbound comment/message, use semantic classification so
+  // colloquial Arabic such as "حللي نشاطي" still maps to business_audit.
+  if (!match && ['comment.created', 'message.received'].includes(String(event.event_type || ''))) {
+    match = await classifyEventWithAI(event, rules);
+  }
 
   if (!match) {
     // Keep actionable inbound items in the manual inbox queue even when they
