@@ -88,6 +88,7 @@ async function configureTelegramCommandCenter() {
             { command: 'tasks', description: 'المهام المفتوحة' },
             { command: 'scan', description: 'البحث الآن عن عملاء' },
             { command: 'run', description: 'تشغيل مهام الوكلاء الآن' },
+            { command: 'daily', description: 'تشغيل فريق Tiqnora اليومي' },
             { command: 'report', description: 'تقرير فوري' },
             { command: 'help', description: 'شرح الأوامر' }
           ]
