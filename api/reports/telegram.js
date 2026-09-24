@@ -65,23 +65,26 @@ function isAuthorizedCron(req) {
 }
 
 async function runGrowthCron(res) {
+  const workforce = await ensureDailyWorkforceTasks();
   const growth = await runAutonomousGrowth();
   const saved = growth?.prospecting?.saved || 0;
   const completed = growth?.tasks?.completed || 0;
   const failed = growth?.tasks?.failed || 0;
 
   await telegramIfConfigured([
-    '<b>Tiqnora Growth Engine</b>',
+    '<b>Tiqnora Daily Workforce</b>',
     '',
-    `🎯 فرص بحثها Gemini: <b>${growth?.prospecting?.candidates || 0}</b>`,
-    `✅ تم حفظ/تحديث: <b>${saved}</b>`,
-    `🤖 مهام الوكلاء المنجزة: <b>${completed}</b>`,
-    `⚠️ مهام فشلت: <b>${failed}</b>`,
+    `Agents enabled: <b>${workforce?.agents_enabled?.length || 0}</b>`,
+    `New daily tasks: <b>${workforce?.tasks_created || 0}</b>`,
+    `Gemini prospects: <b>${growth?.prospecting?.candidates || 0}</b>`,
+    `Saved/updated prospects: <b>${saved}</b>`,
+    `Completed agent tasks: <b>${completed}</b>`,
+    `Failed tasks: <b>${failed}</b>`,
     '',
-    'الرسائل المقترحة محفوظة للمراجعة داخل بيانات الفرص. لا يتم الإرسال تلقائياً.'
+    'Drafts stay under review. No automatic publishing or customer outreach before approval.'
   ].join('\n')).catch(error => console.warn('Growth Telegram notification failed', { message: error.message }));
 
-  return json(res, 200, { ok: true, mode: 'growth', growth });
+  return json(res, 200, { ok: true, mode: 'growth', workforce, growth });
 }
 
 async function runDailyReport(res) {
