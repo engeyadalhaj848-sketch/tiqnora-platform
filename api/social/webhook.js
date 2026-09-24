@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:crypto';
 
 export const config = { api: { bodyParser: false } };
 
@@ -399,6 +399,92 @@ function getAdapter(platform) {
   return ADAPTERS[platform] || { verify: validGenericSignature, normalize: (payload) => normalizeGeneric(platform, payload) };
 }
 
+
+function decryptVault(enc) {
+  if (!enc?.ciphertext || !enc?.iv || !enc?.tag) return null;
+  const key = Buffer.from(process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || '', 'base64');
+  if (key.length !== 32) throw new Error('SOCIAL_TOKEN_ENCRYPTION_KEY must be a base64 32-byte key');
+  const d = createDecipheriv('aes-256-gcm', key, Buffer.from(enc.iv, 'base64url'));
+  d.setAuthTag(Buffer.from(enc.tag, 'base64url'));
+  return Buffer.concat([d.update(Buffer.from(enc.ciphertext, 'base64url')), d.final()]).toString();
+}
+
+async function metaGraphPost(path, accessToken, payload) {
+  const url = new URL(`https://graph.facebook.com/v22.0/${String(path || '').replace(/^\//, '')}`);
+  url.searchParams.set('access_token', accessToken);
+  const response = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+    body: JSON.stringify(payload || {})
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.error) throw new Error(body?.error?.message || `Meta Graph API failed (${response.status})`);
+  return body;
+}
+
+async function generateAgentReply(event, rule) {
+  const fallback = String(rule?.reply_template || 'شكرًا لتواصلك معنا. يسعدنا مساعدتك، أرسل لنا تفاصيل أكثر عن نشاطك.').replaceAll('{{author_name}}', event.author_name || '');
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) return fallback;
+
+  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const prompt = [
+    'أنت وكيل خدمة عملاء وسوشيال ميديا لمنصة Tiqnora AI في السعودية.',
+    'اكتب ردًا عربيًا طبيعيًا ومختصرًا على تعليق العميل.',
+    'افهم مقصده من نص التعليق، ولا تخترع معلومات أو أسعارًا أو وعودًا.',
+    'إذا كان يطلب تحليل نشاطه، اطلب منه اسم النشاط ورابط الحساب أو الموقع للبدء.',
+    'اجعل الرد من جملة أو جملتين وبحد أقصى 220 حرفًا، بدون تنسيق Markdown.',
+    `اسم العميل إن توفر: ${event.author_name || 'غير معروف'}`,
+    `التعليق: ${event.content || ''}`,
+    `النية المتوقعة: ${rule?.intent || 'general'}`
+  ].join('\n');
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.45, maxOutputTokens: 160 }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error?.message || `Gemini failed (${response.status})`);
+    const text = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join(' ').replace(/\s+/g, ' ').trim();
+    return text ? text.slice(0, 220) : fallback;
+  } catch (error) {
+    console.warn('Social AI reply generation failed; using template fallback', { message: error.message });
+    return fallback;
+  }
+}
+
+async function sendMetaAutoReply(event, storedEvent, organizationId, text) {
+  if (!['instagram', 'facebook'].includes(event.platform) || event.event_type !== 'comment.created') {
+    return { sent: false, reason: 'unsupported_auto_reply_event' };
+  }
+
+  let rows = [];
+  if (storedEvent.connection_id) {
+    rows = await rest(`social_connections?id=eq.${encodeURIComponent(storedEvent.connection_id)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=1`);
+  }
+  if (!rows?.length && event.account_external_id) {
+    rows = await rest(`social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.${encodeURIComponent(event.platform)}&external_account_id=eq.${encodeURIComponent(event.account_external_id)}&status=eq.active&select=*&limit=1`);
+  }
+  const connection = rows?.[0];
+  const token = decryptVault(connection?.settings?.page_access_token_enc);
+  if (!token) throw new Error('Page access token missing for automatic reply');
+
+  const result = event.platform === 'instagram'
+    ? await metaGraphPost(`${event.external_event_id}/replies`, token, { message: text })
+    : await metaGraphPost(`${event.external_event_id}/comments`, token, { message: text });
+
+  return {
+    sent: true,
+    connection_id: connection?.id || null,
+    external_reply_id: String(result?.id || '')
+  };
+}
+
 async function rest(path, options = {}) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing');
@@ -576,15 +662,34 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   }
 
   if (rule.auto_reply && rule.reply_template) {
-    const text = String(rule.reply_template).replaceAll('{{author_name}}', event.author_name || '');
-    await createActionOnce({
-      organizationId,
-      eventId: storedEvent.id,
-      ruleId: rule.id,
-      actionType: 'auto_reply',
-      status: 'pending',
-      result: { text, platform: event.platform, external_event_id: event.external_event_id }
-    });
+    const text = await generateAgentReply(event, rule);
+    try {
+      const delivery = await sendMetaAutoReply(event, storedEvent, organizationId, text);
+      await createActionOnce({
+        organizationId,
+        eventId: storedEvent.id,
+        ruleId: rule.id,
+        actionType: 'auto_reply',
+        status: delivery.sent ? 'completed' : 'skipped',
+        result: { text, platform: event.platform, external_event_id: event.external_event_id, ...delivery }
+      });
+      if (delivery.sent) {
+        await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ processing_status: 'processed' })
+        });
+      }
+    } catch (error) {
+      await createActionOnce({
+        organizationId,
+        eventId: storedEvent.id,
+        ruleId: rule.id,
+        actionType: 'auto_reply',
+        status: 'failed',
+        result: { text, platform: event.platform, external_event_id: event.external_event_id, error: String(error.message || error).slice(0, 500) }
+      });
+      console.warn('Social auto reply failed', { platform: event.platform, event_id: storedEvent.id, message: error.message });
+    }
   }
 
   return { matched: true, intent: rule.intent || null, confidence };
