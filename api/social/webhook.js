@@ -422,12 +422,118 @@ async function metaGraphPost(path, accessToken, payload) {
   return body;
 }
 
+async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens = 180 } = {}) {
+  const failures = [];
+
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (geminiKey) {
+    try {
+      const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(geminiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature,
+            maxOutputTokens: maxTokens,
+            ...(json ? { responseMimeType: 'application/json' } : {})
+          }
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || `Gemini failed (${response.status})`);
+      const text = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join('').trim();
+      if (text) return { text, provider: 'google_ai', model };
+      throw new Error('Gemini returned empty text');
+    } catch (error) {
+      failures.push(`google_ai: ${error.message}`);
+    }
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          ...(json ? { response_format: { type: 'json_object' } } : {}),
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || `OpenAI failed (${response.status})`);
+      const text = body?.choices?.[0]?.message?.content?.trim();
+      if (text) return { text, provider: 'openai', model: body?.model || model };
+      throw new Error('OpenAI returned empty text');
+    } catch (error) {
+      failures.push(`openai: ${error.message}`);
+    }
+  }
+
+  if (process.env.XAI_API_KEY) {
+    try {
+      const model = process.env.XAI_MODEL || 'grok-3-mini';
+      const response = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || `xAI failed (${response.status})`);
+      const text = body?.choices?.[0]?.message?.content?.trim();
+      if (text) return { text, provider: 'xai', model: body?.model || model };
+      throw new Error('xAI returned empty text');
+    } catch (error) {
+      failures.push(`xai: ${error.message}`);
+    }
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest';
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          temperature,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || `Anthropic failed (${response.status})`);
+      const text = (body?.content || []).filter(x => x?.type === 'text').map(x => x.text || '').join('').trim();
+      if (text) return { text, provider: 'anthropic', model: body?.model || model };
+      throw new Error('Anthropic returned empty text');
+    } catch (error) {
+      failures.push(`anthropic: ${error.message}`);
+    }
+  }
+
+  if (failures.length) {
+    console.warn('All configured social AI providers failed', { failures });
+  }
+  return null;
+}
+
 async function generateAgentReply(event, rule) {
   const fallback = String(rule?.reply_template || 'شكرًا لتواصلك معنا. يسعدنا مساعدتك، أرسل لنا تفاصيل أكثر عن نشاطك.').replaceAll('{{author_name}}', event.author_name || '');
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) return fallback;
 
-  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
   const prompt = [
     'أنت وكيل خدمة عملاء وسوشيال ميديا لمنصة Tiqnora AI في السعودية.',
     'اكتب ردًا عربيًا طبيعيًا ومختصرًا على تعليق العميل.',
@@ -440,17 +546,8 @@ async function generateAgentReply(event, rule) {
   ].join('\n');
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.45, maxOutputTokens: 160 }
-      })
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body?.error?.message || `Gemini failed (${response.status})`);
-    const text = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join(' ').replace(/\s+/g, ' ').trim();
+    const result = await callSocialAI(prompt, { temperature: 0.45, maxTokens: 160 });
+    const text = String(result?.text || '').replace(/\s+/g, ' ').trim();
     return text ? text.slice(0, 220) : fallback;
   } catch (error) {
     console.warn('Social AI reply generation failed; using template fallback', { message: error.message });
@@ -552,7 +649,24 @@ function evaluateRule(rule, event) {
   const text = normalizeText(event.content);
   const scores = (Array.isArray(rule.keywords) ? rule.keywords : []).map(word => keywordScore(text, word, rule.match_mode));
   const confidence = Math.max(0, ...scores);
-  return confidence > 0 ? { rule, confidence, reason: rule.match_mode === 'intent_or_keyword' ? 'keyword_or_fuzzy' : rule.match_mode } : null;
+  if (confidence > 0) {
+    return { rule, confidence, reason: rule.match_mode === 'intent_or_keyword' ? 'keyword_or_fuzzy' : rule.match_mode };
+  }
+
+  // Deterministic Arabic semantic safety net for the first Tiqnora intent.
+  // It catches natural variants such as "حللي نشاطي" and
+  // "ممكن تشوفوا حسابي وتقولوا لي ايش يحتاج؟" even if an AI provider
+  // is temporarily unavailable. Require both a business subject and an
+  // audit/review cue to avoid replying to unrelated comments.
+  if (rule.match_mode === 'intent_or_keyword' && rule.intent === 'business_audit') {
+    const hasSubject = /(نشاط|حساب|موقع|صفحه|متجر|بيزنس|مشروع)/.test(text);
+    const hasAuditCue = /(حلل|تحليل|قيم|تقييم|راجع|مراجع|شوف|تشوف|افحص|فحص|يحتاج|ناقص|تحسين|تطوير)/.test(text);
+    if (hasSubject && hasAuditCue) {
+      return { rule, confidence: 0.86, reason: 'arabic_semantic_fallback' };
+    }
+  }
+
+  return null;
 }
 
 function sourceFor(event) {
@@ -568,10 +682,6 @@ async function classifyEventWithAI(event, rules) {
   );
   if (!candidates.length || !String(event.content || '').trim()) return null;
 
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) return null;
-
-  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
   const intents = candidates.map(rule => ({
     intent: rule.intent,
     name: rule.name,
@@ -590,26 +700,14 @@ async function classifyEventWithAI(event, rules) {
   ].join('\n');
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.05,
-          maxOutputTokens: 80,
-          responseMimeType: 'application/json'
-        }
-      })
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body?.error?.message || `Gemini classification failed (${response.status})`);
-    const raw = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join('').trim();
+    const result = await callSocialAI(prompt, { json: true, temperature: 0.05, maxTokens: 80 });
+    if (!result?.text) return null;
+    const raw = String(result.text).replace(/^\`\`\`(?:json)?/i, '').replace(/\`\`\`$/i, '').trim();
     const parsed = JSON.parse(raw || '{}');
     const confidence = Math.max(0, Math.min(1, Number(parsed?.confidence) || 0));
     const rule = candidates.find(x => x.intent === parsed?.intent);
     if (!rule || confidence < 0.72) return null;
-    return { rule, confidence, reason: 'ai_semantic' };
+    return { rule, confidence, reason: `ai_semantic:${result.provider}` };
   } catch (error) {
     console.warn('Social AI intent classification failed', { message: error.message });
     return null;
