@@ -531,13 +531,17 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   const match = matches[0];
 
   if (!match) {
-    if (storedEvent.processing_status === 'new') {
+    // Keep actionable inbound items in the manual inbox queue even when they
+    // do not match an automation rule. "ignored" is reserved for passive
+    // events that need no human response (reactions, read receipts, etc.).
+    const actionable = ['comment.created', 'message.received'].includes(String(event.event_type || ''));
+    if (!actionable && storedEvent.processing_status === 'new') {
       await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ processing_status: 'ignored' })
       });
     }
-    return { matched: false };
+    return { matched: false, queued: actionable };
   }
 
   const { rule, confidence, reason } = match;
@@ -659,6 +663,7 @@ export default async function handler(req, res) {
     let matched = 0;
     let insertedCount = 0;
     let duplicateCount = 0;
+    let queued = 0;
     let ignored = 0;
 
     for (const event of normalized) {
@@ -679,6 +684,7 @@ export default async function handler(req, res) {
 
       const result = await processEvent(event, storedEvent, organizationId, rules || []);
       if (result.matched) matched += 1;
+      else if (result.queued) queued += 1;
       else ignored += 1;
     }
 
@@ -689,6 +695,7 @@ export default async function handler(req, res) {
       inserted: insertedCount,
       duplicates: duplicateCount,
       matched,
+      queued,
       ignored
     });
   } catch (error) {
