@@ -16,6 +16,7 @@ import {
   auditPageRecord,
   runSiteAudit,
   sampleTiqnoraPages,
+  fetchAndAuditPage,
   filterSitemapUrls
 } from '../lib/v6/seo/audit.js';
 import {
@@ -48,7 +49,24 @@ describe('SEO core', () => {
     assert.equal(isAllowedAuditUrl('https://www.tiqnora.com/about'), true);
     assert.equal(isAllowedAuditUrl('http://127.0.0.1/secret'), false);
     assert.equal(isAllowedAuditUrl('http://169.254.169.254/latest'), false);
+    assert.equal(isAllowedAuditUrl('https://eviltiqnora.vercel.app/'), false);
+    assert.equal(
+      isAllowedAuditUrl('https://tiqnora-abc123-engeyadalhaj848-7848.vercel.app/'),
+      true
+    );
     assert.throws(() => assertSafeAuditUrl('http://localhost/admin'), (e) => e.code === 'ssrf_blocked');
+  });
+
+  it('live audit blocks redirects to private targets', async () => {
+    const fetchImpl = async () => ({
+      status: 302,
+      headers: { get: (name) => String(name).toLowerCase() === 'location' ? 'http://169.254.169.254/latest' : null },
+      text: async () => ''
+    });
+    await assert.rejects(
+      fetchAndAuditPage('https://www.tiqnora.com/about', { fetchImpl }),
+      (e) => e.code === 'ssrf_blocked'
+    );
   });
 
   it('Organization schema has no invented awards/ratings', () => {
