@@ -88,6 +88,8 @@ end $$;
 -- Keep anonymous callers out; authenticated access is still constrained by RLS/admin policy.
 revoke all on public.research_jobs from anon;
 revoke all on public.research_candidates from anon;
+revoke all on public.research_jobs from authenticated;
+revoke all on public.research_candidates from authenticated;
 
 grant select, insert, update on public.research_jobs to authenticated;
 grant select, insert, update on public.research_candidates to authenticated;
