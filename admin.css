@@ -653,3 +653,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .v6-research-controls input,.v6-research-filters select{width:100%}
 .v6-research-filters{margin-bottom:10px}
 @media (max-width:800px){.v6-research-controls{grid-template-columns:1fr}}
+
+.v6-studio-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto auto;gap:8px;margin:12px 0}
+@media (max-width:900px){.v6-studio-controls{grid-template-columns:1fr}}

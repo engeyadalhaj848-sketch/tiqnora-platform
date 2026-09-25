@@ -38,6 +38,29 @@ import {
   analyzeResearchCandidate,
   buildCrmLeadPayload
 } from '../lib/v6/lead-research.js';
+import {
+  buildBrandProfile,
+  buildBrandContext,
+  validateBrandContent,
+  getDefaultBrandProfile
+} from '../lib/v6/brand-brain.js';
+import {
+  createCampaign,
+  generateContentIdeas,
+  generateContentDraft,
+  adaptToChannels,
+  generateCreativeBrief,
+  submitForReview,
+  approveContent,
+  editAfterApproval,
+  scheduleContent,
+  mockPublish,
+  canPublish,
+  generateDailyPlan,
+  runContentHandoff,
+  detectDuplicateContent,
+  buildPerformanceInsight
+} from '../lib/v6/social-studio.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -1054,6 +1077,163 @@ async function handleLeadResearch(req, res, auth) {
 }
 
 
+
+async function handleSocialStudio(req, res, auth) {
+  const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const op = String(req.query?.op || req.body?.op || 'brand_get').toLowerCase();
+
+  // Brand Brain — prefer DB default, fallback to seed
+  if (op === 'brand_get') {
+    let stored = null;
+    try {
+      const rows = await sbGet(
+        `brand_profiles?organization_id=eq.${encodeURIComponent(organizationId)}&is_default=eq.true&select=*&limit=1`,
+        auth.token
+      );
+      stored = Array.isArray(rows) ? rows[0] : null;
+    } catch (_) {}
+    const profile = buildBrandProfile(stored?.profile || getDefaultBrandProfile());
+    return json(res, 200, {
+      brand: profile,
+      context: buildBrandContext(profile),
+      stored_id: stored?.id || null,
+      source: stored ? 'database' : 'seed'
+    });
+  }
+
+  if (op === 'brand_validate') {
+    const text = req.body?.text || '';
+    const profile = buildBrandProfile(req.body?.brand || getDefaultBrandProfile());
+    return json(res, 200, { validation: validateBrandContent(text, profile, { require_cta: !!req.body?.require_cta }) });
+  }
+
+  if (op === 'campaign_create') {
+    const campaign = createCampaign(req.body?.campaign || req.body || {}, req.body?.brand || getDefaultBrandProfile());
+    // best-effort persist
+    try {
+      const key = SERVICE || auth.token;
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/marketing_campaigns`, {
+        method: 'POST',
+        headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          name: campaign.name,
+          objective: campaign.objective,
+          status: campaign.status,
+          target_audience: campaign.target_audience,
+          industry: campaign.industry,
+          location: campaign.location,
+          platforms: campaign.platforms,
+          offer: campaign.offer,
+          cta: campaign.cta,
+          campaign_brief: campaign.campaign_brief,
+          start_date: campaign.start_date,
+          end_date: campaign.end_date,
+          created_by: auth.profile?.id || null
+        })
+      });
+      const rows = await r.json().catch(() => null);
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (r.ok && row?.id) campaign.id = row.id;
+    } catch (_) {}
+    return json(res, 201, { campaign });
+  }
+
+  if (op === 'content_ideas') {
+    const campaign = createCampaign(req.body?.campaign || {}, req.body?.brand || getDefaultBrandProfile());
+    const ideas = generateContentIdeas(campaign, req.body?.brand || getDefaultBrandProfile(), { count: req.body?.count || 10 });
+    return json(res, 200, { campaign, ideas, requires_approval: true });
+  }
+
+  if (op === 'content_generate') {
+    const campaign = createCampaign(req.body?.campaign || {}, req.body?.brand || {});
+    const idea = req.body?.idea || generateContentIdeas(campaign, {}, { count: 1 })[0];
+    const draft = generateContentDraft(idea, campaign, req.body?.brand || {});
+    const variants = adaptToChannels(draft, campaign.platforms, req.body?.brand || {});
+    const creative_brief = generateCreativeBrief(draft, req.body?.brand || {});
+    return json(res, 200, {
+      draft,
+      variants,
+      creative_brief,
+      requires_approval: true,
+      auto_publish: false
+    });
+  }
+
+  if (op === 'content_variants') {
+    const draft = req.body?.draft || {};
+    const platforms = req.body?.platforms || [];
+    return json(res, 200, { variants: adaptToChannels(draft, platforms, req.body?.brand || {}) });
+  }
+
+  if (op === 'content_submit_review') {
+    return json(res, 200, { content: submitForReview(req.body?.content || {}) });
+  }
+
+  if (op === 'content_approve') {
+    const content = approveContent(req.body?.content || {}, auth.profile?.id);
+    // optional action log
+    try {
+      await createAction({
+        organizationId,
+        actionType: 'content_publish_approval',
+        payload: { content_status: content.status, title: content.title || content.headline, requires_approval: false, auto_publish: false },
+        createdBy: auth.profile.id,
+        requiresApproval: false,
+        status: 'approved',
+        accessToken: auth.token
+      });
+    } catch (_) {}
+    return json(res, 200, { content });
+  }
+
+  if (op === 'content_edit') {
+    return json(res, 200, { content: editAfterApproval(req.body?.content || {}, req.body?.edits || {}) });
+  }
+
+  if (op === 'content_schedule') {
+    const result = scheduleContent(req.body?.content || {}, req.body?.scheduled_at);
+    if (!result.ok) return json(res, 409, result);
+    return json(res, 200, result);
+  }
+
+  if (op === 'content_publish_mock') {
+    const gate = canPublish(req.body?.content || {});
+    if (!gate.ok) return json(res, 409, { error: 'approval_required', ...gate });
+    const pub = mockPublish(req.body?.content || {}, req.body?.platform);
+    return json(res, 200, { publish: pub, live: false });
+  }
+
+  if (op === 'daily_plan') {
+    const campaign = createCampaign(req.body?.campaign || {}, req.body?.brand || {});
+    return json(res, 200, { plan: generateDailyPlan(campaign, req.body?.brand || {}) });
+  }
+
+  if (op === 'workforce_handoff') {
+    return json(res, 200, runContentHandoff(req.body?.campaign || {}, req.body?.brand || {}));
+  }
+
+  if (op === 'duplicate_check') {
+    return json(res, 200, detectDuplicateContent(req.body?.candidate || {}, req.body?.recent || []));
+  }
+
+  if (op === 'analytics_insight') {
+    return json(res, 200, buildPerformanceInsight(req.body?.metrics || []));
+  }
+
+  return json(res, 400, {
+    error: 'Unknown op',
+    ops: [
+      'brand_get', 'brand_validate', 'campaign_create', 'content_ideas', 'content_generate',
+      'content_variants', 'content_submit_review', 'content_approve', 'content_edit',
+      'content_schedule', 'content_publish_mock', 'daily_plan', 'workforce_handoff',
+      'duplicate_check', 'analytics_insight'
+    ]
+  });
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -1082,6 +1262,7 @@ export default async function handler(req, res) {
     if (route === 'proposal_history') return await handleProposalHistory(req, res, auth);
     if (route === 'proposal_manage') return await handleProposalManage(req, res, auth);
     if (route === 'research') return await handleLeadResearch(req, res, auth);
+    if (route === 'social_studio') return await handleSocialStudio(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });

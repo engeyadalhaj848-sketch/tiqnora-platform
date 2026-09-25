@@ -479,6 +479,30 @@ VIEWS['sales-v6'] = async v => {
       </div>
     </section>
 
+
+    <section class="card v6-studio-card">
+      <div class="card-head">
+        <div>
+          <h2>استوديو المحتوى والتسويق</h2>
+          <p class="card-desc">Brand Brain → حملة → أفكار → مسودة → قنوات → موافقة. لا نشر تلقائي.</p>
+        </div>
+      </div>
+      <div class="v6-studio-controls">
+        <input id="v6-studio-campaign-name" placeholder="اسم الحملة" value="حملة أتمتة واتساب للعيادات" />
+        <input id="v6-studio-industry" placeholder="القطاع" value="dental_clinic" />
+        <input id="v6-studio-location" placeholder="المدينة" value="المدينة المنورة" />
+        <select id="v6-studio-objective">
+          <option value="lead_generation">lead_generation</option>
+          <option value="awareness">awareness</option>
+          <option value="engagement">engagement</option>
+          <option value="education">education</option>
+        </select>
+        <button class="btn-primary" id="v6-studio-run">توليد حملة + أفكار</button>
+        <button class="btn-ghost" id="v6-studio-brand">Brand Brain</button>
+      </div>
+      <div id="v6-studio-results"><div class="muted">ابدأ بتوليد حملة تجريبية (offline-safe).</div></div>
+    </section>
+
     <section class="card v6-research-card">
       <div class="card-head">
         <div>
@@ -1204,6 +1228,113 @@ VIEWS['sales-v6'] = async v => {
 
   $('#v6-research-run') && ($('#v6-research-run').onclick = runResearch);
   $('#v6-research-filter-status') && ($('#v6-research-filter-status').onchange = () => renderResearchResults({ candidates: researchCandidates }));
+
+  
+  let studioState = { campaign: null, ideas: [], draft: null, variants: [], brand: null };
+
+  const renderStudio = () => {
+    const host = $('#v6-studio-results');
+    if (!host) return;
+    const ideas = studioState.ideas || [];
+    host.innerHTML = `
+      <div class="muted" style="margin-bottom:8px">الحملة: <b>${esc(studioState.campaign?.name || '—')}</b> · ${ideas.length} فكرة · auto_publish=false</div>
+      <div class="table-wrap"><table class="v6-history-table">
+        <thead><tr><th>الفكرة</th><th>النوع</th><th>المنصة</th><th>المرحلة</th><th></th></tr></thead>
+        <tbody>
+          ${ideas.slice(0,10).map((idea, idx) => `<tr>
+            <td><b>${esc(idea.title)}</b><div class="muted">${esc(idea.reason || '')}</div></td>
+            <td>${esc(idea.content_type)}</td>
+            <td>${esc(idea.target_platform)}</td>
+            <td>${esc(idea.funnel_stage)}</td>
+            <td><button class="btn-sm btn-ghost" data-studio-draft="${idx}">مسودة</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div id="v6-studio-draft-view"></div>`;
+    $$('[data-studio-draft]').forEach(btn => {
+      btn.onclick = async () => {
+        const idea = studioState.ideas[Number(btn.dataset.studioDraft)];
+        btn.disabled = true;
+        try {
+          const out = await v6Api('social_studio', {
+            method: 'POST',
+            body: { op: 'content_generate', campaign: studioState.campaign, idea, brand: studioState.brand }
+          });
+          studioState.draft = out.draft;
+          studioState.variants = out.variants || [];
+          const v = $('#v6-studio-draft-view');
+          if (v) {
+            v.innerHTML = `<div class="v6-proposal-preview" style="margin-top:12px">
+              <h4>مسودة</h4>
+              <p>${esc(out.draft?.body || '')}</p>
+              <p class="muted">Validation: ${out.draft?.brand_validation?.ok ? 'OK' : 'تحذيرات'} · ${esc((out.draft?.brand_validation?.warnings||[]).join(' | '))}</p>
+              <div class="v6-chip-wrap">${(out.variants||[]).map(x => `<span class="v6-service-chip"><b>${esc(x.platform)}</b></span>`).join('')}</div>
+              <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn-sm btn-primary" id="v6-studio-approve">اعتماد المسودة</button>
+                <button class="btn-sm btn-ghost" id="v6-studio-mock-pub">نشر تجريبي (mock)</button>
+              </div>
+            </div>`;
+            $('#v6-studio-approve').onclick = async () => {
+              let c = submitLike(out.draft);
+              const a = await v6Api('social_studio', { method: 'POST', body: { op: 'content_approve', content: c } });
+              toast('تم الاعتماد — لا يزال النشر يدويًا');
+              studioState.draft = a.content;
+            };
+            $('#v6-studio-mock-pub').onclick = async () => {
+              try {
+                const content = studioState.draft?.status === 'approved' ? studioState.draft : (await v6Api('social_studio', { method: 'POST', body: { op: 'content_approve', content: submitLike(out.draft) } })).content;
+                const pub = await v6Api('social_studio', { method: 'POST', body: { op: 'content_publish_mock', content } });
+                toast(pub.publish?.ok ? 'Mock publish OK' : 'Publish blocked', !!pub.publish?.ok);
+              } catch (e) { toast(e.message, false); }
+            };
+          }
+        } catch (e) { toast(e.message, false); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  const submitLike = (draft) => ({ ...(draft || {}), status: 'review' });
+
+  $('#v6-studio-run') && ($('#v6-studio-run').onclick = async () => {
+    const btn = $('#v6-studio-run');
+    btn.disabled = true;
+    try {
+      const campaign = {
+        name: $('#v6-studio-campaign-name')?.value,
+        industry: $('#v6-studio-industry')?.value,
+        location: $('#v6-studio-location')?.value,
+        objective: $('#v6-studio-objective')?.value,
+        platforms: ['instagram', 'facebook', 'linkedin', 'tiktok']
+      };
+      const brandRes = await v6Api('social_studio', { query: { op: 'brand_get' } });
+      studioState.brand = brandRes.brand;
+      const created = await v6Api('social_studio', { method: 'POST', body: { op: 'campaign_create', campaign, brand: studioState.brand } });
+      studioState.campaign = created.campaign;
+      const ideas = await v6Api('social_studio', { method: 'POST', body: { op: 'content_ideas', campaign: studioState.campaign, brand: studioState.brand, count: 10 } });
+      studioState.ideas = ideas.ideas || [];
+      renderStudio();
+    } catch (e) {
+      const host = $('#v6-studio-results');
+      if (host) host.innerHTML = `<div class="v6-error">${esc(e.message)}</div>`;
+      toast(e.message, false);
+    } finally { btn.disabled = false; }
+  });
+
+  $('#v6-studio-brand') && ($('#v6-studio-brand').onclick = async () => {
+    try {
+      const out = await v6Api('social_studio', { query: { op: 'brand_get' } });
+      openModal(`<div class="v6-history-detail">
+        <h3>Brand Brain — ${esc(out.brand?.brand_name || 'Tiqnora')}</h3>
+        <p>${esc(out.brand?.brand_description || '')}</p>
+        <p class="muted">Colors: ${esc(JSON.stringify(out.brand?.visual_identity?.colors || {}))}</p>
+        <p class="muted">Cities: ${esc((out.brand?.target_cities||[]).join(', '))}</p>
+        <div class="modal-foot"><button type="button" class="btn-primary" id="v6-studio-brand-close">إغلاق</button></div>
+      </div>`);
+      $('#v6-studio-brand-close').onclick = closeModal;
+    } catch (e) { toast(e.message, false); }
+  });
+
 
   $('#v6-proposal-preview').onclick = async () => {
     const leadId = $('#v6-proposal-lead').value;
