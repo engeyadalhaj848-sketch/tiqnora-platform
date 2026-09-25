@@ -532,6 +532,122 @@ async function handleTikTokPosting(req, res) {
   }
 }
 
+async function handleYCloudReply(req, res, { admin, body, event, organizationId, message }) {
+  const forbidden = ['platform', 'to', 'recipient_id', 'account_external_id', 'phone_number_id', 'template', 'kind', 'parent_id', 'comment_id'];
+  if (forbidden.some(key => body[key] != null)) {
+    return send(res, 400, { error: 'Only event_id and message are accepted for a YCloud reply.', code: 'invalid_reply_fields' });
+  }
+  if (event.event_type !== 'message.received' || event.raw_payload?.kind !== 'inbound') {
+    return send(res, 409, { error: 'This is not an incoming WhatsApp message.', code: 'not_inbound_message' });
+  }
+  if (!message || message.length > 4096) {
+    return send(res, 400, { error: 'Reply text must be 1–4096 characters.', code: 'invalid_reply_text' });
+  }
+  try {
+    await resolveOrganization(organizationId, admin);
+  } catch {
+    return send(res, 403, { error: 'Organization access denied.', code: 'organization_access_denied' });
+  }
+
+  const rows = event.connection_id
+    ? await supa(`social_connections?id=eq.${encodeURIComponent(event.connection_id)}&organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.whatsapp&select=*&limit=1`)
+    : [];
+  const connection = Array.isArray(rows) ? rows[0] : null;
+  const rawMessage = event.raw_payload.message || {};
+  const from = String(connection?.external_account_id || '');
+  const to = String(rawMessage.from || '');
+  const validPhone = /^\+[1-9]\d{6,14}$/;
+  if (connection?.status !== 'active' || connection?.settings?.provider !== 'ycloud'
+    || connection?.settings?.ycloud_verified !== true || connection?.settings?.webhook_subscribed !== true
+    || connection?.capabilities?.messaging !== true || !validPhone.test(from) || !validPhone.test(to)
+    || from !== String(rawMessage.to || '') || from !== String(event.account_external_id || '')
+    || to !== String(event.author_external_id || '')
+    || String(connection.settings.waba_id || '') !== String(rawMessage.wabaId || '')) {
+    return send(res, 409, { error: 'The incoming message does not match an enabled YCloud connection.', code: 'ycloud_connection_mismatch' });
+  }
+  const occurredAt = Date.parse(event.occurred_at || '');
+  const ageMs = Date.now() - occurredAt;
+  if (!Number.isFinite(occurredAt) || ageMs < -5 * 60 * 1000 || ageMs >= 24 * 60 * 60 * 1000) {
+    return send(res, 409, { error: 'The 24-hour WhatsApp reply window has closed.', code: 'outside_session_window' });
+  }
+  const apiKey = process.env.YCLOUD_API_KEY;
+  if (!apiKey) return send(res, 503, { error: 'YCloud sending key is not configured.', code: 'ycloud_key_missing' });
+
+  // The incoming event UUID is a single-use reservation. A retry cannot send a second message.
+  const action = {
+    id: event.id, organization_id: organizationId, event_id: event.id,
+    action_type: 'manual_reply', status: 'pending',
+    result: { provider: 'ycloud', from, to, message_preview: message.slice(0, 120) }
+  };
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
+  const reserve = await fetch(`${base}/rest/v1/social_event_actions`, {
+    method: 'POST',
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify(action)
+  });
+  if (!reserve.ok) {
+    if (reserve.status === 409) {
+      const prior = await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&organization_id=eq.${encodeURIComponent(organizationId)}&event_id=eq.${encodeURIComponent(event.id)}&select=status,result&limit=1`);
+      if (prior?.[0]?.status === 'completed') {
+        return send(res, 200, { ok: true, already_sent: true, platform: 'whatsapp', kind: 'message', outbound_external_id: prior[0].result?.outbound_external_id || null });
+      }
+      return send(res, 409, { error: 'A reply is already being processed. Check the inbox before trying again.', code: 'reply_already_processing' });
+    }
+    return send(res, 502, { error: 'Could not reserve this reply.', code: 'reply_reservation_failed' });
+  }
+
+  const payload = { from, to, type: 'text', text: { body: message } };
+  if (/^wamid\./.test(String(rawMessage.wamid || ''))) payload.context = { message_id: rawMessage.wamid };
+  let response;
+  try {
+    response = await fetch('https://api.ycloud.com/v2/whatsapp/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch {
+    return send(res, 502, { error: 'YCloud response is uncertain. Check message status before another reply.', code: 'ycloud_send_uncertain' });
+  }
+  const apiResult = await response.json().catch(() => ({}));
+  if (!response.ok || apiResult?.error) {
+    const errorCode = apiResult?.error?.code || apiResult?.code || `HTTP_${response.status}`;
+    await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&status=eq.pending`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ status: response.status >= 500 ? 'pending' : 'failed', error_message: String(errorCode).slice(0, 120) })
+    });
+    return send(res, response.status === 401 || response.status === 403 ? 503 : 502, {
+      error: 'YCloud did not accept the reply. Check the account and reply window.', code: 'ycloud_send_rejected'
+    });
+  }
+
+  const outboundExternalId = String(apiResult.wamid || apiResult.id || '');
+  if (!outboundExternalId) {
+    return send(res, 502, { error: 'YCloud accepted the request without a message ID. Check status before another reply.', code: 'ycloud_id_missing' });
+  }
+  await supa('social_events?on_conflict=platform,external_event_id', {
+    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify({
+      organization_id: organizationId, connection_id: connection.id, platform: 'whatsapp',
+      event_type: 'message.sent', external_event_id: outboundExternalId,
+      external_parent_id: event.external_event_id || null,
+      author_external_id: 'tiqnora', author_name: 'Tiqnora', content: message,
+      occurred_at: new Date().toISOString(), processing_status: 'processed',
+      raw_payload: { adapter: 'tiqnora_outbound', provider: 'ycloud', status: apiResult.status || 'accepted', in_reply_to: event.id, ycloud_message_id: apiResult.id || null }
+    })
+  });
+  await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&status=eq.pending`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ status: 'completed', result: { ...action.result, outbound_external_id: outboundExternalId, accepted_status: apiResult.status || 'accepted' }, completed_at: new Date().toISOString() })
+  });
+  await supa(`social_events?id=eq.${encodeURIComponent(event.id)}`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ processing_status: 'processed' })
+  });
+  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId });
+}
+
 async function handleSocialReply(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -564,7 +680,7 @@ async function handleSocialReply(req, res) {
     const effectivePlatform = platform || event?.platform;
     if (!effectivePlatform) return send(res, 400, { error: 'platform is required', code: 'platform_required' });
     if (event?.platform === 'whatsapp' && event?.raw_payload?.adapter === 'ycloud') {
-      return send(res, 409, { error: 'Replies for YCloud connections are not configured yet.', code: 'ycloud_reply_unavailable' });
+      return handleYCloudReply(req, res, { admin, body, event, organizationId, message });
     }
     const eventType = String(event?.event_type || '');
     const kind = body.kind || (eventType.startsWith('comment.') ? 'comment' : (body.comment_id ? 'comment' : 'message'));
@@ -896,3 +1012,4 @@ export default async function handler(req, res) {
     return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
+
