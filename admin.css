@@ -640,3 +640,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   .v6-history-timeline>div{grid-template-columns:12px 1fr}
   .v6-history-timeline small{grid-column:2}
 }
+
+.pill.lifecycle-draft{background:rgba(148,163,184,.15);color:#cbd5e1}
+.pill.lifecycle-needs_review{background:rgba(251,191,36,.15);color:#fbbf24}
+.pill.lifecycle-approved,.pill.lifecycle-ready_to_send{background:rgba(45,212,191,.15);color:#2dd4bf}
+.pill.lifecycle-sent,.pill.lifecycle-viewed{background:rgba(96,165,250,.15);color:#60a5fa}
+.pill.lifecycle-negotiation{background:rgba(167,139,250,.15);color:#a78bfa}
+.pill.lifecycle-accepted{background:rgba(52,211,153,.18);color:#34d399}
+.pill.lifecycle-rejected,.pill.lifecycle-expired{background:rgba(248,113,113,.15);color:#f87171}

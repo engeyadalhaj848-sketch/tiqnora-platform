@@ -462,6 +462,7 @@ VIEWS['sales-v6'] = async v => {
             <option value="cancelled">مرفوض / ملغي</option>
           </select>
           <button class="btn-ghost btn-sm" id="v6-history-refresh">تحديث السجل</button>
+          <button class="btn-ghost btn-sm" id="v6-share-link" title="ينسخ رابط أول عرض في القائمة أو المحدد">نسخ رابط العرض</button>
         </div>
       </div>
 
@@ -647,6 +648,28 @@ VIEWS['sales-v6'] = async v => {
     }
   };
 
+
+  const copyProposalShareLink = async (actionId) => {
+    if (!actionId) {
+      toast('اختر عرضًا أولًا', false);
+      return;
+    }
+    try {
+      const out = await v6Api('proposal_manage', {
+        method: 'POST',
+        body: { op: 'share_link', id: actionId }
+      });
+      const path = out.path || (out.share_token ? `/proposal/${out.share_token}` : null);
+      if (!path) throw new Error('لم يُرجع الخادم رابطًا');
+      const url = `${location.origin}${path}`;
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
+      toast('تم نسخ رابط العرض');
+      return url;
+    } catch (e) {
+      toast('تعذر إنشاء رابط العرض: ' + (e.message || e), false);
+    }
+  };
+
   const renderProposalHistory = payload => {
     const host = $('#v6-proposal-history');
     const kpis = $('#v6-history-kpis');
@@ -697,7 +720,10 @@ VIEWS['sales-v6'] = async v => {
                   <td><span class="pill ${v6DeliveryPill(delivery)}">${esc(deliveryLabel)}</span></td>
                   <td>${esc(row.platform || '—')}</td>
                   <td>${row.updated_at ? new Date(row.updated_at).toLocaleString('ar-SA') : '—'}</td>
-                  <td><button class="btn-sm btn-ghost" data-v6-history-view="${esc(row.id)}">تفاصيل</button></td>
+                  <td class="v6-history-row-actions">
+                    <button class="btn-sm btn-ghost" data-v6-history-view="${esc(row.id)}">تفاصيل</button>
+                    <button class="btn-sm btn-ghost" data-v6-history-share="${esc(row.id)}">رابط</button>
+                  </td>
                 </tr>`;
             }).join('')}
           </tbody>
@@ -766,6 +792,15 @@ VIEWS['sales-v6'] = async v => {
           </div>
         `);
         $('#v6-history-close').onclick = closeModal;
+      };
+    });
+
+    $$('[data-v6-history-share]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.dataset.v6HistoryShare;
+        btn.disabled = true;
+        try { await copyProposalShareLink(id); }
+        finally { btn.disabled = false; }
       };
     });
   };
@@ -1012,6 +1047,16 @@ VIEWS['sales-v6'] = async v => {
   $('#v6-new-draft').onclick = () => $('#v6-message')?.focus();
   $('#v6-history-refresh').onclick = loadProposalHistory;
   $('#v6-history-status').onchange = loadProposalHistory;
+  const shareToolbar = $('#v6-share-link');
+  if (shareToolbar) {
+    shareToolbar.onclick = async () => {
+      const id = proposalHistoryRows?.[0]?.id;
+      if (!id) return toast('لا يوجد عرض في السجل', false);
+      shareToolbar.disabled = true;
+      try { await copyProposalShareLink(id); }
+      finally { shareToolbar.disabled = false; }
+    };
+  }
 
   $('#v6-proposal-preview').onclick = async () => {
     const leadId = $('#v6-proposal-lead').value;
