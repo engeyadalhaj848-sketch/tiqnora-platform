@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs"
+    "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs",
+    "prebuild": "node --test tests/v6-inbox-crm.test.mjs"
   }
 }
