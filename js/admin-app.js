@@ -477,7 +477,34 @@ VIEWS['sales-v6'] = async v => {
       <div id="v6-proposal-history">
         <div class="loading-hint">جارٍ تحميل سجل العروض…</div>
       </div>
-    </section>`;
+    </section>
+
+    <section class="card v6-research-card">
+      <div class="card-head">
+        <div>
+          <h2>اكتشاف العملاء</h2>
+          <p class="card-desc">Research → Enrichment → Score → CRM. بدون إرسال تلقائي.</p>
+        </div>
+      </div>
+      <div class="v6-research-controls">
+        <input id="v6-research-query" placeholder="مثال: عيادة أسنان في المدينة المنورة" />
+        <input id="v6-research-city" placeholder="المدينة" />
+        <input id="v6-research-industry" placeholder="القطاع (dental_clinic)" />
+        <input id="v6-research-limit" type="number" min="1" max="50" value="10" title="العدد" />
+        <button class="btn-primary" id="v6-research-run">بحث</button>
+      </div>
+      <div class="v6-research-filters">
+        <select id="v6-research-filter-status">
+          <option value="all">كل الحالات</option>
+          <option value="qualified">مؤهل</option>
+          <option value="enriched">محلل</option>
+          <option value="duplicate">مكرر</option>
+          <option value="imported">مستورد</option>
+        </select>
+      </div>
+      <div id="v6-research-results"><div class="muted">ابدأ ببحث تجريبي (fixture آمن بدون scraping حي).</div></div>
+    </section>
+`;
 
   let currentProposal = null;
   let proposalHistoryRows = [];
@@ -1057,6 +1084,111 @@ VIEWS['sales-v6'] = async v => {
       finally { shareToolbar.disabled = false; }
     };
   }
+
+  
+  let researchCandidates = [];
+  const renderResearchResults = (payload) => {
+    const host = $('#v6-research-results');
+    if (!host) return;
+    researchCandidates = payload?.candidates || [];
+    const filter = $('#v6-research-filter-status')?.value || 'all';
+    const rows = filter === 'all' ? researchCandidates : researchCandidates.filter(c => c.status === filter);
+    const summary = payload?.summary || {};
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty">لا نتائج.</div>';
+      return;
+    }
+    host.innerHTML = `
+      <div class="muted" style="margin-bottom:8px">اكتشف ${summary.discovered ?? researchCandidates.length} · مؤهل ${summary.qualified ?? 0} · مكرر ${summary.duplicates ?? 0}</div>
+      <div class="table-wrap">
+        <table class="v6-history-table">
+          <thead><tr>
+            <th>الشركة</th><th>القطاع</th><th>المدينة</th><th>المصدر</th>
+            <th>الهاتف</th><th>Score</th><th>Grade</th><th>خدمة مقترحة</th><th>الحالة</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${rows.map((c, idx) => {
+              const rec = c.record || c;
+              const services = (c.recommended_services || []).slice(0,2).join(', ');
+              return `<tr>
+                <td><b>${esc(rec.business_name || '—')}</b></td>
+                <td>${esc(c.vertical || rec.industry || '—')}</td>
+                <td>${esc(rec.city || '—')}</td>
+                <td>${esc(rec.source || '—')}</td>
+                <td class="ltr">${esc(rec.phone || '—')}</td>
+                <td><b>${c.opportunity_score ?? '—'}</b></td>
+                <td>${esc(c.grade || '—')}</td>
+                <td>${esc(services || '—')}</td>
+                <td><span class="pill">${esc(c.status || '—')}</span></td>
+                <td>
+                  <button class="btn-sm btn-ghost" data-research-import="${idx}">CRM</button>
+                  <button class="btn-sm btn-ghost" data-research-draft="${idx}">رسالة</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    $$('[data-research-import]').forEach(btn => {
+      btn.onclick = async () => {
+        const c = researchCandidates[Number(btn.dataset.researchImport)];
+        if (!c || c.status === 'duplicate') return toast('لا يمكن استيراد مكرر بهذه الطريقة', false);
+        btn.disabled = true;
+        try {
+          await v6Api('research', { method: 'POST', body: { op: 'import_crm', candidate: { ...c, crm_payload: c.crm_payload } } });
+          toast('تمت إضافة العميل للـ CRM (مراجعة بشرية)');
+          c.status = 'imported';
+          renderResearchResults({ candidates: researchCandidates, summary });
+        } catch (e) { toast(e.message || 'فشل الاستيراد', false); }
+        finally { btn.disabled = false; }
+      };
+    });
+    $$('[data-research-draft]').forEach(btn => {
+      btn.onclick = async () => {
+        const c = researchCandidates[Number(btn.dataset.researchDraft)];
+        if (!c) return;
+        btn.disabled = true;
+        try {
+          const out = await v6Api('research', { method: 'POST', body: { op: 'draft_outreach', candidate: c.record || c } });
+          openModal(`<div class="v6-history-detail"><h3>مسودة تواصل (تحتاج موافقة)</h3>
+            <pre style="white-space:pre-wrap">${esc(out.draft?.text || '')}</pre>
+            <p class="muted">requires_approval=true · auto_send=false</p>
+            <div class="modal-foot"><button type="button" class="btn-primary" id="v6-research-close">إغلاق</button></div></div>`);
+          $('#v6-research-close').onclick = closeModal;
+        } catch (e) { toast(e.message || 'فشل المسودة', false); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  const runResearch = async () => {
+    const host = $('#v6-research-results');
+    if (host) host.innerHTML = '<div class="loading-hint">جارٍ البحث والتحليل…</div>';
+    const btn = $('#v6-research-run');
+    if (btn) btn.disabled = true;
+    try {
+      const out = await v6Api('research', {
+        method: 'POST',
+        body: {
+          op: 'run',
+          query: $('#v6-research-query')?.value || '',
+          city: $('#v6-research-city')?.value || '',
+          industry: $('#v6-research-industry')?.value || '',
+          target_count: Number($('#v6-research-limit')?.value || 10),
+          source: 'fixture'
+        }
+      });
+      renderResearchResults(out);
+    } catch (e) {
+      if (host) host.innerHTML = `<div class="v6-error">${esc(e.message)}</div>`;
+      toast('فشل البحث: ' + e.message, false);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  };
+
+  $('#v6-research-run') && ($('#v6-research-run').onclick = runResearch);
+  $('#v6-research-filter-status') && ($('#v6-research-filter-status').onchange = () => renderResearchResults({ candidates: researchCandidates }));
 
   $('#v6-proposal-preview').onclick = async () => {
     const leadId = $('#v6-proposal-lead').value;
