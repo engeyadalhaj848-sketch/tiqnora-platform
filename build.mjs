@@ -1,4 +1,5 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 
 const output = 'dist';
@@ -110,6 +111,58 @@ async function configureTelegramCommandCenter() {
     console.warn('Telegram Command Center setup failed:', error.message);
   }
 }
+
+
+function verifyBrowserScriptSyntax() {
+  for (const file of ['js/admin-app.js', 'js/social-inbox-admin.js']) {
+    if (!existsSync(file)) continue;
+    try {
+      new vm.Script(readFileSync(file, 'utf8'), { filename: file });
+      console.log(`Syntax OK → ${file}`);
+    } catch (error) {
+      console.error(`Syntax FAILED → ${file}: ${error.message}`);
+      throw error;
+    }
+  }
+}
+
+async function runV6PreviewBuildSmoke() {
+  if (process.env.VERCEL_ENV !== 'preview') return;
+  if (process.env.VERCEL_GIT_COMMIT_REF !== 'tiqnora-v6-growth-os') return;
+
+  const { classifyIntent, generateSalesReply } = await import('./lib/ai/provider.js');
+  const sample = 'أبي أسوي موقع احترافي لعيادة أسنان في المدينة المنورة مع حجز مواعيد وربط واتساب ومتابعة العملاء.';
+  const intent = await classifyIntent({ text: sample, language: 'ar' });
+  const sales = await generateSalesReply({
+    lead: {
+      company_name: 'عيادة اختبار V6',
+      industry: 'dental_clinic',
+      city: 'المدينة المنورة',
+      source: 'v6_build_smoke',
+      opportunity_score: 88
+    },
+    messages: [{ direction: 'inbound', body: sample }],
+    language: 'ar'
+  });
+
+  // Synthetic data only; never print secrets or customer data.
+  console.log('V6_BUILD_SMOKE=' + JSON.stringify({
+    ok: true,
+    intent: intent.intent,
+    confidence: intent.confidence,
+    sentiment: intent.sentiment,
+    priority: intent.priority,
+    draft: sales.reply_draft,
+    qualification: sales.qualification,
+    next_best_action: sales.next_best_action,
+    suggested_stage: sales.suggested_stage,
+    model: sales.model,
+    provider: sales.provider
+  }));
+}
+
+verifyBrowserScriptSyntax();
+await runV6PreviewBuildSmoke();
 
 await configureTelegramCommandCenter();
 console.log('Build complete → dist/');
