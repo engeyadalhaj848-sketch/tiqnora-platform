@@ -850,7 +850,12 @@ async function handleLeadResearch(req, res, auth) {
       industry: req.body?.industry,
       target_count: req.body?.target_count || req.body?.limit,
       source: req.body?.source || 'fixture',
-      filters: req.body?.filters
+      filters: req.body?.filters,
+      min_rating: req.body?.min_rating,
+      min_reviews: req.body?.min_reviews,
+      latitude: req.body?.latitude,
+      longitude: req.body?.longitude,
+      radius_m: req.body?.radius_m
     });
 
     // Load existing leads for dedupe (best effort)
@@ -863,11 +868,20 @@ async function handleLeadResearch(req, res, auth) {
       existing = Array.isArray(rows) ? rows : [];
     } catch (_) {}
 
-    const result = await runResearchJob(spec, {
-      existingCandidates: existing,
-      provider: req.body?.source || 'fixture',
-      rows: req.body?.rows || []
-    });
+    let result;
+    try {
+      result = await runResearchJob(spec, {
+        existingCandidates: existing,
+        provider: req.body?.source || spec.source || 'fixture',
+        rows: req.body?.rows || []
+      });
+    } catch (err) {
+      return json(res, err.status || 500, {
+        error: err.message || 'Research failed',
+        code: err.code || 'research_error',
+        job: { ...spec, status: 'failed', error_message: err.message || 'Research failed' }
+      });
+    }
 
     // Persist job + candidates when service role available (non-fatal if tables missing)
     let jobId = null;

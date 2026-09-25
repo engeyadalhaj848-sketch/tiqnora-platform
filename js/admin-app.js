@@ -490,9 +490,17 @@ VIEWS['sales-v6'] = async v => {
         <input id="v6-research-query" placeholder="مثال: عيادة أسنان في المدينة المنورة" />
         <input id="v6-research-city" placeholder="المدينة" />
         <input id="v6-research-industry" placeholder="القطاع (dental_clinic)" />
-        <input id="v6-research-limit" type="number" min="1" max="50" value="10" title="العدد" />
-        <button class="btn-primary" id="v6-research-run">بحث</button>
+        <select id="v6-research-source" title="المصدر">
+          <option value="fixture">تجريبي (fixture)</option>
+          <option value="google_places">Google Places</option>
+          <option value="manual">يدوي</option>
+        </select>
+        <input id="v6-research-limit" type="number" min="1" max="40" value="10" title="العدد" />
+        <input id="v6-research-min-rating" type="number" min="0" max="5" step="0.1" placeholder="أدنى تقييم" title="أدنى تقييم" />
+        <input id="v6-research-min-reviews" type="number" min="0" placeholder="أدنى مراجعات" title="أدنى مراجعات" />
+        <button class="btn-primary" id="v6-research-run">بدء البحث</button>
       </div>
+      <div id="v6-research-status" class="muted" style="margin:6px 0">الحالة: Idle</div>
       <div class="v6-research-filters">
         <select id="v6-research-filter-status">
           <option value="all">كل الحالات</option>
@@ -1167,6 +1175,8 @@ VIEWS['sales-v6'] = async v => {
     const btn = $('#v6-research-run');
     if (btn) btn.disabled = true;
     try {
+      const statusEl = $('#v6-research-status');
+      if (statusEl) statusEl.textContent = 'الحالة: Running…';
       const out = await v6Api('research', {
         method: 'POST',
         body: {
@@ -1175,12 +1185,17 @@ VIEWS['sales-v6'] = async v => {
           city: $('#v6-research-city')?.value || '',
           industry: $('#v6-research-industry')?.value || '',
           target_count: Number($('#v6-research-limit')?.value || 10),
-          source: 'fixture'
+          source: $('#v6-research-source')?.value || 'fixture',
+          min_rating: $('#v6-research-min-rating')?.value !== '' ? Number($('#v6-research-min-rating').value) : undefined,
+          min_reviews: $('#v6-research-min-reviews')?.value !== '' ? Number($('#v6-research-min-reviews').value) : undefined
         }
       });
+      if (statusEl) statusEl.textContent = `الحالة: Completed · ${out.summary?.discovered ?? 0} نتيجة`;
       renderResearchResults(out);
     } catch (e) {
       if (host) host.innerHTML = `<div class="v6-error">${esc(e.message)}</div>`;
+      const statusEl = $('#v6-research-status');
+      if (statusEl) statusEl.textContent = 'الحالة: Failed';
       toast('فشل البحث: ' + e.message, false);
     } finally {
       if (btn) btn.disabled = false;
