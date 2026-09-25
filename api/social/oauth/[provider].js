@@ -563,6 +563,9 @@ async function handleSocialReply(req, res) {
 
     const effectivePlatform = platform || event?.platform;
     if (!effectivePlatform) return send(res, 400, { error: 'platform is required', code: 'platform_required' });
+    if (event?.platform === 'whatsapp' && event?.raw_payload?.adapter === 'ycloud') {
+      return send(res, 409, { error: 'Replies for YCloud connections are not configured yet.', code: 'ycloud_reply_unavailable' });
+    }
     const eventType = String(event?.event_type || '');
     const kind = body.kind || (eventType.startsWith('comment.') ? 'comment' : (body.comment_id ? 'comment' : 'message'));
     const externalParentId = body.comment_id || body.parent_id || event?.external_event_id || null;
@@ -613,10 +616,19 @@ async function handleSocialReply(req, res) {
         apiResult = await graphPost(path, pageToken, { recipient: { id: recipientId }, messaging_type: 'RESPONSE', message: { text: message } });
       }
     } else if (effectivePlatform === 'whatsapp') {
-      const conn = await loadConnection('whatsapp', accountExternalId);
+      const eventConnections = event?.connection_id
+        ? await supa(`social_connections?id=eq.${encodeURIComponent(event.connection_id)}&organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.whatsapp&select=*&limit=1`)
+        : [];
+      const conn = eventConnections?.[0] || await loadConnection('whatsapp', accountExternalId);
+      if (conn?.settings?.provider === 'ycloud') {
+        return send(res, 409, { error: 'Replies for YCloud connections are not configured yet.', code: 'ycloud_reply_unavailable' });
+      }
       usedConnection = conn;
-      const phoneNumberId = body.phone_number_id || conn?.external_account_id || conn?.settings?.phone_number_id;
+      const phoneNumberId = conn?.settings?.phone_number_id || conn?.external_account_id;
       if (!phoneNumberId) return send(res, 409, { error: 'WhatsApp Phone Number ID not connected', code: 'whatsapp_not_connected', reconnect: true });
+      if (body.phone_number_id && String(body.phone_number_id) !== String(phoneNumberId)) {
+        return send(res, 409, { error: 'Requested WhatsApp Phone Number ID does not match the connected account', code: 'phone_number_mismatch' });
+      }
       let accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_SYSTEM_USER_TOKEN || null;
       if (!accessToken) {
         const rows = await supa(`social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=in.(whatsapp,meta)&select=ciphertext,iv,tag,provider&order=updated_at.desc`);
