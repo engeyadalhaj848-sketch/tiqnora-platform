@@ -549,6 +549,7 @@ VIEWS['sales-v6'] = async v => {
         .eq('status', 'open').order('created_at', { ascending: false }).limit(12),
       db.from('appointments').select('id', { count: 'exact', head: true }).in('status', ['scheduled','confirmed']).gte('starts_at', nowIso),
       v6Api('actions', { query: { status: 'pending_approval', limit: '30' } }),
+      v6Api('actions', { query: { status: 'approved', limit: '50' } }),
       db.from('leads')
         .select('id,name,contact_name,company_name,industry,opportunity_score,status,pipeline_stage,created_at')
         .order('opportunity_score', { ascending: false })
@@ -563,7 +564,9 @@ VIEWS['sales-v6'] = async v => {
     const oppRows = safe(3).data || [];
     const apptCount = safe(4).count ?? 0;
     const pendingActions = safe(5, { actions: [] }).actions || [];
-    const proposalLeads = safe(6).data || [];
+    const approvedProposalActions = (safe(6, { actions: [] }).actions || []).filter(a => a.action_type === 'proposal_review');
+    const actionableItems = [...pendingActions, ...approvedProposalActions];
+    const proposalLeads = safe(7).data || [];
 
     const leadSelect = $('#v6-proposal-lead');
     if (leadSelect) {
@@ -583,12 +586,12 @@ VIEWS['sales-v6'] = async v => {
       <div class="kpi"><div class="k">مواعيد قادمة</div><div class="v">${apptCount}</div></div>
     `;
 
-    $('#v6-pending-count').textContent = pendingActions.length;
+    $('#v6-pending-count').textContent = actionableItems.length;
 
-    if (!pendingActions.length) {
-      actionsEl.innerHTML = '<div class="empty">لا توجد إجراءات بانتظار الموافقة حاليًا</div>';
+    if (!actionableItems.length) {
+      actionsEl.innerHTML = '<div class="empty">لا توجد إجراءات بانتظار المراجعة أو الإرسال حاليًا</div>';
     } else {
-      actionsEl.innerHTML = pendingActions.map(a => {
+      actionsEl.innerHTML = actionableItems.map(a => {
         const p = a.payload || {};
         const isProposal = a.action_type === 'proposal_review' && p.proposal;
         const draft = isProposal
@@ -611,8 +614,12 @@ VIEWS['sales-v6'] = async v => {
               <span>الخطوة التالية: <b>${esc(next)}</b></span>
             </div>
             <div class="v6-action-buttons">
-              <button class="btn-primary btn-sm" data-v6-approve="${esc(a.id)}">موافقة</button>
-              <button class="btn-danger btn-sm" data-v6-reject="${esc(a.id)}">رفض</button>
+              ${isProposal && a.status === 'approved'
+                ? `<button class="btn-primary btn-sm" data-v6-send-proposal="${esc(a.id)}">معاينة وإرسال</button>`
+                : `
+                  <button class="btn-primary btn-sm" data-v6-approve="${esc(a.id)}">موافقة</button>
+                  <button class="btn-danger btn-sm" data-v6-reject="${esc(a.id)}">رفض</button>
+                `}
             </div>
           </div>`;
       }).join('');
@@ -665,6 +672,83 @@ VIEWS['sales-v6'] = async v => {
           await load();
         } catch (e) {
           toast('تعذر الرفض: ' + e.message, false);
+          btn.disabled = false;
+        }
+      };
+    });
+
+    $('[data-v6-send-proposal]').forEach(btn => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          const prepared = await v6Api('proposal_delivery', {
+            method: 'POST',
+            body: { op: 'prepare', action_id: btn.dataset.v6SendProposal }
+          });
+
+          openModal(`
+            <h3>مراجعة إرسال العرض</h3>
+            <p class="card-desc">القناة: <b>${esc(prepared.platform || '—')}</b> · العميل: <b>${esc(prepared.recipient || '—')}</b></p>
+            <label>النص الذي سيُرسل للعميل</label>
+            <textarea id="v6-delivery-message" rows="14" readonly>${esc(prepared.message || '')}</textarea>
+            <div class="v6-safe-box" style="margin-top:10px">هذا زر إرسال يدوي. الموافقة السابقة لا ترسل شيئًا تلقائيًا، والضغط على «إرسال الآن» هو خطوة الإرسال الفعلية.</div>
+            <div class="modal-foot">
+              <button type="button" class="btn-ghost" id="v6-delivery-cancel">إلغاء</button>
+              <button type="button" class="btn-primary" id="v6-delivery-send">إرسال الآن</button>
+            </div>
+          `);
+
+          $('#v6-delivery-cancel').onclick = closeModal;
+          $('#v6-delivery-send').onclick = async () => {
+            const sendBtn = $('#v6-delivery-send');
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'جارٍ الإرسال…';
+            try {
+              const { data: { session } } = await db.auth.getSession();
+              const token = session?.access_token;
+              if (!token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+
+              const replyRes = await fetch('/api/social/reply', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: 'Bearer ' + token
+                },
+                body: JSON.stringify({
+                  event_id: prepared.event_id,
+                  message: prepared.message,
+                  action_id: prepared.action_id
+                })
+              });
+              const reply = await replyRes.json().catch(() => ({}));
+              if (!replyRes.ok) throw new Error(reply.error || reply.code || ('HTTP ' + replyRes.status));
+              if (!reply.outbound_external_id) throw new Error('مزود القناة لم يرجع معرّف الرسالة الصادرة.');
+
+              await v6Api('proposal_delivery', {
+                method: 'POST',
+                body: {
+                  op: 'record_sent',
+                  action_id: prepared.action_id,
+                  source_event_id: prepared.event_id,
+                  outbound_external_id: reply.outbound_external_id,
+                  outbound_event_id: reply.event_id || null,
+                  provider_status: reply.status || 'sent',
+                  platform: reply.platform || prepared.platform
+                }
+              });
+
+              closeModal();
+              toast('تم إرسال العرض يدويًا وتسجيله في CRM');
+              await load();
+            } catch (e) {
+              toast('تعذر إرسال العرض: ' + e.message, false);
+              sendBtn.disabled = false;
+              sendBtn.textContent = 'إرسال الآن';
+            }
+          };
+        } catch (e) {
+          toast('تعذر تجهيز الإرسال: ' + e.message, false);
+        } finally {
           btn.disabled = false;
         }
       };
