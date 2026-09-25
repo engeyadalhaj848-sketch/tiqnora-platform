@@ -272,6 +272,21 @@ const v6ActionStatusLabel = {
   cancelled: 'ملغي'
 };
 
+const v6DeliveryStatusLabel = {
+  accepted: 'مقبول من المزود',
+  sent: 'تم الإرسال',
+  delivered: 'تم التسليم',
+  read: 'تمت القراءة',
+  failed: 'فشل التسليم'
+};
+
+function v6DeliveryPill(status) {
+  if (status === 'read' || status === 'delivered') return 'ok';
+  if (status === 'sent' || status === 'accepted') return 'warn';
+  if (status === 'failed') return 'danger';
+  return 'muted';
+}
+
 function v6ActionPill(status) {
   if (status === 'completed' || status === 'approved') return 'ok';
   if (status === 'pending_approval' || status === 'draft' || status === 'executing') return 'warn';
@@ -377,9 +392,41 @@ VIEWS['sales-v6'] = async v => {
       <div id="v6-proposal-result">
         <div class="empty">اختر Lead ثم اضغط «معاينة العرض».</div>
       </div>
+    </section>
+
+    <section class="card v6-proposal-history-card">
+      <div class="card-head">
+        <div>
+          <h2>سجل العروض</h2>
+          <p class="card-desc">تتبّع Proposal من الإنشاء والموافقة حتى الإرسال والتسليم والقراءة.</p>
+        </div>
+        <div class="v6-history-tools">
+          <select id="v6-history-status" aria-label="تصفية حالة العرض">
+            <option value="all">كل الحالات</option>
+            <option value="pending_approval">بانتظار الموافقة</option>
+            <option value="approved">معتمد ولم يُرسل</option>
+            <option value="completed">تم الإرسال</option>
+            <option value="cancelled">مرفوض / ملغي</option>
+          </select>
+          <button class="btn-ghost btn-sm" id="v6-history-refresh">تحديث السجل</button>
+        </div>
+      </div>
+
+      <div class="v6-history-kpis" id="v6-history-kpis">
+        <div class="v6-history-kpi"><span>الإجمالي</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>بانتظار الموافقة</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>بانتظار الإرسال</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>تم التسليم</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>تمت القراءة</span><b>—</b></div>
+      </div>
+
+      <div id="v6-proposal-history">
+        <div class="loading-hint">جارٍ تحميل سجل العروض…</div>
+      </div>
     </section>`;
 
   let currentProposal = null;
+  let proposalHistoryRows = [];
 
   const proposalPricingFromUi = () => {
     const rows = $$('[data-proposal-price]');
@@ -533,6 +580,157 @@ VIEWS['sales-v6'] = async v => {
     };
   };
 
+  const proposalAmount = row => {
+    const value = row?.total ?? row?.subtotal;
+    if (value === null || value === undefined || value === '') return '—';
+    try {
+      return new Intl.NumberFormat('ar-SA', {
+        style: 'currency',
+        currency: row.currency || 'SAR',
+        maximumFractionDigits: 2
+      }).format(Number(value));
+    } catch {
+      return `${Number(value).toLocaleString('ar-SA')} ${row.currency || 'SAR'}`;
+    }
+  };
+
+  const renderProposalHistory = payload => {
+    const host = $('#v6-proposal-history');
+    const kpis = $('#v6-history-kpis');
+    if (!host || !kpis) return;
+
+    proposalHistoryRows = payload?.proposals || [];
+    const summary = payload?.summary || {};
+
+    kpis.innerHTML = `
+      <div class="v6-history-kpi"><span>الإجمالي</span><b>${summary.total ?? proposalHistoryRows.length}</b></div>
+      <div class="v6-history-kpi"><span>بانتظار الموافقة</span><b>${summary.pending_approval ?? 0}</b></div>
+      <div class="v6-history-kpi"><span>بانتظار الإرسال</span><b>${summary.approved ?? 0}</b></div>
+      <div class="v6-history-kpi"><span>تم التسليم</span><b>${summary.delivered ?? 0}</b></div>
+      <div class="v6-history-kpi"><span>تمت القراءة</span><b>${summary.read ?? 0}</b></div>
+    `;
+
+    if (!proposalHistoryRows.length) {
+      host.innerHTML = '<div class="empty">لا توجد عروض في هذا الفلتر.</div>';
+      return;
+    }
+
+    host.innerHTML = `
+      <div class="table-wrap v6-history-table-wrap">
+        <table class="v6-history-table">
+          <thead>
+            <tr>
+              <th>العميل</th>
+              <th>العرض</th>
+              <th>المبلغ</th>
+              <th>المراجعة</th>
+              <th>التسليم</th>
+              <th>القناة</th>
+              <th>آخر تحديث</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${proposalHistoryRows.map(row => {
+              const delivery = String(row.delivery_status || '').toLowerCase();
+              const statusLabel = v6ActionStatusLabel[row.status] || row.status || '—';
+              const deliveryLabel = delivery ? (v6DeliveryStatusLabel[delivery] || delivery) : (row.status === 'approved' ? 'لم يُرسل بعد' : '—');
+              return `
+                <tr>
+                  <td><b>${esc(row.client_name || 'عميل CRM')}</b><div class="muted">${esc(row.vertical || 'general')}</div></td>
+                  <td>${esc(row.title || 'Proposal')}<div class="muted">${esc(row.proposal_status || '—')}</div></td>
+                  <td><b>${esc(proposalAmount(row))}</b></td>
+                  <td><span class="pill ${v6ActionPill(row.status)}">${esc(statusLabel)}</span></td>
+                  <td><span class="pill ${v6DeliveryPill(delivery)}">${esc(deliveryLabel)}</span></td>
+                  <td>${esc(row.platform || '—')}</td>
+                  <td>${row.updated_at ? new Date(row.updated_at).toLocaleString('ar-SA') : '—'}</td>
+                  <td><button class="btn-sm btn-ghost" data-v6-history-view="${esc(row.id)}">تفاصيل</button></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    $('[data-v6-history-view]').forEach(btn => {
+      btn.onclick = () => {
+        const row = proposalHistoryRows.find(x => x.id === btn.dataset.v6HistoryView);
+        if (!row) return;
+        const proposal = row.proposal || {};
+        const pricing = proposal.pricing || {};
+        const solution = Array.isArray(proposal.recommended_solution) ? proposal.recommended_solution : [];
+        const delivery = String(row.delivery_status || '').toLowerCase();
+        const timeline = [
+          ['تم إنشاء المسودة', row.created_at],
+          ['تمت الموافقة', row.approved_at],
+          ['تم الإرسال', row.sent_at],
+          ['آخر تحديث للتسليم', row.delivery_status_at]
+        ].filter(([, value]) => value);
+
+        openModal(`
+          <div class="v6-history-detail">
+            <div class="v6-result-head">
+              <div>
+                <span class="pill ${v6ActionPill(row.status)}">${esc(v6ActionStatusLabel[row.status] || row.status || '—')}</span>
+                <span class="pill ${v6DeliveryPill(delivery)}">${esc(delivery ? (v6DeliveryStatusLabel[delivery] || delivery) : 'غير مرسل')}</span>
+              </div>
+              <span class="muted">Proposal ID: ${esc(row.id)}</span>
+            </div>
+            <h3>${esc(row.title || 'Proposal')}</h3>
+            <p class="card-desc">العميل: <b>${esc(row.client_name || '—')}</b> · القطاع: <b>${esc(row.vertical || 'general')}</b></p>
+
+            <div class="v6-history-detail-grid">
+              <div><span>المبلغ</span><b>${esc(proposalAmount(row))}</b></div>
+              <div><span>حالة التسعير</span><b>${esc(row.pricing_status || '—')}</b></div>
+              <div><span>القناة</span><b>${esc(row.platform || '—')}</b></div>
+              <div><span>معرّف الرسالة</span><b class="ltr">${esc(row.outbound_external_id || '—')}</b></div>
+            </div>
+
+            <div class="v6-history-detail-section">
+              <h4>الحل المقترح</h4>
+              ${solution.length
+                ? `<div class="v6-chip-wrap">${solution.map(item => `<span class="v6-service-chip"><b>${esc(item.label || item.service)}</b></span>`).join('')}</div>`
+                : '<div class="muted">لا توجد خدمات مسجلة.</div>'}
+            </div>
+
+            <div class="v6-history-detail-section">
+              <h4>التسعير المؤكد</h4>
+              <div class="v6-history-pricing">
+                <span>قبل الضريبة: <b>${pricing.subtotal == null ? '—' : esc(proposalAmount({total: pricing.subtotal, currency: pricing.currency}))}</b></span>
+                <span>VAT: <b>${pricing.vat == null ? '—' : esc(proposalAmount({total: pricing.vat, currency: pricing.currency}))}</b></span>
+                <span>الإجمالي: <b>${pricing.total == null ? '—' : esc(proposalAmount({total: pricing.total, currency: pricing.currency}))}</b></span>
+              </div>
+            </div>
+
+            <div class="v6-history-detail-section">
+              <h4>الخط الزمني</h4>
+              <div class="v6-history-timeline">
+                ${timeline.map(([label, value]) => `<div><span></span><b>${esc(label)}</b><small>${new Date(value).toLocaleString('ar-SA')}</small></div>`).join('')}
+              </div>
+            </div>
+
+            ${row.error_message ? `<div class="v6-error">خطأ: ${esc(row.error_message)}</div>` : ''}
+            <div class="modal-foot"><button type="button" class="btn-primary" id="v6-history-close">إغلاق</button></div>
+          </div>
+        `);
+        $('#v6-history-close').onclick = closeModal;
+      };
+    });
+  };
+
+  const loadProposalHistory = async () => {
+    const host = $('#v6-proposal-history');
+    if (host) host.innerHTML = '<div class="loading-hint">جارٍ تحميل سجل العروض…</div>';
+    const status = $('#v6-history-status')?.value || 'all';
+    try {
+      const payload = await v6Api('proposal_history', {
+        query: { status, limit: '80' }
+      });
+      renderProposalHistory(payload);
+    } catch (e) {
+      if (host) host.innerHTML = `<div class="v6-error">تعذر تحميل سجل العروض: ${esc(e.message)}</div>`;
+    }
+  };
+
   const load = async () => {
     const actionsEl = $('#v6-actions');
     const pipeEl = $('#v6-pipeline');
@@ -677,7 +875,7 @@ VIEWS['sales-v6'] = async v => {
       };
     });
 
-    $('[data-v6-send-proposal]').forEach(btn => {
+    $$('[data-v6-send-proposal]').forEach(btn => {
       btn.onclick = async () => {
         btn.disabled = true;
         try {
@@ -753,10 +951,14 @@ VIEWS['sales-v6'] = async v => {
         }
       };
     });
+
+    await loadProposalHistory();
   };
 
   $('#v6-refresh').onclick = load;
   $('#v6-new-draft').onclick = () => $('#v6-message')?.focus();
+  $('#v6-history-refresh').onclick = loadProposalHistory;
+  $('#v6-history-status').onchange = loadProposalHistory;
 
   $('#v6-proposal-preview').onclick = async () => {
     const leadId = $('#v6-proposal-lead').value;

@@ -523,6 +523,78 @@ async function handleProposalDelivery(req, res, auth) {
   return json(res, 400, { error: 'op must be prepare|record_sent' });
 }
 
+async function handleProposalHistory(req, res, auth) {
+  if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+
+  const organizationId = req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+
+  const limit = Math.min(parseInt(req.query?.limit || '60', 10) || 60, 200);
+  const leadId = String(req.query?.lead_id || '').trim();
+  const status = String(req.query?.status || '').trim().toLowerCase();
+
+  let path =
+    `actions?organization_id=eq.${encodeURIComponent(organizationId)}&action_type=eq.proposal_review&select=id,organization_id,status,payload,result,lead_id,conversation_id,created_by,approved_by,approved_at,executed_at,error_code,error_message,created_at,updated_at&order=created_at.desc&limit=${limit}`;
+  if (leadId) path += `&lead_id=eq.${encodeURIComponent(leadId)}`;
+  if (status && status !== 'all') path += `&status=eq.${encodeURIComponent(status)}`;
+
+  const rows = await sbGet(path, auth.token);
+  const proposals = (Array.isArray(rows) ? rows : []).map(action => {
+    const proposal = action.payload?.proposal || {};
+    const pricing = proposal.pricing || {};
+    const result = action.result || {};
+    const deliveryStatus = result.delivery_status || null;
+    const clientName =
+      action.payload?.client_name
+      || proposal.client?.name
+      || null;
+
+    return {
+      id: action.id,
+      status: action.status,
+      lead_id: action.lead_id || null,
+      conversation_id: action.conversation_id || null,
+      client_name: clientName,
+      title: proposal.title || 'Proposal',
+      language: proposal.language || 'ar',
+      vertical: proposal.client?.vertical || null,
+      proposal_status: action.payload?.proposal_status || proposal.status || null,
+      pricing_status: action.payload?.pricing_status || pricing.status || null,
+      currency: pricing.currency || 'SAR',
+      subtotal: pricing.subtotal ?? null,
+      vat: pricing.vat ?? null,
+      total: pricing.total ?? null,
+      delivery_status: deliveryStatus,
+      platform: result.platform || null,
+      outbound_external_id: result.outbound_external_id || null,
+      sent_at: result.sent_at || action.executed_at || null,
+      delivery_status_at: result.delivery_status_at || null,
+      approved_at: action.approved_at || null,
+      executed_at: action.executed_at || null,
+      created_at: action.created_at,
+      updated_at: action.updated_at,
+      error_code: action.error_code || null,
+      error_message: action.error_message || null,
+      proposal,
+      result
+    };
+  });
+
+  const summary = {
+    total: proposals.length,
+    pending_approval: proposals.filter(x => x.status === 'pending_approval').length,
+    approved: proposals.filter(x => x.status === 'approved').length,
+    completed: proposals.filter(x => x.status === 'completed').length,
+    rejected: proposals.filter(x => x.status === 'cancelled').length,
+    sent: proposals.filter(x => ['sent', 'accepted', 'delivered', 'read'].includes(String(x.delivery_status || '').toLowerCase())).length,
+    delivered: proposals.filter(x => ['delivered', 'read'].includes(String(x.delivery_status || '').toLowerCase())).length,
+    read: proposals.filter(x => String(x.delivery_status || '').toLowerCase() === 'read').length,
+    failed: proposals.filter(x => String(x.delivery_status || '').toLowerCase() === 'failed').length
+  };
+
+  return json(res, 200, { proposals, summary });
+}
+
 async function handleActions(req, res, auth) {
   const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
   if (!organizationId) return json(res, 500, { error: 'Organization missing' });
@@ -617,6 +689,7 @@ export default async function handler(req, res) {
     if (route === 'draft_reply') return await handleDraftReply(req, res, auth);
     if (route === 'proposal') return await handleProposal(req, res, auth);
     if (route === 'proposal_delivery') return await handleProposalDelivery(req, res, auth);
+    if (route === 'proposal_history') return await handleProposalHistory(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
