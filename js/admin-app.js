@@ -263,8 +263,8 @@ VIEWS['social-inbox'] = async v => {
   </div>`;
 
   const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
-    db.from('social_connections').select('id,platform,status,account_name'),
-    db.from('social_events').select('id,platform,intent,processing_status,received_at,author_name,content').order('received_at', { ascending: false }).limit(80)
+    db.from('social_connections').select('id,platform,status,account_name,capabilities'),
+    db.from('social_events').select('id,platform,intent,processing_status,received_at,occurred_at,author_name,author_external_id,content,event_type,connection_id').order('received_at', { ascending: false }).limit(80)
   ]);
 
   // Mount extended admin cards (connections, rules, webhook) without breaking
@@ -332,6 +332,61 @@ VIEWS['social-inbox'] = async v => {
         <p class="card-desc">الرد يتم عبر مسارات المنصة الحالية (OAuth / API). لا تغيير على Webhooks.</p>
         <a class="btn-primary btn-sm" style="display:inline-block;text-decoration:none;padding:8px 14px" href="#social-inbox">تحديث القائمة</a>
       </div>`;
+
+    const connection = connections.find(item => item.id === ev.connection_id);
+    const sentAt = Date.parse(ev.occurred_at || '');
+    const ageMs = Date.now() - sentAt;
+    const canReply = ev.platform === 'whatsapp' && ev.event_type === 'message.received'
+      && ev.processing_status !== 'processed' && connection?.status === 'active'
+      && connection?.capabilities?.messaging === true
+      && Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
+    if (canReply) {
+      const area = panel.querySelector('.thread-reply');
+      area.replaceChildren();
+      const label = document.createElement('label');
+      label.textContent = 'رد واتساب إلى ' + (ev.author_external_id || ev.author_name || 'العميل');
+      const input = document.createElement('textarea');
+      input.rows = 4;
+      input.maxLength = 4096;
+      input.placeholder = 'اكتب ردك هنا';
+      label.appendChild(input);
+      area.appendChild(label);
+      const sendButton = document.createElement('button');
+      sendButton.type = 'button';
+      sendButton.className = 'btn-primary btn-sm';
+      sendButton.textContent = 'إرسال الرد';
+      area.appendChild(sendButton);
+      const feedback = document.createElement('p');
+      feedback.className = 'card-desc';
+      area.appendChild(feedback);
+      sendButton.onclick = async () => {
+        const message = input.value.trim();
+        if (!message) { feedback.textContent = 'اكتب الرد أولًا.'; return; }
+        sendButton.disabled = true;
+        feedback.textContent = 'جارٍ إرسال الرد…';
+        try {
+          const session = await window.TiqnoraDB?.client?.auth?.getSession?.();
+          const token = session?.data?.session?.access_token;
+          if (!token) throw new Error('يجب تسجيل الدخول كمسؤول.');
+          const response = await fetch('/api/social/reply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+            body: JSON.stringify({ event_id: ev.id, message })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || result.code || ('HTTP ' + response.status));
+          feedback.textContent = result.status === 'accepted'
+            ? 'قبل YCloud الرد، وهو قيد الإرسال. تحقق من واتساب للتسليم.'
+            : 'تم إرسال الرد.';
+          sendButton.textContent = 'تم';
+          ev.processing_status = 'processed';
+          renderList();
+        } catch (error) {
+          feedback.textContent = 'تعذر إرسال الرد: ' + (error.message || error);
+          sendButton.disabled = false;
+        }
+      };
+    }
   };
 
   const renderList = () => {
