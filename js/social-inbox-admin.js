@@ -980,15 +980,11 @@
             replyBtn.className = 'btn-sm';
             replyBtn.type = 'button';
             replyBtn.textContent = 'رد';
-            replyBtn.onclick = async () => {
-              const text = window.prompt('اكتب الرد الذي سيُرسل عبر ' + item.platform + ':', '');
-              if (!text || !String(text).trim()) return;
-              if (item.raw_payload?.adapter === 'ycloud') {
-                const to = item.author_external_id || 'العميل';
-                if (!window.confirm(`إرسال رد واتساب إلى ${to}؟\n\n${String(text).trim()}`)) return;
-              }
-              replyBtn.disabled = true;
-              replyBtn.textContent = 'جارٍ…';
+            const submitReply = async (message, button) => {
+              const text = String(message || '').trim();
+              if (!text) return;
+              button.disabled = true;
+              button.textContent = 'جارٍ…';
               try {
                 const session = await window.TiqnoraDB?.client?.auth?.getSession?.();
                 const token = session?.data?.session?.access_token;
@@ -996,18 +992,55 @@
                 const r = await fetch('/api/social/reply', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-                  body: JSON.stringify({ event_id: item.id, message: String(text).trim() })
+                  body: JSON.stringify({ event_id: item.id, message: text })
                 });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || j.code || ('HTTP ' + r.status));
-                replyBtn.textContent = j.status === 'accepted' ? 'قيد الإرسال' : 'تم';
+                button.textContent = j.status === 'accepted' ? 'قيد الإرسال' : 'تم';
                 await refresh();
               } catch (e) {
                 alert('فشل الرد: ' + (e.message || e));
-                replyBtn.disabled = false;
-                replyBtn.textContent = 'رد';
+                button.disabled = false;
+                button.textContent = item.raw_payload?.adapter === 'ycloud' ? 'إرسال الرد' : 'رد';
               }
             };
+            if (item.raw_payload?.adapter === 'ycloud') {
+              replyBtn.onclick = () => {
+                replyBtn.hidden = true;
+                const composer = document.createElement('div');
+                composer.style.cssText = 'min-width:220px;display:flex;flex-direction:column;gap:6px';
+                const label = document.createElement('label');
+                label.textContent = 'رد واتساب إلى ' + (item.author_external_id || 'العميل');
+                const input = document.createElement('textarea');
+                input.rows = 3;
+                input.maxLength = 4096;
+                input.placeholder = 'اكتب الرد هنا';
+                label.appendChild(input);
+                composer.appendChild(label);
+                const controls = document.createElement('div');
+                controls.style.cssText = 'display:flex;gap:6px';
+                const sendBtn = document.createElement('button');
+                sendBtn.type = 'button';
+                sendBtn.className = 'btn-sm';
+                sendBtn.textContent = 'إرسال الرد';
+                sendBtn.onclick = () => submitReply(input.value, sendBtn);
+                controls.appendChild(sendBtn);
+                const cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'btn-sm';
+                cancelBtn.textContent = 'إلغاء';
+                cancelBtn.onclick = () => { composer.remove(); replyBtn.hidden = false; };
+                controls.appendChild(cancelBtn);
+                composer.appendChild(controls);
+                actionCell.appendChild(composer);
+                input.focus();
+              };
+            } else {
+              replyBtn.onclick = () => {
+                const text = window.prompt('اكتب الرد الذي سيُرسل عبر ' + item.platform + ':', '');
+                if (text) submitReply(text, replyBtn);
+              };
+            }
             actionCell.appendChild(replyBtn);
           } else {
             actionCell.textContent = '—';
