@@ -90,6 +90,16 @@ import { runSiteAudit, sampleTiqnoraPages, filterSitemapUrls } from '../lib/v6/s
 import { buildKeywordMap, detectCannibalization, generateContentOpportunities } from '../lib/v6/seo/keywords.js';
 import { evaluateAiVisibility, evaluateLlmsTxt, entityClarityReport } from '../lib/v6/seo/ai-visibility.js';
 import {
+  runWorkflow,
+  listWorkforceAgents,
+  listWorkflows,
+  buildDailyReport,
+  workforceAnalytics,
+  determineNextBestAction,
+  GLOBAL_GUARDS,
+  getWorkflow
+} from '../lib/v6/workforce/orchestrator.js';
+import {
   isGbpConfigured as gbpEnvConfigured,
   mapLocationToRecord,
   listAccounts as listGbpAccounts,
@@ -1864,6 +1874,104 @@ async function handleSeo(req, res, auth) {
 }
 
 
+
+async function handleWorkforce(req, res, auth) {
+  const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const op = String(req.query?.op || req.body?.op || 'status').toLowerCase();
+
+  if (op === 'status' || op === 'workforce_status') {
+    return json(res, 200, {
+      guards: GLOBAL_GUARDS,
+      agents: listWorkforceAgents({}),
+      workflows: listWorkflows().map((w) => ({ type: w.type, label: w.label })),
+      auto_send: false,
+      auto_publish: false
+    });
+  }
+
+  if (op === 'agents' || op === 'workforce_agents') {
+    return json(res, 200, { agents: listWorkforceAgents(req.body?.config || {}) });
+  }
+
+  if (op === 'workflow_list') {
+    return json(res, 200, { workflows: listWorkflows() });
+  }
+
+  if (op === 'workflow_start') {
+    const type = String(req.body?.workflow_type || '');
+    if (!getWorkflow(type)) return json(res, 400, { error: 'Unknown workflow', code: 'unknown_workflow' });
+    const result = await runWorkflow(type, req.body?.input || {}, {
+      organization_id: organizationId,
+      trigger: req.body?.trigger || 'manual',
+      event_id: req.body?.event_id,
+      entity_id: req.body?.entity_id,
+      idempotency_key: req.body?.idempotency_key
+    });
+    // best-effort persist
+    try {
+      const key = typeof SERVICE !== 'undefined' ? SERVICE : auth.token;
+      await fetch(`${SUPABASE_URL}/rest/v1/workflow_runs`, {
+        method: 'POST',
+        headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          workflow_type: result.run.workflow_type,
+          trigger: result.run.trigger,
+          status: result.run.status,
+          current_step: result.run.current_step,
+          idempotency_key: result.run.idempotency_key,
+          event_id: result.run.event_id,
+          summary: result.run.summary,
+          started_at: result.run.started_at,
+          completed_at: result.run.completed_at
+        })
+      });
+    } catch (_) {}
+    return json(res, 201, { ...result, external_actions: 0 });
+  }
+
+  if (op === 'workflow_runs') {
+    try {
+      const rows = await sbGet(
+        `workflow_runs?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=created_at.desc&limit=50`,
+        auth.token
+      );
+      return json(res, 200, { runs: Array.isArray(rows) ? rows : [] });
+    } catch (e) {
+      return json(res, 200, { runs: [], warning: e.message });
+    }
+  }
+
+  if (op === 'daily_report' || op === 'workflow_daily_report') {
+    const kind = req.body?.kind === 'evening' ? 'evening' : 'morning';
+    return json(res, 200, { report: buildDailyReport(kind, req.body?.data || {}), external_actions: 0 });
+  }
+
+  if (op === 'analytics' || op === 'workforce_analytics') {
+    let runs = req.body?.runs;
+    if (!runs) {
+      try {
+        runs = await sbGet(
+          `workflow_runs?organization_id=eq.${encodeURIComponent(organizationId)}&select=status&limit=200`,
+          auth.token
+        );
+      } catch (_) { runs = []; }
+    }
+    return json(res, 200, { analytics: workforceAnalytics(Array.isArray(runs) ? runs : []) });
+  }
+
+  if (op === 'next_best_action') {
+    return json(res, 200, { action: determineNextBestAction({ facts: req.body?.facts || {} }) });
+  }
+
+  return json(res, 400, {
+    error: 'Unknown op',
+    ops: ['status', 'agents', 'workflow_list', 'workflow_start', 'workflow_runs', 'daily_report', 'analytics', 'next_best_action']
+  });
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -1895,6 +2003,7 @@ export default async function handler(req, res) {
     if (route === 'social_studio') return await handleSocialStudio(req, res, auth);
     if (route === 'reputation') return await handleReputation(req, res, auth);
     if (route === 'seo') return await handleSeo(req, res, auth);
+    if (route === 'workforce') return await handleWorkforce(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
