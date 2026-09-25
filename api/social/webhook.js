@@ -1,5 +1,5 @@
 import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:crypto';
-import { persistSocialCrmEvent } from '../../lib/v6/social-crm-bridge.js';
+import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -391,8 +391,41 @@ function normalizeWhatsApp(payload) {
 export function normalizeYCloud(payload) {
   const inbound = payload?.type === 'whatsapp.inbound_message.received';
   const appEcho = payload?.type === 'whatsapp.smb.message.echoes';
-  if (!inbound && !appEcho) return [];
+  const statusUpdate = payload?.type === 'whatsapp.message.updated';
+  if (!inbound && !appEcho && !statusUpdate) return [];
+
   const message = inbound ? payload?.whatsappInboundMessage : payload?.whatsappMessage;
+
+  if (statusUpdate) {
+    const status = String(message?.status || 'unknown').toLowerCase();
+    const messageId = String(message?.id || message?.wamid || '').trim();
+    if (!messageId || !['sent', 'delivered', 'read', 'failed'].includes(status)) return [];
+    const businessPhone = normalizedPhone(message?.from);
+    const customerPhone = normalizedPhone(message?.to);
+    return [{
+      platform: 'whatsapp',
+      event_type: `message.status.${status}`,
+      external_event_id: `ycloud-status-${messageId}-${status}-${String(payload?.id || payload?.createTime || Date.now())}`,
+      external_parent_id: messageId,
+      author_external_id: customerPhone,
+      author_name: null,
+      content: status,
+      permalink: null,
+      occurred_at: toIso(message?.readTime || message?.deliverTime || message?.sendTime || payload?.createTime),
+      account_external_id: businessPhone || '',
+      detected_intent: null,
+      detected_intent_confidence: null,
+      raw_payload: {
+        adapter: 'ycloud',
+        kind: 'status',
+        event_id: payload?.id || null,
+        waba_id: message?.wabaId ? String(message.wabaId) : null,
+        status,
+        message
+      }
+    }];
+  }
+
   const businessPhone = normalizedPhone(inbound ? message?.to : message?.from);
   const customerPhone = normalizedPhone(inbound ? message?.from : message?.to);
   const customerId = customerPhone || String(inbound ? message?.fromUserId || '' : message?.toUserId || '').trim();
@@ -465,6 +498,43 @@ const ADAPTERS = {
 
 function getAdapter(platform) {
   return ADAPTERS[platform] || { verify: validGenericSignature, normalize: (payload) => normalizeGeneric(platform, payload) };
+}
+
+async function ensureYCloudStatusSubscription(req) {
+  const apiKey = process.env.YCLOUD_API_KEY;
+  const endpointId = String(req.headers?.['x-webhook-endpoint-id'] || '').trim();
+  if (!apiKey || !endpointId) return { changed: false, reason: 'missing_key_or_endpoint_id' };
+
+  try {
+    const getRes = await fetch(`https://api.ycloud.com/v2/webhookEndpoints/${encodeURIComponent(endpointId)}`, {
+      headers: { Accept: 'application/json', 'X-API-Key': apiKey },
+      signal: AbortSignal.timeout(10000)
+    });
+    const endpoint = await getRes.json().catch(() => ({}));
+    if (!getRes.ok || endpoint?.error) throw new Error(endpoint?.error?.message || `GET webhook endpoint failed (${getRes.status})`);
+
+    const enabled = Array.isArray(endpoint.enabledEvents) ? endpoint.enabledEvents.map(String) : [];
+    const required = ['whatsapp.inbound_message.received', 'whatsapp.message.updated'];
+    const next = [...new Set([...enabled, ...required])];
+    const changed = next.length !== enabled.length || required.some(x => !enabled.includes(x));
+    if (!changed) return { changed: false, enabledEvents: enabled };
+
+    const patchRes = await fetch(`https://api.ycloud.com/v2/webhookEndpoints/${encodeURIComponent(endpointId)}`, {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify({ enabledEvents: next }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const patched = await patchRes.json().catch(() => ({}));
+    if (!patchRes.ok || patched?.error) throw new Error(patched?.error?.message || `PATCH webhook endpoint failed (${patchRes.status})`);
+    return { changed: true, enabledEvents: patched.enabledEvents || next };
+  } catch (error) {
+    console.warn('YCloud webhook subscription sync failed', {
+      endpoint_id: endpointId || null,
+      message: String(error?.message || error).slice(0, 300)
+    });
+    return { changed: false, error: error.message };
+  }
 }
 
 
@@ -1111,8 +1181,11 @@ export default async function handler(req, res) {
       || (platform === 'meta' && payload?.object === 'whatsapp_business_account');
     const normalized = isMetaWhatsApp ? normalizeWhatsApp(payload) : adapter.normalize(payload);
     if (platform === 'ycloud') {
-      if (!['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes'].includes(payload.type)) {
+      if (!['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes', 'whatsapp.message.updated'].includes(payload.type)) {
         return send(res, 200, { received: true, adapter: 'ycloud', ignored: 1 });
+      }
+      if (payload.type === 'whatsapp.inbound_message.received') {
+        await ensureYCloudStatusSubscription(req);
       }
       if (normalized.length !== 1) return send(res, 422, { error: 'Invalid YCloud WhatsApp message' });
     }
@@ -1129,6 +1202,7 @@ export default async function handler(req, res) {
     let ignored = 0;
     let crmLinked = 0;
     let crmErrors = 0;
+    let deliveryUpdates = 0;
 
     for (const event of normalized) {
       if (!event.platform || !event.external_event_id) continue;
@@ -1142,6 +1216,7 @@ export default async function handler(req, res) {
       }
       const dbEvent = toDbEvent(event, organizationId, connectionId);
       if (platform === 'ycloud' && event.raw_payload?.kind === 'app_echo') dbEvent.processing_status = 'ignored';
+      if (event.raw_payload?.kind === 'status' || isDeliveryStatusEvent(event)) dbEvent.processing_status = 'processed';
       const inserted = await rest('social_events?on_conflict=platform,external_event_id', {
         method: 'POST',
         headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
@@ -1161,16 +1236,20 @@ export default async function handler(req, res) {
       }
       if (!storedEvent) continue;
 
-      // Deterministic V6 bridge: link/create Contact, Lead (sales only),
-      // Conversation and Message. No external AI is used here.
+      // Deterministic V6 bridge: inbound content becomes CRM context;
+      // delivery receipts update the existing outbound CRM message.
       try {
-        const crm = await persistSocialCrmEvent({
-          event,
-          storedEvent,
-          organizationId,
-          rest,
-          useAI: false
-        });
+        const delivery = isDeliveryStatusEvent(event);
+        const crm = delivery
+          ? await persistDeliveryStatusEvent({ event, storedEvent, organizationId, rest })
+          : await persistSocialCrmEvent({
+              event,
+              storedEvent,
+              organizationId,
+              rest,
+              useAI: false
+            });
+        if (delivery && !crm?.skipped) deliveryUpdates += 1;
         if (!crm?.skipped && crm?.conversation_id) crmLinked += 1;
         if (crm && !crm.skipped) {
           storedEvent.lead_id = crm.lead_id || storedEvent.lead_id || null;
@@ -1192,9 +1271,14 @@ export default async function handler(req, res) {
 
       if (platform === 'ycloud') {
         // V6 bridge above is deterministic and local. Do not pass YCloud
-        // customer content through legacy automation or external AI.
-        if (event.raw_payload?.kind === 'app_echo') ignored += 1;
+        // customer content, echoes, or delivery receipts through legacy AI.
+        if (['app_echo', 'status'].includes(event.raw_payload?.kind)) ignored += 1;
         else queued += 1;
+        continue;
+      }
+
+      if (isDeliveryStatusEvent(event)) {
+        ignored += 1;
         continue;
       }
 
@@ -1214,7 +1298,8 @@ export default async function handler(req, res) {
       queued,
       ignored,
       crm_linked: crmLinked,
-      crm_errors: crmErrors
+      crm_errors: crmErrors,
+      delivery_updates: deliveryUpdates
     });
   } catch (error) {
     return send(res, 500, { error: error.message });
