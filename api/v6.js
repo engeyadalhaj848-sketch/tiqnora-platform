@@ -500,10 +500,11 @@ async function handleProposalDelivery(req, res, auth) {
           body: {
             organization_id: organizationId,
             lead_id: action.lead_id,
-            activity_type: 'proposal_sent',
+            activity_type: 'system',
             title: 'تم إرسال العرض للعميل',
             body: `القناة: ${result.platform || 'social'}`,
             metadata: {
+              kind: 'proposal_sent',
               action_id: action.id,
               outbound_external_id: outboundExternalId,
               outbound_event_id: result.outbound_event_id,
