@@ -28,3 +28,17 @@ test('V6 proposal delivery requires an explicit send action in the admin UI', ()
 test('Approval itself still does not auto execute or auto send', () => {
   assert.equal(source.includes("body: { op: 'approve', autoExecute: false }"), true);
 });
+
+
+test('V6 approved Proposal send buttons use a collection selector', () => {
+  assert.equal(source.includes("$$('[data-v6-send-proposal]').forEach"), true);
+  assert.equal(/(^|[^$])\$\('\[data-v6-send-proposal\]'\)\.forEach/m.test(source), false);
+});
+
+test('V6 Proposal history UI exposes filters, details and delivery status', () => {
+  assert.equal(source.includes('id="v6-proposal-history"'), true);
+  assert.equal(source.includes('id="v6-history-status"'), true);
+  assert.equal(source.includes("v6Api('proposal_history'"), true);
+  assert.equal(source.includes('data-v6-history-view'), true);
+  assert.equal(source.includes('v6DeliveryStatusLabel'), true);
+});
