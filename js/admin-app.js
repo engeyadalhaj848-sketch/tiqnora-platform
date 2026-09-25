@@ -541,6 +541,31 @@ VIEWS['sales-v6'] = async v => {
       <div id="v6-seo-results"><div class="muted">شغّل تدقيقًا لمعاينة المشاكل والفرص (offline fixtures).</div></div>
     </section>
 
+    <section class="card v6-workforce-card">
+      <div class="card-head">
+        <div>
+          <h2>غرفة عمليات الذكاء الاصطناعي</h2>
+          <p class="card-desc">Workflows · Agents · موافقات · بدون إرسال خارجي تلقائي</p>
+        </div>
+        <div class="v6-history-tools">
+          <button class="btn-ghost btn-sm" id="v6-wf-status">الحالة</button>
+          <button class="btn-primary btn-sm" id="v6-wf-run">تشغيل Lead→Proposal</button>
+        </div>
+      </div>
+      <div class="v6-research-filters">
+        <select id="v6-wf-type">
+          <option value="lead_to_proposal">lead_to_proposal</option>
+          <option value="daily_marketing">daily_marketing</option>
+          <option value="reputation_response">reputation_response</option>
+          <option value="seo_opportunity">seo_opportunity</option>
+          <option value="morning_operations">morning_operations</option>
+        </select>
+      </div>
+      <div id="v6-wf-overview" class="v6-history-kpis"></div>
+      <div id="v6-wf-results"><div class="muted">شغّل workflow لمعاينة الخطوات (offline-safe).</div></div>
+    </section>
+
+
 
 
     <section class="card v6-research-card">
@@ -1545,6 +1570,62 @@ VIEWS['sales-v6'] = async v => {
       </div>`);
       $('#v6-seo-entity-close').onclick = closeModal;
     } catch (e) { toast(e.message, false); }
+  });
+
+
+  
+  let wfState = { last: null };
+
+  const renderWf = () => {
+    const r = wfState.last;
+    const ov = $('#v6-wf-overview');
+    if (ov && r?.run) {
+      ov.innerHTML = `
+        <div class="v6-history-kpi"><span>الحالة</span><b>${esc(r.run.status)}</b></div>
+        <div class="v6-history-kpi"><span>الخطوات</span><b>${r.steps?.length ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>External</span><b>${r.external_actions ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>Approval</span><b>${r.run.status === 'waiting_approval' ? 'نعم' : '—'}</b></div>`;
+    }
+    const host = $('#v6-wf-results');
+    if (!host || !r) return;
+    host.innerHTML = `<div class="table-wrap"><table class="v6-history-table">
+      <thead><tr><th>Step</th><th>Agent</th><th>Status</th><th>Approval</th></tr></thead>
+      <tbody>
+        ${(r.steps||[]).map(s => `<tr>
+          <td class="ltr">${esc(s.step_key)}</td>
+          <td>${esc(s.agent_key || '—')}</td>
+          <td><span class="pill">${esc(s.status)}</span></td>
+          <td>${s.requires_approval ? 'yes' : 'no'}</td>
+        </tr>`).join('')}
+      </tbody></table></div>
+      <p class="muted">auto_send=false · auto_publish=false · external_actions=${r.external_actions ?? 0}</p>`;
+  };
+
+  $('#v6-wf-status') && ($('#v6-wf-status').onclick = async () => {
+    try {
+      const s = await v6Api('workforce', { query: { op: 'status' } });
+      toast(`Agents: ${(s.agents||[]).length} · Workflows: ${(s.workflows||[]).length}`);
+    } catch (e) { toast(e.message, false); }
+  });
+
+  $('#v6-wf-run') && ($('#v6-wf-run').onclick = async () => {
+    const btn = $('#v6-wf-run');
+    btn.disabled = true;
+    try {
+      const type = $('#v6-wf-type')?.value || 'lead_to_proposal';
+      const out = await v6Api('workforce', {
+        method: 'POST',
+        body: {
+          op: 'workflow_start',
+          workflow_type: type,
+          input: { query: 'عيادات أسنان', city: 'المدينة المنورة', industry: 'dental_clinic', review: { rating: 1, comment: 'تأخير' } },
+          trigger: 'manual'
+        }
+      });
+      wfState.last = out;
+      renderWf();
+    } catch (e) { toast(e.message, false); }
+    finally { btn.disabled = false; }
   });
 
 
