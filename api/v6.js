@@ -96,6 +96,7 @@ import {
   buildDailyReport,
   workforceAnalytics,
   determineNextBestAction,
+  buildIdempotencyKey,
   GLOBAL_GUARDS,
   getWorkflow
 } from '../lib/v6/workforce/orchestrator.js';
@@ -210,6 +211,43 @@ async function sbWrite(path, { method = 'POST', body = null, prefer = 'return=re
 async function tiqnoraOrgId(token = '') {
   const rows = await sbGet('organizations?slug=eq.tiqnora&select=id&limit=1', token);
   return rows?.[0]?.id || null;
+}
+
+async function sbUserGet(path, token = '') {
+  if (!token) throw Object.assign(new Error('Authenticated user token required'), { status: 401 });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON, Authorization: `Bearer ${token}` }
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw Object.assign(new Error(body?.message || body?.hint || `Supabase ${response.status}`), {
+      status: response.status,
+      code: body?.code
+    });
+  }
+  return body;
+}
+
+async function sbUserWrite(path, { method = 'POST', body = null, prefer = 'return=representation' } = {}, token = '') {
+  if (!token) throw Object.assign(new Error('Authenticated user token required'), { status: 401 });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      apikey: ANON,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Prefer: prefer
+    },
+    ...(body == null ? {} : { body: JSON.stringify(body) })
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw Object.assign(new Error(payload?.message || payload?.hint || `Supabase ${response.status}`), {
+      status: response.status,
+      code: payload?.code
+    });
+  }
+  return payload;
 }
 
 async function loadGbpAccessToken(organizationId) {
@@ -1901,39 +1939,171 @@ async function handleWorkforce(req, res, auth) {
   if (op === 'workflow_start') {
     const type = String(req.body?.workflow_type || '');
     if (!getWorkflow(type)) return json(res, 400, { error: 'Unknown workflow', code: 'unknown_workflow' });
-    const result = await runWorkflow(type, req.body?.input || {}, {
+
+    const workflowInput = req.body?.input || {};
+    const idempotencyKey =
+      req.body?.idempotency_key ||
+      buildIdempotencyKey({
+        workflow_type: type,
+        event_id: req.body?.event_id || workflowInput.event_id,
+        entity_id: req.body?.entity_id || workflowInput.entity_id,
+        day: req.body?.day
+      });
+
+    if (idempotencyKey) {
+      const existing = await sbUserGet(
+        `workflow_runs?organization_id=eq.${encodeURIComponent(organizationId)}&workflow_type=eq.${encodeURIComponent(type)}&idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&status=neq.cancelled&select=*&limit=1`,
+        auth.token
+      );
+      if (Array.isArray(existing) && existing[0]) {
+        const priorSteps = await sbUserGet(
+          `workflow_steps?run_id=eq.${encodeURIComponent(existing[0].id)}&select=*&order=created_at.asc`,
+          auth.token
+        );
+        return json(res, 200, {
+          run: existing[0],
+          steps: Array.isArray(priorSteps) ? priorSteps : [],
+          deduplicated: true,
+          external_actions: 0
+        });
+      }
+    }
+
+    const reservationRows = await sbUserWrite(
+      'workflow_runs?on_conflict=organization_id,workflow_type,idempotency_key',
+      {
+        method: 'POST',
+        prefer: 'resolution=ignore-duplicates,return=representation',
+        body: {
+          organization_id: organizationId,
+          workflow_type: type,
+          trigger: req.body?.trigger || 'manual',
+          status: 'running',
+          idempotency_key: idempotencyKey,
+          event_id: req.body?.event_id || workflowInput.event_id || null,
+          summary: { external_actions: 0, reserved: true },
+          started_at: new Date().toISOString()
+        }
+      },
+      auth.token
+    );
+
+    let reservation = Array.isArray(reservationRows) ? reservationRows[0] : reservationRows;
+    if (!reservation && idempotencyKey) {
+      const raced = await sbUserGet(
+        `workflow_runs?organization_id=eq.${encodeURIComponent(organizationId)}&workflow_type=eq.${encodeURIComponent(type)}&idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=*&limit=1`,
+        auth.token
+      );
+      reservation = Array.isArray(raced) ? raced[0] : null;
+      if (reservation) {
+        const priorSteps = await sbUserGet(
+          `workflow_steps?run_id=eq.${encodeURIComponent(reservation.id)}&select=*&order=created_at.asc`,
+          auth.token
+        );
+        return json(res, 200, {
+          run: reservation,
+          steps: Array.isArray(priorSteps) ? priorSteps : [],
+          deduplicated: true,
+          blocked_concurrent: ['queued', 'running'].includes(reservation.status),
+          external_actions: 0
+        });
+      }
+    }
+    if (!reservation?.id) {
+      return json(res, 409, { error: 'Unable to reserve workflow run', code: 'workflow_reservation_failed' });
+    }
+
+    const result = await runWorkflow(type, workflowInput, {
+      run_id: reservation.id,
       organization_id: organizationId,
       trigger: req.body?.trigger || 'manual',
       event_id: req.body?.event_id,
       entity_id: req.body?.entity_id,
-      idempotency_key: req.body?.idempotency_key
+      idempotency_key: idempotencyKey
     });
-    // best-effort persist
-    try {
-      const key = typeof SERVICE !== 'undefined' ? SERVICE : auth.token;
-      await fetch(`${SUPABASE_URL}/rest/v1/workflow_runs`, {
-        method: 'POST',
-        headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          organization_id: organizationId,
-          workflow_type: result.run.workflow_type,
-          trigger: result.run.trigger,
+
+    for (const step of result.steps || []) {
+      await sbUserWrite(
+        'workflow_steps?on_conflict=run_id,step_key',
+        {
+          method: 'POST',
+          prefer: 'resolution=merge-duplicates,return=minimal',
+          body: {
+            organization_id: organizationId,
+            run_id: reservation.id,
+            step_key: step.step_key,
+            agent_key: step.agent_key || null,
+            status: step.status,
+            input: { source: 'workflow_context' },
+            output: step.output || {},
+            attempt_count: step.attempt_count || 0,
+            max_attempts: GLOBAL_GUARDS.max_retries,
+            duration_ms: step.duration_ms || null,
+            error_code: step.error_code || null,
+            error_message: step.output?.message || null,
+            started_at: step.started_at || null,
+            completed_at: ['completed', 'failed', 'skipped'].includes(step.status) ? new Date().toISOString() : null
+          }
+        },
+        auth.token
+      );
+    }
+
+    let approvalAction = null;
+    if (result.run.status === 'waiting_approval') {
+      const approvalStep = [...(result.steps || [])].reverse().find((s) => s.status === 'waiting_approval');
+      approvalAction = await createAction({
+        organizationId,
+        actionType: 'workflow_external_review',
+        payload: {
+          workflow_run_id: reservation.id,
+          workflow_type: type,
+          step_key: approvalStep?.step_key || result.run.current_step,
+          agent_key: approvalStep?.agent_key || null,
+          output: approvalStep?.output || {},
+          external_execution: false,
+          guards: GLOBAL_GUARDS
+        },
+        relatedEntityType: 'workflow_run',
+        relatedEntityId: reservation.id,
+        createdBy: auth.profile.id,
+        requiresApproval: true,
+        accessToken: auth.token
+      });
+      result.run.summary = {
+        ...(result.run.summary || {}),
+        approval_action_id: approvalAction?.id || null
+      };
+    }
+
+    await sbUserWrite(
+      `workflow_runs?id=eq.${encodeURIComponent(reservation.id)}&organization_id=eq.${encodeURIComponent(organizationId)}`,
+      {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: {
           status: result.run.status,
           current_step: result.run.current_step,
-          idempotency_key: result.run.idempotency_key,
-          event_id: result.run.event_id,
           summary: result.run.summary,
-          started_at: result.run.started_at,
-          completed_at: result.run.completed_at
-        })
-      });
-    } catch (_) {}
-    return json(res, 201, { ...result, external_actions: 0 });
+          error_code: result.run.error_code || null,
+          error_message: result.run.error_message || null,
+          completed_at: result.run.completed_at,
+          updated_at: new Date().toISOString()
+        }
+      },
+      auth.token
+    );
+
+    return json(res, 201, {
+      ...result,
+      approval_action: approvalAction,
+      external_actions: 0
+    });
   }
 
   if (op === 'workflow_runs') {
     try {
-      const rows = await sbGet(
+      const rows = await sbUserGet(
         `workflow_runs?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=created_at.desc&limit=50`,
         auth.token
       );
@@ -1941,6 +2111,50 @@ async function handleWorkforce(req, res, auth) {
     } catch (e) {
       return json(res, 200, { runs: [], warning: e.message });
     }
+  }
+
+  if (op === 'workflow_run_detail') {
+    const runId = String(req.query?.run_id || req.body?.run_id || '').trim();
+    if (!runId) return json(res, 400, { error: 'run_id required', code: 'run_id_required' });
+    const runs = await sbUserGet(
+      `workflow_runs?id=eq.${encodeURIComponent(runId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=1`,
+      auth.token
+    );
+    const run = Array.isArray(runs) ? runs[0] : null;
+    if (!run) return json(res, 404, { error: 'Workflow run not found', code: 'workflow_run_not_found' });
+    const steps = await sbUserGet(
+      `workflow_steps?run_id=eq.${encodeURIComponent(runId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=created_at.asc`,
+      auth.token
+    );
+    return json(res, 200, { run, steps: Array.isArray(steps) ? steps : [] });
+  }
+
+  if (op === 'workflow_cancel') {
+    const runId = String(req.body?.run_id || '').trim();
+    if (!runId) return json(res, 400, { error: 'run_id required', code: 'run_id_required' });
+    const runs = await sbUserGet(
+      `workflow_runs?id=eq.${encodeURIComponent(runId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=1`,
+      auth.token
+    );
+    const run = Array.isArray(runs) ? runs[0] : null;
+    if (!run) return json(res, 404, { error: 'Workflow run not found', code: 'workflow_run_not_found' });
+    if (!['queued', 'running', 'waiting_approval'].includes(run.status)) {
+      return json(res, 409, { error: `Cannot cancel workflow in status ${run.status}`, code: 'workflow_not_cancellable' });
+    }
+    await sbUserWrite(
+      `workflow_runs?id=eq.${encodeURIComponent(runId)}&organization_id=eq.${encodeURIComponent(organizationId)}`,
+      {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: {
+          status: 'cancelled',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      },
+      auth.token
+    );
+    return json(res, 200, { ok: true, run_id: runId, status: 'cancelled', external_actions: 0 });
   }
 
   if (op === 'daily_report' || op === 'workflow_daily_report') {
@@ -1952,7 +2166,7 @@ async function handleWorkforce(req, res, auth) {
     let runs = req.body?.runs;
     if (!runs) {
       try {
-        runs = await sbGet(
+        runs = await sbUserGet(
           `workflow_runs?organization_id=eq.${encodeURIComponent(organizationId)}&select=status&limit=200`,
           auth.token
         );
