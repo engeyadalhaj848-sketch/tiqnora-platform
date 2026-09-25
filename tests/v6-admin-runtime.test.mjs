@@ -4,19 +4,14 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../js/admin-app.js', import.meta.url), 'utf8');
 
-function hasSingleSelector(selector) {
-  const escaped = selector.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&');
-  return new RegExp('(^|[^$])\\$\\(' + escaped + '\\)').test(source);
-}
-
 test('V6 proposal price inputs use a collection selector', () => {
-  assert.match(source, /\\$\\$\\('\\[data-proposal-price\\]'\\)/);
-  assert.equal(hasSingleSelector("'[data-proposal-price]'"), false);
+  assert.equal(source.includes("const rows = $$('[data-proposal-price]');"), true);
+  assert.equal(/(^|[^$])\$\('\[data-proposal-price\]'\)/m.test(source), false);
 });
 
 test('V6 pending approval buttons use collection selectors', () => {
-  assert.match(source, /\\$\\$\\('\\[data-v6-approve\\]'\\)\\.forEach/);
-  assert.match(source, /\\$\\$\\('\\[data-v6-reject\\]'\\)\\.forEach/);
-  assert.equal(hasSingleSelector("'[data-v6-approve]'"), false);
-  assert.equal(hasSingleSelector("'[data-v6-reject]'"), false);
+  assert.equal(source.includes("$$('[data-v6-approve]').forEach"), true);
+  assert.equal(source.includes("$$('[data-v6-reject]').forEach"), true);
+  assert.equal(/(^|[^$])\$\('\[data-v6-approve\]'\)\.forEach/m.test(source), false);
+  assert.equal(/(^|[^$])\$\('\[data-v6-reject\]'\)\.forEach/m.test(source), false);
 });
