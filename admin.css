@@ -401,3 +401,121 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   .social-inbox-layout { grid-template-columns: 1fr; }
   .social-thread-list { max-height: 280px; }
 }
+
+
+/* ============================================================
+   Tiqnora V6 — Sales Control Center
+   ============================================================ */
+.v6-hero {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(0,210,255,.10), transparent 34%),
+    radial-gradient(circle at 90% 0%, rgba(10,92,255,.16), transparent 38%),
+    var(--surface);
+}
+.v6-hero h2 { margin:4px 0 4px; font-size:1.25rem; }
+.v6-eyebrow {
+  color:var(--accent);
+  font-size:.68rem;
+  letter-spacing:.12em;
+  font-weight:700;
+  direction:ltr;
+  text-align:right;
+}
+.v6-hero-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.v6-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+  gap:16px;
+}
+.v6-action-item {
+  border:1px solid var(--line);
+  background:var(--bg2);
+  border-radius:12px;
+  padding:14px;
+  margin-bottom:10px;
+}
+.v6-action-top,
+.v6-result-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+.v6-action-draft {
+  margin:12px 0;
+  padding:12px 14px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:rgba(10,92,255,.07);
+  white-space:pre-wrap;
+  line-height:1.75;
+}
+.v6-action-meta {
+  display:flex;
+  gap:14px;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:.78rem;
+}
+.v6-action-buttons {
+  display:flex;
+  gap:8px;
+  margin-top:12px;
+  flex-wrap:wrap;
+}
+.v6-draft-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.8fr) minmax(220px,.7fr);
+  gap:14px;
+  align-items:start;
+}
+.v6-result {
+  margin-top:16px;
+  border:1px solid var(--line-strong);
+  border-radius:12px;
+  padding:16px;
+  background:linear-gradient(180deg, rgba(10,92,255,.08), rgba(0,210,255,.03));
+}
+.v6-result h3 { margin:16px 0 8px; font-size:.92rem; }
+.v6-qual-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  margin-top:12px;
+}
+.v6-qual-grid > div {
+  border:1px solid var(--line);
+  border-radius:9px;
+  padding:10px;
+  background:var(--bg2);
+}
+.v6-qual-grid span {
+  display:block;
+  color:var(--muted);
+  font-size:.7rem;
+  margin-bottom:3px;
+}
+.v6-qual-grid b { font-size:.82rem; }
+.v6-error {
+  margin-top:14px;
+  color:var(--danger);
+  border:1px solid rgba(255,141,155,.25);
+  background:rgba(255,141,155,.06);
+  border-radius:10px;
+  padding:12px;
+}
+@media (max-width: 950px) {
+  .v6-grid { grid-template-columns:1fr; }
+  .v6-draft-grid { grid-template-columns:1fr; }
+  .v6-qual-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 560px) {
+  .v6-hero { align-items:flex-start; flex-direction:column; }
+  .v6-hero-actions { width:100%; }
+  .v6-hero-actions button { flex:1; }
+  .v6-qual-grid { grid-template-columns:1fr; }
+}
