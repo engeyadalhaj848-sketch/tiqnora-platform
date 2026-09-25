@@ -37,3 +37,12 @@ alter table public.integration_connections
     'telegram'::text,
     'google_business_profile'::text
   ]));
+
+
+-- Persist the canonical Google review resource name required by updateReply.
+alter table public.reputation_reviews
+  add column if not exists resource_name text;
+
+create index if not exists idx_reputation_reviews_resource_name
+  on public.reputation_reviews(resource_name)
+  where resource_name is not null;
