@@ -1,0 +1,44 @@
+name: Validate Tiqnora V6
+
+on:
+  push:
+    branches:
+      - tiqnora-v6-growth-os
+  pull_request:
+    branches:
+      - tiqnora-v6-growth-os
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tiqnora-v6-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-v6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Run V6 tests and build
+        run: npm run build
+
+      - name: Verify required output
+        run: |
+          test -f dist/index.html
+          test -f dist/admin.html
+          test -f dist/shop.html
+          test -f dist/robots.txt
+          test -f dist/sitemap.xml
+          test -f api/v6.js
+          test -f api/ai-workforce/chat.js
+          test -f api/social/webhook.js
+          test -f api/social/oauth/[provider].js
