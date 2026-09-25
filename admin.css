@@ -519,3 +519,90 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   .v6-hero-actions button { flex:1; }
   .v6-qual-grid { grid-template-columns:1fr; }
 }
+
+
+/* Tiqnora V6 — Proposal Composer */
+.v6-proposal-card { overflow:hidden; }
+.v6-proposal-controls {
+  display:grid;
+  grid-template-columns:minmax(240px,1.4fr) minmax(140px,.6fr) auto;
+  gap:12px;
+  align-items:end;
+  margin-bottom:16px;
+}
+.v6-proposal-preview {
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:16px;
+  background:var(--bg2);
+}
+.v6-proposal-preview h3 { margin:14px 0 8px; font-size:1.05rem; }
+.v6-proposal-preview h4 { margin:0 0 8px; font-size:.86rem; }
+.v6-proposal-summary {
+  margin:0 0 16px;
+  color:var(--text);
+  line-height:1.85;
+}
+.v6-proposal-score {
+  color:var(--muted);
+  font-size:.78rem;
+  white-space:nowrap;
+}
+.v6-proposal-score b { color:var(--accent); font-size:1rem; }
+.v6-proposal-columns {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:12px;
+}
+.v6-chip-wrap { display:flex; flex-wrap:wrap; gap:8px; }
+.v6-service-chip {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:140px;
+  padding:9px 11px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface);
+}
+.v6-service-chip small { color:var(--muted); font-size:.65rem; direction:ltr; text-align:right; }
+.v6-question-list {
+  margin:0;
+  padding-inline-start:22px;
+  color:var(--text);
+  line-height:1.85;
+  font-size:.82rem;
+}
+.v6-safe-box {
+  min-height:48px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:11px 12px;
+  color:var(--muted);
+  background:var(--surface);
+  line-height:1.65;
+}
+.v6-pricing-editor {
+  margin-top:16px;
+  padding-top:16px;
+  border-top:1px solid var(--line);
+}
+.v6-price-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:10px;
+  margin-top:10px;
+}
+.v6-proposal-actions {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+@media (max-width: 760px) {
+  .v6-proposal-controls { grid-template-columns:1fr; }
+  .v6-proposal-controls button { width:100%; }
+  .v6-proposal-columns { grid-template-columns:1fr; }
+  .v6-proposal-score { white-space:normal; }
+}
