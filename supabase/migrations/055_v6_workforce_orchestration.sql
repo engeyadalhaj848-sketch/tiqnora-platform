@@ -22,17 +22,9 @@ create table if not exists public.workflow_runs (
 );
 create index if not exists idx_workflow_runs_org on public.workflow_runs(organization_id, created_at desc);
 create index if not exists idx_workflow_runs_status on public.workflow_runs(organization_id, status);
-do $ begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'workflow_runs_idempotency_unique'
-      and conrelid = 'public.workflow_runs'::regclass
-  ) then
-    alter table public.workflow_runs
-      add constraint workflow_runs_idempotency_unique
-      unique (organization_id, workflow_type, idempotency_key);
-  end if;
-end $;
+alter table public.workflow_runs
+  add constraint workflow_runs_idempotency_unique
+  unique (organization_id, workflow_type, idempotency_key);
 
 create table if not exists public.workflow_steps (
   id uuid primary key default gen_random_uuid(),
@@ -62,19 +54,11 @@ alter table public.ai_tasks add column if not exists workflow_step_key text;
 alter table public.ai_tasks add column if not exists attempt_count int default 0;
 alter table public.ai_tasks add column if not exists max_attempts int default 3;
 
-do $ begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'ai_tasks_workflow_run_id_fkey'
-      and conrelid = 'public.ai_tasks'::regclass
-  ) then
-    alter table public.ai_tasks
-      add constraint ai_tasks_workflow_run_id_fkey
-      foreign key (workflow_run_id)
-      references public.workflow_runs(id)
-      on delete set null;
-  end if;
-end $;
+alter table public.ai_tasks
+  add constraint ai_tasks_workflow_run_id_fkey
+  foreign key (workflow_run_id)
+  references public.workflow_runs(id)
+  on delete set null;
 
 create index if not exists idx_ai_tasks_workflow_run
   on public.ai_tasks(workflow_run_id)
