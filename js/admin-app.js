@@ -658,7 +658,7 @@ VIEWS['sales-v6'] = async v => {
       };
     });
 
-    $('[data-v6-reject]').forEach(btn => {
+    $$('[data-v6-reject]').forEach(btn => {
       btn.onclick = async () => {
         if (!confirm('رفض هذه المسودة؟')) return;
         btn.disabled = true;
