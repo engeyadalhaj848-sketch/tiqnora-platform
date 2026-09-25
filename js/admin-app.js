@@ -503,6 +503,30 @@ VIEWS['sales-v6'] = async v => {
       <div id="v6-studio-results"><div class="muted">ابدأ بتوليد حملة تجريبية (offline-safe).</div></div>
     </section>
 
+    <section class="card v6-reputation-card">
+      <div class="card-head">
+        <div>
+          <h2>إدارة السمعة</h2>
+          <p class="card-desc">Google Business Profile · مراجعات · ردود بمسودة AI · موافقة بشرية. auto_reply=false</p>
+        </div>
+        <div class="v6-history-tools">
+          <button class="btn-ghost btn-sm" id="v6-rep-status">حالة الاتصال</button>
+          <button class="btn-primary btn-sm" id="v6-rep-demo">مزامنة تجريبية</button>
+        </div>
+      </div>
+      <div id="v6-rep-dashboard" class="v6-history-kpis"></div>
+      <div class="v6-research-filters">
+        <select id="v6-rep-filter">
+          <option value="all">كل المراجعات</option>
+          <option value="unanswered">بدون رد</option>
+          <option value="high">أولوية عالية</option>
+          <option value="pending_approval">بانتظار الموافقة</option>
+        </select>
+      </div>
+      <div id="v6-rep-results"><div class="muted">شغّل مزامنة تجريبية لمعاينة التدفق بدون Google Live.</div></div>
+    </section>
+
+
     <section class="card v6-research-card">
       <div class="card-head">
         <div>
@@ -1334,6 +1358,117 @@ VIEWS['sales-v6'] = async v => {
       $('#v6-studio-brand-close').onclick = closeModal;
     } catch (e) { toast(e.message, false); }
   });
+
+
+  
+  let repState = { reviews: [], locations: [], dashboard: null };
+
+  const renderRep = () => {
+    const dash = $('#v6-rep-dashboard');
+    const d = repState.dashboard || {};
+    if (dash) {
+      dash.innerHTML = `
+        <div class="v6-history-kpi"><span>المتوسط</span><b>${d.average_rating ?? '—'}</b></div>
+        <div class="v6-history-kpi"><span>المراجعات</span><b>${d.review_count ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>بدون رد</span><b>${d.unanswered_reviews ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>سلبي</span><b>${d.negative_reviews ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>نسبة الرد</span><b>${d.response_rate != null ? d.response_rate + '%' : '—'}</b></div>`;
+    }
+    const host = $('#v6-rep-results');
+    if (!host) return;
+    let rows = repState.reviews || [];
+    const f = $('#v6-rep-filter')?.value || 'all';
+    if (f === 'unanswered') rows = rows.filter(r => r.reply_status === 'unanswered' || !r.existing_reply);
+    if (f === 'high') rows = rows.filter(r => r.priority === 'high' || r.priority === 'critical');
+    if (f === 'pending_approval') rows = rows.filter(r => r.reply_status === 'pending_approval');
+    if (!rows.length) { host.innerHTML = '<div class="empty">لا مراجعات</div>'; return; }
+    host.innerHTML = `<div class="table-wrap"><table class="v6-history-table">
+      <thead><tr><th>التقييم</th><th>المراجع</th><th>النص</th><th>المشاعر</th><th>الأولوية</th><th>الرد</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((r, idx) => `<tr>
+          <td><b>${esc(r.rating ?? '—')}</b></td>
+          <td>${esc(r.reviewer_display_name || '—')}</td>
+          <td>${esc((r.comment || '').slice(0, 120))}</td>
+          <td>${esc(r.sentiment || '—')}</td>
+          <td><span class="pill">${esc(r.priority || '—')}</span></td>
+          <td>${esc(r.reply_status || '—')}</td>
+          <td><button class="btn-sm btn-ghost" data-rep-draft="${idx}">مسودة رد</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
+    $$('[data-rep-draft]').forEach(btn => {
+      btn.onclick = async () => {
+        const review = repState.reviews[Number(btn.dataset.repDraft)];
+        btn.disabled = true;
+        try {
+          const out = await v6Api('reputation', { method: 'POST', body: { op: 'draft_reply', review, location: repState.locations?.[0] } });
+          const draft = out.draft;
+          openModal(`<div class="v6-history-detail">
+            <h3>مسودة رد (تتطلب موافقة)</h3>
+            <p>${esc(draft.draft_reply || '')}</p>
+            <p class="muted">${esc(draft.reasoning_summary || '')}</p>
+            <p class="muted">تحذيرات: ${esc((draft.warnings || []).join(' | ') || 'لا يوجد')}</p>
+            <div class="modal-foot" style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn-primary" id="v6-rep-approve">اعتماد</button>
+              <button type="button" class="btn-ghost" id="v6-rep-publish">نشر تجريبي</button>
+              <button type="button" class="btn-ghost" id="v6-rep-close">إغلاق</button>
+            </div>
+          </div>`);
+          $('#v6-rep-close').onclick = closeModal;
+          let current = draft;
+          $('#v6-rep-approve').onclick = async () => {
+            const a = await v6Api('reputation', { method: 'POST', body: { op: 'approve_reply', draft: { ...current, status: 'pending_approval' } } });
+            current = a.draft;
+            toast('تم الاعتماد — auto_reply=false');
+          };
+          $('#v6-rep-publish').onclick = async () => {
+            if (current.status !== 'approved') {
+              const a = await v6Api('reputation', { method: 'POST', body: { op: 'approve_reply', draft: { ...current, status: 'pending_approval' } } });
+              current = a.draft;
+            }
+            const pub = await v6Api('reputation', { method: 'POST', body: { op: 'publish_reply', draft: current, review } });
+            toast(pub.publish?.ok ? 'Mock publish OK' : 'Blocked: ' + (pub.reasons || []).join(','), !!pub.publish?.ok);
+          };
+        } catch (e) { toast(e.message, false); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  $('#v6-rep-status') && ($('#v6-rep-status').onclick = async () => {
+    try {
+      const s = await v6Api('reputation', { query: { op: 'status' } });
+      toast(`GBP: ${s.connection_status} · configured=${s.configured}`);
+    } catch (e) { toast(e.message, false); }
+  });
+
+  $('#v6-rep-demo') && ($('#v6-rep-demo').onclick = async () => {
+    const btn = $('#v6-rep-demo');
+    btn.disabled = true;
+    try {
+      const mockReviews = [
+        { reviewId: 'r1', starRating: 'FIVE', comment: 'خدمة ممتازة وسريعة', reviewer: { displayName: 'أحمد' }, createTime: new Date().toISOString() },
+        { reviewId: 'r2', starRating: 'ONE', comment: 'تأخير كبير في الموعد والتعامل سيء', reviewer: { displayName: 'سارة' }, createTime: new Date().toISOString() },
+        { reviewId: 'r3', starRating: 'TWO', comment: 'السعر غالي والجودة متوسطة', reviewer: { displayName: 'فهد' }, createTime: new Date(Date.now()-86400000).toISOString() },
+        { reviewId: 'r4', starRating: 'FOUR', comment: 'تجربة جيدة overall', reviewer: { displayName: 'Nora' }, createTime: new Date().toISOString() },
+        { reviewId: 'r5', starRating: 'THREE', comment: '', reviewer: { displayName: 'Anonymous' }, createTime: new Date().toISOString() }
+      ];
+      const out = await v6Api('reputation', {
+        method: 'POST',
+        body: {
+          op: 'sync_mock',
+          locations: [{ name: 'locations/mock1', title: 'عيادة تجريبية — المدينة المنورة' }],
+          reviews: mockReviews
+        }
+      });
+      repState.reviews = out.reviews || [];
+      repState.locations = out.locations || [];
+      repState.dashboard = out.dashboard;
+      renderRep();
+    } catch (e) { toast(e.message, false); }
+    finally { btn.disabled = false; }
+  });
+
+  $('#v6-rep-filter') && ($('#v6-rep-filter').onchange = renderRep);
 
 
   $('#v6-proposal-preview').onclick = async () => {
