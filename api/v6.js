@@ -11,6 +11,7 @@ import {
   rejectAction,
   executeAction
 } from '../lib/actions/engine.js';
+import { buildProposalDraft } from '../lib/v6/proposal-composer.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -181,6 +182,166 @@ async function handleDraftReply(req, res, auth) {
   });
 }
 
+
+function normalizeConfirmedPricing(input) {
+  if (!input || typeof input !== 'object') return null;
+  const num = value => {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error('قيمة سعر غير صالحة'), { status: 400 });
+    return n;
+  };
+
+  const lineItems = Array.isArray(input.line_items)
+    ? input.line_items.map(item => ({
+        service: String(item?.service || '').trim(),
+        price: num(item?.price)
+      })).filter(item => item.service)
+    : [];
+
+  const pricing = {
+    currency: String(input.currency || 'SAR').trim().toUpperCase() || 'SAR',
+    subtotal: num(input.subtotal),
+    vat: num(input.vat),
+    total: num(input.total),
+    line_items: lineItems
+  };
+
+  const hasAnyValue =
+    pricing.subtotal !== null ||
+    pricing.vat !== null ||
+    pricing.total !== null ||
+    pricing.line_items.some(item => item.price !== null);
+
+  return hasAnyValue ? pricing : null;
+}
+
+async function handleProposal(req, res, auth) {
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+
+  const body = req.body || {};
+  const leadId = String(body.lead_id || '').trim();
+  if (!leadId) return json(res, 400, { error: 'lead_id required' });
+
+  const leadRows = await sbGet(`leads?id=eq.${encodeURIComponent(leadId)}&select=*&limit=1`, auth.token);
+  const lead = Array.isArray(leadRows) ? leadRows[0] : null;
+  if (!lead) return json(res, 404, { error: 'Lead not found' });
+
+  const organizationId = lead.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+
+  let contact = null;
+  if (lead.contact_id) {
+    const contactRows = await sbGet(
+      `crm_contacts?id=eq.${encodeURIComponent(lead.contact_id)}&select=*&limit=1`,
+      auth.token
+    );
+    contact = Array.isArray(contactRows) ? contactRows[0] : null;
+  }
+
+  let company = null;
+  if (lead.company_id) {
+    const companyRows = await sbGet(
+      `crm_companies?id=eq.${encodeURIComponent(lead.company_id)}&select=*&limit=1`,
+      auth.token
+    );
+    company = Array.isArray(companyRows) ? companyRows[0] : null;
+  }
+
+  const custom = lead.custom_fields || {};
+  const services = Array.isArray(custom.service_interest) ? custom.service_interest : [];
+  const recommended = custom.recommended_services && typeof custom.recommended_services === 'object'
+    ? custom.recommended_services
+    : { primary: services, secondary: [] };
+  const missing = custom.missing_qualification && typeof custom.missing_qualification === 'object'
+    ? custom.missing_qualification
+    : { missing: [], recommended_questions: [] };
+  const scoreBreakdown = lead.score_breakdown || {};
+
+  const inboxAnalysis = {
+    intent: custom.detected_intent || 'sales',
+    industry: lead.industry || null,
+    service_interest: services,
+    contact: {
+      name: contact?.full_name || lead.contact_name || lead.name || null,
+      phone: contact?.phone || contact?.whatsapp || lead.phone || lead.whatsapp || null,
+      email: contact?.email || lead.email || null
+    },
+    location: { city: lead.city || null, country: lead.country || null },
+    qualification: custom.qualification || {},
+    opportunity_score: {
+      score: Number(lead.opportunity_score || 0),
+      reasons: Array.isArray(scoreBreakdown?.reasons) ? scoreBreakdown.reasons : []
+    },
+    lead_payload: { company_name: lead.company_name || company?.name || null }
+  };
+
+  const enrichment = {
+    vertical: {
+      id: lead.industry || 'general',
+      confidence: 1,
+      reason: 'crm'
+    },
+    pack: custom.vertical_pack || null,
+    quality: {
+      score: Number(lead.opportunity_score || 0),
+      grade: scoreBreakdown?.grade || null,
+      reasons: Array.isArray(scoreBreakdown?.reasons) ? scoreBreakdown.reasons : [],
+      missing_data: Array.isArray(scoreBreakdown?.missing_data) ? scoreBreakdown.missing_data : []
+    },
+    services: recommended,
+    missing,
+    next_best_action: custom.next_best_action || null
+  };
+
+  const playbook = custom.sales_playbook || {};
+  const confirmedPricing = normalizeConfirmedPricing(body.confirmed_pricing);
+
+  const proposal = buildProposalDraft({
+    inbox_analysis: inboxAnalysis,
+    enrichment,
+    playbook,
+    lead,
+    company,
+    contact,
+    ...(confirmedPricing ? { confirmed_pricing: confirmedPricing } : {})
+  }, { language: body.language === 'en' ? 'en' : 'ar' });
+
+  if (String(body.op || 'preview') === 'preview') {
+    return json(res, 200, { proposal });
+  }
+
+  if (String(body.op) === 'create_action') {
+    if (proposal.status === 'not_ready') {
+      return json(res, 409, { error: 'العرض غير جاهز لإنشاء مسودة مراجعة', proposal });
+    }
+
+    const action = await createAction({
+      organizationId,
+      actionType: 'proposal_review',
+      payload: {
+        proposal,
+        proposal_status: proposal.status,
+        pricing_status: proposal.pricing?.status || null,
+        client_name: proposal.client?.name || lead.company_name || lead.contact_name || null,
+        source: 'v6_proposal_composer'
+      },
+      relatedEntityType: 'lead',
+      relatedEntityId: lead.id,
+      leadId: lead.id,
+      conversationId: null,
+      createdBy: auth.profile.id,
+      requiresApproval: true,
+      status: 'pending_approval',
+      accessToken: auth.token
+    });
+
+    return json(res, 201, { proposal, action });
+  }
+
+  return json(res, 400, { error: 'op must be preview|create_action' });
+}
+
 async function handleActions(req, res, auth) {
   const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
   if (!organizationId) return json(res, 500, { error: 'Organization missing' });
@@ -273,6 +434,7 @@ export default async function handler(req, res) {
 
   try {
     if (route === 'draft_reply') return await handleDraftReply(req, res, auth);
+    if (route === 'proposal') return await handleProposal(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
