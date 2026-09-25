@@ -532,7 +532,69 @@ async function handleTikTokPosting(req, res) {
   }
 }
 
-async function handleYCloudReply(req, res, { admin, body, event, organizationId, message }) {
+async function persistOutboundCrmMessage({
+  organizationId,
+  event,
+  outboundEvent,
+  platform,
+  outboundExternalId,
+  message,
+  provider,
+  status = 'sent',
+  actionId = null
+}) {
+  if (!event?.conversation_id || !outboundExternalId) return null;
+  const outboundRow = Array.isArray(outboundEvent) ? outboundEvent[0] : null;
+  const now = new Date().toISOString();
+  const normalizedStatus = String(status || 'sent').toLowerCase() === 'accepted' ? 'sent' : String(status || 'sent').toLowerCase();
+  const rows = await supa('messages?on_conflict=organization_id,external_message_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({
+      organization_id: organizationId,
+      conversation_id: event.conversation_id,
+      direction: 'outbound',
+      body: message || null,
+      external_message_id: `${platform}:${outboundExternalId}`,
+      sender_name: 'Tiqnora',
+      social_event_id: outboundRow?.id || null,
+      created_at: now,
+      ai_meta: {
+        delivery_status: normalizedStatus,
+        delivery_status_at: now,
+        sent_at: now,
+        provider: provider || null,
+        provider_message_id: outboundExternalId,
+        source: actionId ? 'approved_proposal' : 'manual_social_reply',
+        action_id: actionId || null
+      }
+    })
+  });
+
+  await supa(`conversations?id=eq.${encodeURIComponent(event.conversation_id)}&organization_id=eq.${encodeURIComponent(organizationId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ last_message_at: now, updated_at: now })
+  }).catch(() => null);
+
+  return Array.isArray(rows) ? rows[0] : null;
+}
+
+async function loadApprovedProposalAction(actionId, organizationId, event) {
+  if (!actionId) return null;
+  const rows = await supa(
+    `actions?id=eq.${encodeURIComponent(actionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&action_type=eq.proposal_review&status=eq.approved&select=id,organization_id,lead_id,conversation_id,status,action_type,payload&limit=1`
+  );
+  const action = Array.isArray(rows) ? rows[0] : null;
+  if (!action) return null;
+
+  const leadMatches = !action.lead_id || !event?.lead_id || String(action.lead_id) === String(event.lead_id);
+  const conversationMatches = !action.conversation_id || !event?.conversation_id || String(action.conversation_id) === String(event.conversation_id);
+  if (!leadMatches || !conversationMatches) return null;
+  return action;
+}
+
+async function handleYCloudReply(req, res, { admin, body, event, organizationId, message, deliveryAction = null }) {
   const forbidden = ['platform', 'to', 'recipient_id', 'account_external_id', 'phone_number_id', 'template', 'kind', 'parent_id', 'comment_id'];
   if (forbidden.some(key => body[key] != null)) {
     return send(res, 400, { error: 'Only event_id and message are accepted for a YCloud reply.', code: 'invalid_reply_fields' });
@@ -573,11 +635,19 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   const apiKey = process.env.YCLOUD_API_KEY;
   if (!apiKey) return send(res, 503, { error: 'YCloud sending key is not configured.', code: 'ycloud_key_missing' });
 
-  // The incoming event UUID is a single-use reservation. A retry cannot send a second message.
+  // Manual inbox replies use the inbound event UUID. Approved proposals use
+  // the proposal Action UUID, so each approved proposal can be sent once.
+  const reservationId = deliveryAction?.id || event.id;
   const action = {
-    id: event.id, organization_id: organizationId, event_id: event.id,
-    action_type: 'manual_reply', status: 'pending',
-    result: { provider: 'ycloud', from, to, message_preview: message.slice(0, 120) }
+    id: reservationId, organization_id: organizationId, event_id: event.id,
+    action_type: deliveryAction ? 'proposal_send' : 'manual_reply', status: 'pending',
+    result: {
+      provider: 'ycloud',
+      from,
+      to,
+      message_preview: message.slice(0, 120),
+      action_id: deliveryAction?.id || null
+    }
   };
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
@@ -588,7 +658,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   });
   if (!reserve.ok) {
     if (reserve.status === 409) {
-      const prior = await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&organization_id=eq.${encodeURIComponent(organizationId)}&event_id=eq.${encodeURIComponent(event.id)}&select=status,result&limit=1`);
+      const prior = await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&organization_id=eq.${encodeURIComponent(organizationId)}&event_id=eq.${encodeURIComponent(event.id)}&select=status,result&limit=1`);
       if (prior?.[0]?.status === 'completed') {
         return send(res, 200, { ok: true, already_sent: true, platform: 'whatsapp', kind: 'message', outbound_external_id: prior[0].result?.outbound_external_id || null });
       }
@@ -613,7 +683,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   const apiResult = await response.json().catch(() => ({}));
   if (!response.ok || apiResult?.error) {
     const errorCode = apiResult?.error?.code || apiResult?.code || `HTTP_${response.status}`;
-    await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&status=eq.pending`, {
+    await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&status=eq.pending`, {
       method: 'PATCH', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ status: response.status >= 500 ? 'pending' : 'failed', error_message: String(errorCode).slice(0, 120) })
     });
@@ -626,18 +696,42 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   if (!outboundExternalId) {
     return send(res, 502, { error: 'YCloud accepted the request without a message ID. Check status before another reply.', code: 'ycloud_id_missing' });
   }
-  await supa('social_events?on_conflict=platform,external_event_id', {
-    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+  const outboundEvent = await supa('social_events?on_conflict=platform,external_event_id', {
+    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
     body: JSON.stringify({
       organization_id: organizationId, connection_id: connection.id, platform: 'whatsapp',
       event_type: 'message.sent', external_event_id: outboundExternalId,
       external_parent_id: event.external_event_id || null,
       author_external_id: 'tiqnora', author_name: 'Tiqnora', content: message,
       occurred_at: new Date().toISOString(), processing_status: 'processed',
-      raw_payload: { adapter: 'tiqnora_outbound', provider: 'ycloud', status: apiResult.status || 'accepted', in_reply_to: event.id, ycloud_message_id: apiResult.id || null }
+      lead_id: event.lead_id || deliveryAction?.lead_id || null,
+      contact_id: event.contact_id || null,
+      conversation_id: event.conversation_id || deliveryAction?.conversation_id || null,
+      raw_payload: {
+        adapter: 'tiqnora_outbound',
+        provider: 'ycloud',
+        status: apiResult.status || 'accepted',
+        in_reply_to: event.id,
+        action_id: deliveryAction?.id || null,
+        ycloud_message_id: apiResult.id || null
+      }
     })
   });
-  await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&status=eq.pending`, {
+  await persistOutboundCrmMessage({
+    organizationId,
+    event: {
+      ...event,
+      conversation_id: event.conversation_id || deliveryAction?.conversation_id || null
+    },
+    outboundEvent,
+    platform: 'whatsapp',
+    outboundExternalId,
+    message,
+    provider: 'ycloud',
+    status: apiResult.status || 'accepted',
+    actionId: deliveryAction?.id || null
+  });
+  await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&status=eq.pending`, {
     method: 'PATCH', headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ status: 'completed', result: { ...action.result, outbound_external_id: outboundExternalId, accepted_status: apiResult.status || 'accepted' }, completed_at: new Date().toISOString() })
   });
@@ -645,7 +739,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
     method: 'PATCH', headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ processing_status: 'processed' })
   });
-  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId });
+  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId, event_id: Array.isArray(outboundEvent) ? outboundEvent[0]?.id : null });
 }
 
 async function handleSocialReply(req, res) {
@@ -677,10 +771,16 @@ async function handleSocialReply(req, res) {
       if (!event) return send(res, 404, { error: 'Event not found', code: 'event_not_found' });
     }
 
+    const actionId = body.action_id ? String(body.action_id) : null;
+    const deliveryAction = actionId ? await loadApprovedProposalAction(actionId, organizationId, event) : null;
+    if (actionId && !deliveryAction) {
+      return send(res, 409, { error: 'Proposal must be approved and linked to this CRM conversation before sending.', code: 'proposal_not_approved' });
+    }
+
     const effectivePlatform = platform || event?.platform;
     if (!effectivePlatform) return send(res, 400, { error: 'platform is required', code: 'platform_required' });
     if (event?.platform === 'whatsapp' && event?.raw_payload?.adapter === 'ycloud') {
-      return handleYCloudReply(req, res, { admin, body, event, organizationId, message });
+      return handleYCloudReply(req, res, { admin, body, event, organizationId, message, deliveryAction });
     }
     const eventType = String(event?.event_type || '');
     const kind = body.kind || (eventType.startsWith('comment.') ? 'comment' : (body.comment_id ? 'comment' : 'message'));
@@ -792,8 +892,26 @@ async function handleSocialReply(req, res) {
         content: message || (template ? `[template:${template.name}]` : null),
         occurred_at: new Date().toISOString(),
         processing_status: 'processed',
-        raw_payload: { adapter: 'tiqnora_outbound', in_reply_to: eventId }
+        lead_id: event?.lead_id || deliveryAction?.lead_id || null,
+        contact_id: event?.contact_id || null,
+        conversation_id: event?.conversation_id || deliveryAction?.conversation_id || null,
+        raw_payload: { adapter: 'tiqnora_outbound', in_reply_to: eventId, action_id: deliveryAction?.id || null }
       })
+    });
+
+    await persistOutboundCrmMessage({
+      organizationId,
+      event: {
+        ...(event || {}),
+        conversation_id: event?.conversation_id || deliveryAction?.conversation_id || null
+      },
+      outboundEvent,
+      platform: effectivePlatform,
+      outboundExternalId,
+      message: message || (template ? `[template:${template.name}]` : ''),
+      provider: usedConnection?.settings?.provider || 'meta',
+      status: 'sent',
+      actionId: deliveryAction?.id || null
     });
 
     if (eventId) {
@@ -810,7 +928,7 @@ async function handleSocialReply(req, res) {
           event_id: eventId,
           action_type: 'manual_reply',
           status: 'completed',
-          result: { outbound_external_id: outboundExternalId, platform: effectivePlatform, kind, message_preview: String(message || '').slice(0, 120) },
+          result: { outbound_external_id: outboundExternalId, platform: effectivePlatform, kind, message_preview: String(message || '').slice(0, 120), action_id: deliveryAction?.id || null },
           completed_at: new Date().toISOString()
         })
       });
