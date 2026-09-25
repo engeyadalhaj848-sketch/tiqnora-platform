@@ -390,8 +390,41 @@ function normalizeWhatsApp(payload) {
 export function normalizeYCloud(payload) {
   const inbound = payload?.type === 'whatsapp.inbound_message.received';
   const appEcho = payload?.type === 'whatsapp.smb.message.echoes';
-  if (!inbound && !appEcho) return [];
+  const statusUpdate = payload?.type === 'whatsapp.message.updated';
+  if (!inbound && !appEcho && !statusUpdate) return [];
+
   const message = inbound ? payload?.whatsappInboundMessage : payload?.whatsappMessage;
+
+  if (statusUpdate) {
+    const status = String(message?.status || 'unknown').toLowerCase();
+    const messageId = String(message?.id || message?.wamid || '').trim();
+    if (!messageId || !['sent', 'delivered', 'read', 'failed'].includes(status)) return [];
+    const businessPhone = normalizedPhone(message?.from);
+    const customerPhone = normalizedPhone(message?.to);
+    return [{
+      platform: 'whatsapp',
+      event_type: `message.status.${status}`,
+      external_event_id: `ycloud-status-${messageId}-${status}-${String(payload?.id || payload?.createTime || Date.now())}`,
+      external_parent_id: messageId,
+      author_external_id: customerPhone,
+      author_name: null,
+      content: status,
+      permalink: null,
+      occurred_at: toIso(message?.readTime || message?.deliverTime || message?.sendTime || payload?.createTime),
+      account_external_id: businessPhone || '',
+      detected_intent: null,
+      detected_intent_confidence: null,
+      raw_payload: {
+        adapter: 'ycloud',
+        kind: 'status',
+        event_id: payload?.id || null,
+        waba_id: message?.wabaId ? String(message.wabaId) : null,
+        status,
+        message
+      }
+    }];
+  }
+
   const businessPhone = normalizedPhone(inbound ? message?.to : message?.from);
   const customerPhone = normalizedPhone(inbound ? message?.from : message?.to);
   const customerId = customerPhone || String(inbound ? message?.fromUserId || '' : message?.toUserId || '').trim();
