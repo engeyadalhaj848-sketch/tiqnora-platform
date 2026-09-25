@@ -72,7 +72,7 @@ async function callAnthropic(agent, messages) {
 async function callGemini(agent, messages) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
-  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
+  const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-3.8-flash');
   const systemInstruction = messages.find(message => message.role === 'system')?.content || '';
   const contents = messages.filter(message => message.role !== 'system').map(message => ({
     role: message.role === 'assistant' ? 'model' : 'user',
@@ -132,11 +132,65 @@ async function saveConversation(token, row) {
   return data?.[0];
 }
 
+
+function providerStatusPayload() {
+  const providers = [
+    {
+      id: 'google_ai',
+      name: 'Google Gemini',
+      configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
+      defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+      envVars: ['GEMINI_API_KEY', 'GEMINI_MODEL']
+    },
+    {
+      id: 'openai',
+      name: 'OpenAI',
+      configured: Boolean(process.env.OPENAI_API_KEY),
+      defaultModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      envVars: ['OPENAI_API_KEY', 'OPENAI_MODEL']
+    },
+    {
+      id: 'anthropic',
+      name: 'Claude (Anthropic)',
+      configured: Boolean(process.env.ANTHROPIC_API_KEY),
+      defaultModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest',
+      envVars: ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL']
+    },
+    {
+      id: 'xai',
+      name: 'Grok (xAI)',
+      configured: Boolean(process.env.XAI_API_KEY),
+      defaultModel: process.env.XAI_MODEL || 'grok-3-mini',
+      envVars: ['XAI_API_KEY', 'XAI_MODEL']
+    }
+  ];
+  return {
+    providers,
+    anyConfigured: providers.some(provider => provider.configured),
+    note: 'المفاتيح تُدار فقط من Vercel Environment Variables ولا تُعرض هنا.'
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const token = bearer(req);
   if (!token) return json(res, 401, { error: 'يلزم تسجيل الدخول.' });
+
+  if (req.method === 'GET' && String(req.query?.route || '').toLowerCase() === 'providers') {
+    try {
+      const user = await supabase('/auth/v1/user', token);
+      const profiles = await supabase(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role,is_active`, token);
+      const profile = profiles?.[0];
+      if (!profile || !profile.is_active || !['admin','super_admin'].includes(profile.role)) {
+        return json(res, 403, { error: 'صلاحية أدمن مطلوبة.' });
+      }
+      return json(res, 200, providerStatusPayload());
+    } catch (error) {
+      return json(res, error.status && error.status < 600 ? error.status : 500, { error: error.message || 'حدث خطأ غير متوقع.' });
+    }
+  }
+
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const agentId = String(req.body?.agentId || '');
   const message = String(req.body?.message || '').trim();
   if (!/^[0-9a-f-]{36}$/i.test(agentId)) return json(res, 400, { error: 'معرّف الموظف غير صالح.' });

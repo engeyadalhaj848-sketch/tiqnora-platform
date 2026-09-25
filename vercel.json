@@ -152,6 +152,26 @@
   ],
   "rewrites": [
     {
+      "source": "/api/ai-sales/draft-reply",
+      "destination": "/api/v6?route=draft_reply"
+    },
+    {
+      "source": "/api/actions",
+      "destination": "/api/v6?route=actions"
+    },
+    {
+      "source": "/api/actions/:id",
+      "destination": "/api/v6?route=action&id=:id"
+    },
+    {
+      "source": "/api/sales/chat",
+      "destination": "/api/v6?route=sales_chat"
+    },
+    {
+      "source": "/api/ai-workforce/providers",
+      "destination": "/api/ai-workforce/chat?route=providers"
+    },
+    {
       "source": "/api/telegram/webhook",
       "destination": "/api/reports/telegram?route=telegram_webhook"
     },
