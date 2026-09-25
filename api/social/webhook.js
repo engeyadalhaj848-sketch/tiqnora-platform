@@ -499,6 +499,41 @@ function getAdapter(platform) {
   return ADAPTERS[platform] || { verify: validGenericSignature, normalize: (payload) => normalizeGeneric(platform, payload) };
 }
 
+async function ensureYCloudStatusSubscription(req) {
+  const apiKey = process.env.YCLOUD_API_KEY;
+  const endpointId = String(req.headers?.['x-webhook-endpoint-id'] || '').trim();
+  if (!apiKey || !endpointId) return { changed: false, reason: 'missing_key_or_endpoint_id' };
+
+  try {
+    const getRes = await fetch(`https://api.ycloud.com/v2/webhookEndpoints/${encodeURIComponent(endpointId)}`, {
+      headers: { Accept: 'application/json', 'X-API-Key': apiKey },
+      signal: AbortSignal.timeout(10000)
+    });
+    const endpoint = await getRes.json().catch(() => ({}));
+    if (!getRes.ok || endpoint?.error) throw new Error(endpoint?.error?.message || `GET webhook endpoint failed (${getRes.status})`);
+
+    const enabled = Array.isArray(endpoint.enabledEvents) ? endpoint.enabledEvents.map(String) : [];
+    const required = ['whatsapp.inbound_message.received', 'whatsapp.message.updated'];
+    const next = [...new Set([...enabled, ...required])];
+    const changed = next.length !== enabled.length || required.some(x => !enabled.includes(x));
+    if (!changed) return { changed: false, enabledEvents: enabled };
+
+    const patchRes = await fetch(`https://api.ycloud.com/v2/webhookEndpoints/${encodeURIComponent(endpointId)}`, {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify({ enabledEvents: next }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const patched = await patchRes.json().catch(() => ({}));
+    if (!patchRes.ok || patched?.error) throw new Error(patched?.error?.message || `PATCH webhook endpoint failed (${patchRes.status})`);
+    console.info('YCloud webhook subscription updated', { endpoint_id: endpointId, enabled_events: patched.enabledEvents || next });
+    return { changed: true, enabledEvents: patched.enabledEvents || next };
+  } catch (error) {
+    console.warn('YCloud webhook subscription sync failed', { endpoint_id: endpointId || null, message: error.message });
+    return { changed: false, error: error.message };
+  }
+}
+
 
 function decryptVault(enc) {
   if (!enc?.ciphertext || !enc?.iv || !enc?.tag) return null;
@@ -1092,8 +1127,11 @@ export default async function handler(req, res) {
       || (platform === 'meta' && payload?.object === 'whatsapp_business_account');
     const normalized = isMetaWhatsApp ? normalizeWhatsApp(payload) : adapter.normalize(payload);
     if (platform === 'ycloud') {
-      if (!['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes'].includes(payload.type)) {
+      if (!['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes', 'whatsapp.message.updated'].includes(payload.type)) {
         return send(res, 200, { received: true, adapter: 'ycloud', ignored: 1 });
+      }
+      if (payload.type === 'whatsapp.inbound_message.received') {
+        await ensureYCloudStatusSubscription(req);
       }
       if (normalized.length !== 1) return send(res, 422, { error: 'Invalid YCloud WhatsApp message' });
     }
@@ -1121,6 +1159,7 @@ export default async function handler(req, res) {
       }
       const dbEvent = toDbEvent(event, organizationId, connectionId);
       if (platform === 'ycloud' && event.raw_payload?.kind === 'app_echo') dbEvent.processing_status = 'ignored';
+      if (platform === 'ycloud' && event.raw_payload?.kind === 'status') dbEvent.processing_status = 'processed';
       const inserted = await rest('social_events?on_conflict=platform,external_event_id', {
         method: 'POST',
         headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
@@ -1135,9 +1174,9 @@ export default async function handler(req, res) {
       insertedCount += 1;
 
       if (platform === 'ycloud') {
-        // Keep inbound messages for an administrator. Do not pass customer
-        // content through automation or an external AI provider.
-        if (event.raw_payload?.kind === 'app_echo') ignored += 1;
+        // Keep inbound messages for an administrator. Status and echo events
+        // are stored for observability/UI but must never enter the reply queue.
+        if (['app_echo', 'status'].includes(event.raw_payload?.kind)) ignored += 1;
         else queued += 1;
         continue;
       }
