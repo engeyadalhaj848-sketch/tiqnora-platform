@@ -382,7 +382,7 @@ VIEWS['sales-v6'] = async v => {
   let currentProposal = null;
 
   const proposalPricingFromUi = () => {
-    const rows = $('[data-proposal-price]');
+    const rows = $$('[data-proposal-price]');
     const line_items = rows.map(el => ({
       service: el.dataset.proposalPrice,
       price: el.value === '' ? null : Number(el.value)
@@ -633,7 +633,7 @@ VIEWS['sales-v6'] = async v => {
       );
     }
 
-    $('[data-v6-approve]').forEach(btn => {
+    $$('[data-v6-approve]').forEach(btn => {
       btn.onclick = async () => {
         btn.disabled = true;
         try {
@@ -651,7 +651,7 @@ VIEWS['sales-v6'] = async v => {
       };
     });
 
-    $('[data-v6-reject]').forEach(btn => {
+    $$('[data-v6-reject]').forEach(btn => {
       btn.onclick = async () => {
         if (!confirm('رفض هذه المسودة؟')) return;
         btn.disabled = true;
