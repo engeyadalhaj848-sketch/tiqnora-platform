@@ -739,7 +739,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
     method: 'PATCH', headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ processing_status: 'processed' })
   });
-  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId });
+  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId, event_id: Array.isArray(outboundEvent) ? outboundEvent[0]?.id : null });
 }
 
 async function handleSocialReply(req, res) {
