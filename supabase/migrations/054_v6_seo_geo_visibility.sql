@@ -102,81 +102,160 @@ alter table public.seo_issues enable row level security;
 alter table public.seo_keywords enable row level security;
 alter table public.seo_content_opportunities enable row level security;
 
--- helper expression reused in policies
--- org membership via default_organization_id OR organization_members
+-- Admin-only, organization-scoped policies.
+-- RLS is defense-in-depth; direct Data API access is limited to authenticated admins
+-- within the user's default organization or an explicit organization membership.
 
 drop policy if exists seo_entity_profiles_org on public.seo_entity_profiles;
-create policy seo_entity_profiles_org on public.seo_entity_profiles for all
+create policy seo_entity_profiles_org on public.seo_entity_profiles
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_entity_profiles.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_entity_profiles.organization_id
+      )
+    )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_entity_profiles.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_entity_profiles.organization_id
+      )
+    )
   );
 
 drop policy if exists seo_audits_org on public.seo_audits;
-create policy seo_audits_org on public.seo_audits for all
+create policy seo_audits_org on public.seo_audits
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_audits.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_audits.organization_id
+      )
+    )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_audits.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_audits.organization_id
+      )
+    )
   );
 
 drop policy if exists seo_pages_org on public.seo_pages;
-create policy seo_pages_org on public.seo_pages for all
+create policy seo_pages_org on public.seo_pages
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_pages.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_pages.organization_id
+      )
+    )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_pages.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_pages.organization_id
+      )
+    )
   );
 
 drop policy if exists seo_issues_org on public.seo_issues;
-create policy seo_issues_org on public.seo_issues for all
+create policy seo_issues_org on public.seo_issues
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_issues.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_issues.organization_id
+      )
+    )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_issues.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_issues.organization_id
+      )
+    )
   );
 
 drop policy if exists seo_keywords_org on public.seo_keywords;
-create policy seo_keywords_org on public.seo_keywords for all
+create policy seo_keywords_org on public.seo_keywords
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_keywords.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_keywords.organization_id
+      )
+    )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_keywords.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_keywords.organization_id
+      )
+    )
   );
 
 drop policy if exists seo_content_opportunities_org on public.seo_content_opportunities;
-create policy seo_content_opportunities_org on public.seo_content_opportunities for all
+create policy seo_content_opportunities_org on public.seo_content_opportunities
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_content_opportunities.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_content_opportunities.organization_id
+      )
+    )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.organization_id = seo_content_opportunities.organization_id)
+    (select public.is_admin())
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = (select auth.uid()))
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = (select auth.uid()) and m.organization_id = seo_content_opportunities.organization_id
+      )
+    )
   );
 
-revoke all on public.seo_entity_profiles from authenticated;
-revoke all on public.seo_audits from authenticated;
-revoke all on public.seo_pages from authenticated;
-revoke all on public.seo_issues from authenticated;
-revoke all on public.seo_keywords from authenticated;
-revoke all on public.seo_content_opportunities from authenticated;
+revoke all on public.seo_entity_profiles from anon, authenticated;
+revoke all on public.seo_audits from anon, authenticated;
+revoke all on public.seo_pages from anon, authenticated;
+revoke all on public.seo_issues from anon, authenticated;
+revoke all on public.seo_keywords from anon, authenticated;
+revoke all on public.seo_content_opportunities from anon, authenticated;
 
 grant select, insert, update on public.seo_entity_profiles to authenticated;
 grant select, insert, update on public.seo_audits to authenticated;
