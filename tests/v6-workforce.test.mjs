@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   GLOBAL_GUARDS,
   getWorkflow,
@@ -153,5 +154,37 @@ describe('reports and analytics', () => {
   it('listWorkforceAgents returns statuses', () => {
     const agents = listWorkforceAgents({ sales_agent: { ready: true } });
     assert.ok(agents.find((a) => a.key === 'sales_agent')?.status === 'ready');
+  });
+});
+
+
+describe('workforce persistence guards', () => {
+  it('API reserves idempotent runs before execution and creates approval actions', () => {
+    const source = fs.readFileSync(new URL('../api/v6.js', import.meta.url), 'utf8');
+    const start = source.indexOf("if (op === 'workflow_start')");
+    const end = source.indexOf("if (op === 'workflow_runs')", start);
+    const block = source.slice(start, end);
+    assert.ok(block.includes('buildIdempotencyKey'));
+    assert.ok(block.includes('resolution=ignore-duplicates'));
+    assert.ok(block.includes('sbUserWrite'));
+    assert.ok(block.includes("actionType: 'workflow_external_review'"));
+    assert.ok(block.includes('workflow_steps?on_conflict=run_id,step_key'));
+    assert.equal(block.includes('Bearer ${key}'), false);
+  });
+
+  it('migration enforces admin org scope and workflow foreign key', () => {
+    const sql = fs.readFileSync(
+      new URL('../supabase/migrations/055_v6_workforce_orchestration.sql', import.meta.url),
+      'utf8'
+    );
+    assert.ok(sql.includes('(select public.is_admin())'));
+    assert.ok(sql.includes('workflow_runs_idempotency_unique'));
+    assert.ok(sql.includes('ai_tasks_workflow_run_id_fkey'));
+    assert.ok(sql.includes('revoke all on public.workflow_runs from anon, authenticated'));
+  });
+
+  it('waiting-approval outputs are included in structured validation gate', () => {
+    const source = fs.readFileSync(new URL('../lib/v6/workforce/orchestrator.js', import.meta.url), 'utf8');
+    assert.ok(source.includes("['completed', 'waiting_approval'].includes(result.status)"));
   });
 });
