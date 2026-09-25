@@ -62,3 +62,35 @@ create index if not exists idx_research_candidates_job on public.research_candid
 create index if not exists idx_research_candidates_org on public.research_candidates(organization_id, status);
 create index if not exists idx_research_candidates_phone on public.research_candidates(phone);
 create index if not exists idx_research_candidates_domain on public.research_candidates(domain);
+
+-- ---------- RLS / grants ----------
+alter table public.research_jobs enable row level security;
+alter table public.research_candidates enable row level security;
+
+do $$ begin
+  create policy "research_jobs_admin"
+    on public.research_jobs
+    for all
+    using (public.is_admin())
+    with check (public.is_admin());
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create policy "research_candidates_admin"
+    on public.research_candidates
+    for all
+    using (public.is_admin())
+    with check (public.is_admin());
+exception when duplicate_object then null;
+end $$;
+
+-- Keep anonymous callers out; authenticated access is still constrained by RLS/admin policy.
+revoke all on public.research_jobs from anon;
+revoke all on public.research_candidates from anon;
+
+grant select, insert, update on public.research_jobs to authenticated;
+grant select, insert, update on public.research_candidates to authenticated;
+
+comment on table public.research_jobs is 'V6 Lead Research jobs';
+comment on table public.research_candidates is 'V6 Lead Research normalized and scored candidates';
