@@ -52,6 +52,8 @@ test('5 sales event reuses Inbox CRM and Lead Enrichment', async () => {
   assert.equal(out.analysis.industry, 'restaurant');
   assert.equal(out.enrichment.vertical.id, 'restaurants');
   assert.equal(out.analysis.crm.should_create_lead, true);
+  assert.equal(out.playbook.playbook.vertical_id, 'restaurants');
+  assert.equal(out.playbook.approval.auto_send, false);
 });
 
 test('6 support event stays out of sales lead creation', async () => {
@@ -63,4 +65,18 @@ test('6 support event stays out of sales lead creation', async () => {
   assert.equal(out.analysis.intent, 'support');
   assert.equal(out.analysis.crm.should_create_lead, false);
   assert.equal(out.enrichment.next_best_action.action, 'support_handoff');
+});
+
+
+test('7 sales bridge carries qualification and follow-up plan without auto-send', async () => {
+  const out = await planSocialCrmEvent({
+    platform:'instagram', event_type:'message.received',
+    external_event_id:'m4', author_external_id:'ig-44',
+    author_name:'عبدالله', content:'كم سعر موقع لعيادة أسنان؟'
+  });
+  assert.equal(out.analysis.intent, 'quote_request');
+  assert.equal(out.playbook.playbook.vertical_id, 'dental_clinic');
+  assert.ok(out.playbook.qualification.next_question);
+  assert.equal(out.playbook.action.execute_automatically, false);
+  assert.equal(out.playbook.approval.auto_schedule, false);
 });
