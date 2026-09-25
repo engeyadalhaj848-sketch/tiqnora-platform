@@ -92,78 +92,110 @@ alter table public.reputation_reviews enable row level security;
 alter table public.reputation_reply_drafts enable row level security;
 alter table public.reputation_sync_jobs enable row level security;
 
--- Org scope via default_organization_id OR organization_members
+-- Admin-only, organization-scoped policies.
+-- Access requires an active admin/super_admin profile and the requested org to be
+-- either the user's default organization or one they explicitly belong to.
 drop policy if exists reputation_locations_org_access on public.reputation_locations;
 create policy reputation_locations_org_access on public.reputation_locations
-  for all
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_locations.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_locations.organization_id
+      )
     )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_locations.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_locations.organization_id
+      )
     )
   );
 
 drop policy if exists reputation_reviews_org_access on public.reputation_reviews;
 create policy reputation_reviews_org_access on public.reputation_reviews
-  for all
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_reviews.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_reviews.organization_id
+      )
     )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_reviews.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_reviews.organization_id
+      )
     )
   );
 
 drop policy if exists reputation_reply_drafts_org_access on public.reputation_reply_drafts;
 create policy reputation_reply_drafts_org_access on public.reputation_reply_drafts
-  for all
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_reply_drafts.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_reply_drafts.organization_id
+      )
     )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_reply_drafts.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_reply_drafts.organization_id
+      )
     )
   );
 
 drop policy if exists reputation_sync_jobs_org_access on public.reputation_sync_jobs;
 create policy reputation_sync_jobs_org_access on public.reputation_sync_jobs
-  for all
+  for all to authenticated
   using (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_sync_jobs.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_sync_jobs.organization_id
+      )
     )
   )
   with check (
-    organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
-    or exists (
-      select 1 from public.organization_members m
-      where m.user_id = auth.uid() and m.organization_id = reputation_sync_jobs.organization_id
+    public.is_admin()
+    and (
+      organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+      or exists (
+        select 1 from public.organization_members m
+        where m.user_id = auth.uid() and m.organization_id = reputation_sync_jobs.organization_id
+      )
     )
   );
+
+-- Explicit least-privilege grants. No anonymous access; no direct DELETE/TRUNCATE.
+revoke all on public.reputation_locations from anon, authenticated;
+revoke all on public.reputation_reviews from anon, authenticated;
+revoke all on public.reputation_reply_drafts from anon, authenticated;
+revoke all on public.reputation_sync_jobs from anon, authenticated;
 
 grant select, insert, update on public.reputation_locations to authenticated;
 grant select, insert, update on public.reputation_reviews to authenticated;
