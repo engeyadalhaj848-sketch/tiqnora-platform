@@ -560,7 +560,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   if (connection?.status !== 'active' || connection?.settings?.provider !== 'ycloud'
     || connection?.settings?.ycloud_verified !== true || connection?.settings?.webhook_subscribed !== true
     || connection?.capabilities?.messaging !== true || !validPhone.test(from) || !validPhone.test(to)
-    || from !== String(rawMessage.to || '') || from !== String(event.account_external_id || '')
+    || from !== String(rawMessage.to || '')
     || to !== String(event.author_external_id || '')
     || String(connection.settings.waba_id || '') !== String(rawMessage.wabaId || '')) {
     return send(res, 409, { error: 'The incoming message does not match an enabled YCloud connection.', code: 'ycloud_connection_mismatch' });
