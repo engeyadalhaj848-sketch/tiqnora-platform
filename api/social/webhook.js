@@ -49,6 +49,32 @@ function validGenericSignature(req) {
   return safeEqualText(req.headers['x-tiqnora-webhook-secret'], expected);
 }
 
+export function validYCloudSignature(req, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const secret = process.env.YCLOUD_WEBHOOK_SECRET;
+  const header = req.headers?.['ycloud-signature'];
+  if (!secret || typeof header !== 'string') return false;
+  const fields = new Map();
+  for (const part of header.split(',')) {
+    const match = /^\s*([ts])=([^,\s]+)\s*$/.exec(part);
+    if (!match || fields.has(match[1])) return false;
+    fields.set(match[1], match[2]);
+  }
+  const timestamp = fields.get('t');
+  const signature = fields.get('s');
+  if (!/^\d{10,16}$/.test(timestamp || '') || !/^[a-f0-9]{64}$/i.test(signature || '')) return false;
+  if (Math.abs(nowSeconds - Number(timestamp)) > 300) return false;
+  const expected = createHmac('sha256', secret)
+    .update(`${timestamp}.`)
+    .update(rawBody)
+    .digest('hex');
+  return safeEqualText(signature.toLowerCase(), expected);
+}
+
+function normalizedPhone(value) {
+  const digits = String(value || '').replace(/[^\d]/g, '');
+  return /^[1-9]\d{6,14}$/.test(digits) ? `+${digits}` : null;
+}
+
 function toIso(value) {
   if (!value) return new Date().toISOString();
   if (typeof value === 'number') return new Date(value < 1e12 ? value * 1000 : value).toISOString();
@@ -361,6 +387,46 @@ function normalizeWhatsApp(payload) {
   return events;
 }
 
+export function normalizeYCloud(payload) {
+  const inbound = payload?.type === 'whatsapp.inbound_message.received';
+  const appEcho = payload?.type === 'whatsapp.smb.message.echoes';
+  if (!inbound && !appEcho) return [];
+  const message = inbound ? payload?.whatsappInboundMessage : payload?.whatsappMessage;
+  const businessPhone = normalizedPhone(inbound ? message?.to : message?.from);
+  const customerPhone = normalizedPhone(inbound ? message?.from : message?.to);
+  const customerId = customerPhone || String(inbound ? message?.fromUserId || '' : message?.toUserId || '').trim();
+  if (!message?.id || !message?.wabaId || !businessPhone || !customerId) return [];
+
+  const type = String(message.type || 'text');
+  let content = message.text?.body
+    || message.button?.text
+    || message.interactive?.buttonReply?.title
+    || message.interactive?.listReply?.title
+    || null;
+  if (!content && type === 'image') content = message.image?.caption || '[image]';
+  if (!content && type === 'video') content = message.video?.caption || '[video]';
+  if (!content && type === 'document') content = message.document?.filename || message.document?.caption || '[document]';
+  if (!content && type === 'audio') content = '[audio]';
+  if (!content && type === 'location') content = message.location ? `[location ${message.location.latitude},${message.location.longitude}]` : '[location]';
+  if (!content) content = `[${type}]`;
+
+  return [{
+    platform: 'whatsapp',
+    event_type: inbound ? 'message.received' : 'message.sent',
+    external_event_id: String(message.wamid || message.id),
+    external_parent_id: message.context?.id ? String(message.context.id) : null,
+    author_external_id: inbound ? customerId : 'tiqnora',
+    author_name: inbound ? (message.customerProfile?.name || message.customerProfile?.username || customerId) : 'Tiqnora',
+    content,
+    permalink: null,
+    occurred_at: toIso(message.sendTime || payload.createTime),
+    account_external_id: businessPhone,
+    detected_intent: null,
+    detected_intent_confidence: null,
+    raw_payload: { adapter: 'ycloud', kind: inbound ? 'inbound' : 'app_echo', event_id: payload.id, waba_id: String(message.wabaId), message }
+  }];
+}
+
 function normalizeGeneric(platform, payload) {
   const source = Array.isArray(payload?.events) ? payload.events : [payload?.event || payload];
   return source.map((item) => {
@@ -392,7 +458,8 @@ const ADAPTERS = {
   tiktok: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('tiktok', payload) },
   snapchat: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('snapchat', payload) },
   x: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('x', payload) },
-  whatsapp: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('whatsapp', payload) }
+  whatsapp: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('whatsapp', payload) },
+  ycloud: { verify: validYCloudSignature, normalize: normalizeYCloud }
 };
 
 function getAdapter(platform) {
@@ -759,6 +826,35 @@ async function findConnectionId(organizationId, event) {
   return rows?.[0]?.id || null;
 }
 
+async function findYCloudConnectionId(organizationId, event) {
+  const phone = normalizedPhone(event.account_external_id);
+  const wabaId = event.raw_payload?.waba_id;
+  if (!phone || !wabaId) return null;
+  const rows = await rest(`social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.whatsapp&external_account_id=eq.${encodeURIComponent(phone)}&status=eq.active&select=id,external_account_id,status,settings&limit=2`);
+  const match = rows?.find(row => row.status === 'active'
+    && row.settings?.provider === 'ycloud'
+    && row.settings?.ycloud_verified === true
+    && row.settings?.webhook_subscribed === true
+    && String(row.settings?.waba_id || '') === wabaId
+    && normalizedPhone(row.external_account_id) === phone);
+  return match?.id || null;
+}
+
+async function findMetaWhatsAppConnectionId(organizationId, event) {
+  const phoneId = String(event.account_external_id || '');
+  const wabaId = String(event.raw_payload?.entry_id || '');
+  if (!phoneId || !wabaId) return null;
+  const rows = await rest(`social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.whatsapp&external_account_id=eq.${encodeURIComponent(phoneId)}&status=eq.active&select=id,external_account_id,status,settings&limit=2`);
+  const match = rows?.find(row => row.status === 'active'
+    && String(row.external_account_id) === phoneId
+    && String(row.settings?.phone_number_id || '') === phoneId
+    && String(row.settings?.waba_id || '') === wabaId
+    && row.settings?.phone_status === 'CONNECTED'
+    && row.settings?.platform_type === 'CLOUD_API'
+    && row.settings?.webhook_subscribed === true);
+  return match?.id || null;
+}
+
 async function ensureConnectionId(organizationId, event) {
   const existing = await findConnectionId(organizationId, event);
   if (existing || !event.account_external_id) return existing;
@@ -940,7 +1036,8 @@ export default async function handler(req, res) {
     rawBody = Buffer.concat(chunks);
   }
   const adapter = getAdapter(platform);
-  const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody, platform) : adapter.verify(req);
+  const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody, platform)
+    : platform === 'ycloud' ? validYCloudSignature(req, rawBody) : adapter.verify(req);
   if (!verified) {
     if (['meta', 'whatsapp'].includes(platform)) {
       const signature = String(req.headers['x-hub-signature-256'] || '');
@@ -958,12 +1055,21 @@ export default async function handler(req, res) {
 
   try {
     const payload = JSON.parse(rawBody.toString('utf8') || '{}');
+    const isMetaWhatsApp = platform === 'whatsapp'
+      || (platform === 'meta' && payload?.object === 'whatsapp_business_account');
+    const normalized = isMetaWhatsApp ? normalizeWhatsApp(payload) : adapter.normalize(payload);
+    if (platform === 'ycloud') {
+      if (!['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes'].includes(payload.type)) {
+        return send(res, 200, { received: true, adapter: 'ycloud', ignored: 1 });
+      }
+      if (normalized.length !== 1) return send(res, 422, { error: 'Invalid YCloud WhatsApp message' });
+    }
     const organizations = await rest('organizations?slug=eq.tiqnora&select=id&limit=1');
     const organizationId = organizations?.[0]?.id;
     if (!organizationId) throw new Error('Tiqnora organization is missing');
 
-    const rules = await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
-    const normalized = platform === 'whatsapp' ? normalizeWhatsApp(payload) : adapter.normalize(payload);
+    const rules = platform === 'ycloud' ? []
+      : await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
     let matched = 0;
     let insertedCount = 0;
     let duplicateCount = 0;
@@ -972,11 +1078,20 @@ export default async function handler(req, res) {
 
     for (const event of normalized) {
       if (!event.platform || !event.external_event_id) continue;
-      const connectionId = await ensureConnectionId(organizationId, event);
+      const connectionId = platform === 'ycloud' ? await findYCloudConnectionId(organizationId, event)
+        : isMetaWhatsApp ? await findMetaWhatsAppConnectionId(organizationId, event)
+        : await ensureConnectionId(organizationId, event);
+      if ((platform === 'ycloud' || isMetaWhatsApp) && !connectionId) {
+        // An unbound account must not write customer data. Acknowledge it so
+        // provider retries do not continue for a deliberately rejected phone.
+        return send(res, 200, { received: true, adapter: platform, inserted: insertedCount, ignored: ignored + 1, reason: 'account_unverified' });
+      }
+      const dbEvent = toDbEvent(event, organizationId, connectionId);
+      if (platform === 'ycloud' && event.raw_payload?.kind === 'app_echo') dbEvent.processing_status = 'ignored';
       const inserted = await rest('social_events?on_conflict=platform,external_event_id', {
         method: 'POST',
         headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
-        body: JSON.stringify(toDbEvent(event, organizationId, connectionId))
+        body: JSON.stringify(dbEvent)
       });
 
       const storedEvent = inserted?.[0];
@@ -985,6 +1100,14 @@ export default async function handler(req, res) {
         continue;
       }
       insertedCount += 1;
+
+      if (platform === 'ycloud') {
+        // Keep inbound messages for an administrator. Do not pass customer
+        // content through automation or an external AI provider.
+        if (event.raw_payload?.kind === 'app_echo') ignored += 1;
+        else queued += 1;
+        continue;
+      }
 
       const result = await processEvent(event, storedEvent, organizationId, rules || []);
       if (result.matched) matched += 1;
