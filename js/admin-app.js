@@ -526,6 +526,22 @@ VIEWS['sales-v6'] = async v => {
       <div id="v6-rep-results"><div class="muted">شغّل مزامنة تجريبية لمعاينة التدفق بدون Google Live.</div></div>
     </section>
 
+    <section class="card v6-seo-card">
+      <div class="card-head">
+        <div>
+          <h2>SEO + AI Visibility</h2>
+          <p class="card-desc">تدقيق تقني · كيان Tiqnora AI · كلمات · فرص محتوى · جاهزية AI. بدون نشر تلقائي.</p>
+        </div>
+        <div class="v6-history-tools">
+          <button class="btn-ghost btn-sm" id="v6-seo-entity">الكيان</button>
+          <button class="btn-primary btn-sm" id="v6-seo-audit">تشغيل تدقيق</button>
+        </div>
+      </div>
+      <div id="v6-seo-overview" class="v6-history-kpis"></div>
+      <div id="v6-seo-results"><div class="muted">شغّل تدقيقًا لمعاينة المشاكل والفرص (offline fixtures).</div></div>
+    </section>
+
+
 
     <section class="card v6-research-card">
       <div class="card-head">
@@ -1469,6 +1485,67 @@ VIEWS['sales-v6'] = async v => {
   });
 
   $('#v6-rep-filter') && ($('#v6-rep-filter').onchange = renderRep);
+
+
+  
+  let seoState = { audit: null, opportunities: [] };
+
+  const renderSeo = () => {
+    const a = seoState.audit;
+    const ov = $('#v6-seo-overview');
+    if (ov && a) {
+      ov.innerHTML = `
+        <div class="v6-history-kpi"><span>صفحات</span><b>${a.pages_checked ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>مشاكل</span><b>${a.issues_found ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>قابلة للفهرسة</span><b>${a.indexable_pages ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>حرجة</span><b>${a.severity_count?.critical ?? 0}</b></div>`;
+    }
+    const host = $('#v6-seo-results');
+    if (!host || !a) return;
+    const issues = (a.issues || []).slice(0, 20);
+    host.innerHTML = `
+      <h4 style="margin:12px 0 6px">المشاكل</h4>
+      <div class="table-wrap"><table class="v6-history-table">
+        <thead><tr><th>الخطورة</th><th>المسار</th><th>المشكلة</th><th>الإصلاح المقترح</th></tr></thead>
+        <tbody>
+          ${issues.map(i => `<tr>
+            <td><span class="pill">${esc(i.severity)}</span></td>
+            <td class="ltr">${esc(i.page_path)}</td>
+            <td>${esc(i.problem)}</td>
+            <td>${esc(i.recommended_fix)}</td>
+          </tr>`).join('') || '<tr><td colspan="4">لا مشاكل في العينة</td></tr>'}
+        </tbody>
+      </table></div>
+      <h4 style="margin:16px 0 6px">فرص محتوى (تتطلب موافقة)</h4>
+      <ul>${(seoState.opportunities||[]).map(o => `<li><b>${esc(o.title)}</b> — ${esc(o.search_intent)} · approval required</li>`).join('')}</ul>`;
+  };
+
+  $('#v6-seo-audit') && ($('#v6-seo-audit').onclick = async () => {
+    const btn = $('#v6-seo-audit');
+    btn.disabled = true;
+    try {
+      const out = await v6Api('seo', { method: 'POST', body: { op: 'audit' } });
+      seoState.audit = out.audit;
+      const opp = await v6Api('seo', { method: 'POST', body: { op: 'opportunities' } });
+      seoState.opportunities = opp.opportunities || [];
+      renderSeo();
+    } catch (e) { toast(e.message, false); }
+    finally { btn.disabled = false; }
+  });
+
+  $('#v6-seo-entity') && ($('#v6-seo-entity').onclick = async () => {
+    try {
+      const out = await v6Api('seo', { query: { op: 'entity' } });
+      openModal(`<div class="v6-history-detail">
+        <h3>${esc(out.entity?.name || 'Tiqnora AI')}</h3>
+        <p>${esc(out.entity?.description || '')}</p>
+        <p class="muted">Domain: ${esc(out.entity?.domain || '')} · City: ${esc(out.entity?.city || '')}</p>
+        <p class="muted">Disambiguation: ${(out.clarity?.disambiguation_notes||[]).map(esc).join(' | ')}</p>
+        <div class="modal-foot"><button type="button" class="btn-primary" id="v6-seo-entity-close">إغلاق</button></div>
+      </div>`);
+      $('#v6-seo-entity-close').onclick = closeModal;
+    } catch (e) { toast(e.message, false); }
+  });
 
 
   $('#v6-proposal-preview').onclick = async () => {
