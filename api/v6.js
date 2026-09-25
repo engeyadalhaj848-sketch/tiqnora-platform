@@ -12,6 +12,11 @@ import {
   executeAction
 } from '../lib/actions/engine.js';
 import { buildProposalDraft } from '../lib/v6/proposal-composer.js';
+import {
+  validateProposalDeliveryAction,
+  formatProposalForDelivery,
+  chooseProposalDeliveryEvent
+} from '../lib/v6/proposal-delivery.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -62,6 +67,25 @@ async function sbGet(path, token = '') {
     throw Object.assign(new Error(body?.message || body?.hint || `Supabase ${response.status}`), { status: response.status });
   }
   return body;
+}
+
+async function sbWrite(path, { method = 'POST', body = null, prefer = 'return=representation' } = {}, token = '') {
+  const key = serverKey(token);
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      apikey: SERVICE || ANON,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      Prefer: prefer
+    },
+    ...(body == null ? {} : { body: JSON.stringify(body) })
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw Object.assign(new Error(payload?.message || payload?.hint || `Supabase ${response.status}`), { status: response.status });
+  }
+  return payload;
 }
 
 async function tiqnoraOrgId(token = '') {
@@ -319,6 +343,12 @@ async function handleProposal(req, res, auth) {
       return json(res, 409, { error: 'العرض غير جاهز لإنشاء مسودة مراجعة', proposal });
     }
 
+    const conversationRows = await sbGet(
+      `conversations?organization_id=eq.${encodeURIComponent(organizationId)}&lead_id=eq.${encodeURIComponent(lead.id)}&select=id,platform,last_message_at&order=last_message_at.desc&limit=1`,
+      auth.token
+    );
+    const proposalConversation = Array.isArray(conversationRows) ? conversationRows[0] : null;
+
     const action = await createAction({
       organizationId,
       actionType: 'proposal_review',
@@ -332,7 +362,7 @@ async function handleProposal(req, res, auth) {
       relatedEntityType: 'lead',
       relatedEntityId: lead.id,
       leadId: lead.id,
-      conversationId: null,
+      conversationId: proposalConversation?.id || null,
       createdBy: auth.profile.id,
       requiresApproval: true,
       status: 'pending_approval',
@@ -343,6 +373,154 @@ async function handleProposal(req, res, auth) {
   }
 
   return json(res, 400, { error: 'op must be preview|create_action' });
+}
+
+async function handleProposalDelivery(req, res, auth) {
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+
+  const body = req.body || {};
+  const actionId = String(body.action_id || '').trim();
+  const op = String(body.op || 'prepare').toLowerCase();
+  if (!actionId) return json(res, 400, { error: 'action_id required' });
+
+  const action = await getAction(actionId, auth.token);
+  if (!action) return json(res, 404, { error: 'Proposal action not found' });
+
+  if (op === 'record_sent' && action.status === 'completed' && action.result?.outbound_external_id) {
+    return json(res, 200, { action, already_recorded: true });
+  }
+
+  const validation = validateProposalDeliveryAction(action);
+  if (!validation.ready) {
+    return json(res, 409, {
+      error: 'العرض غير جاهز للإرسال اليدوي',
+      code: 'proposal_delivery_not_ready',
+      validation
+    });
+  }
+
+  const organizationId = action.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+
+  let conversationId = action.conversation_id || null;
+  if (!conversationId && action.lead_id) {
+    const rows = await sbGet(
+      `conversations?organization_id=eq.${encodeURIComponent(organizationId)}&lead_id=eq.${encodeURIComponent(action.lead_id)}&select=id,platform,last_message_at&order=last_message_at.desc&limit=1`,
+      auth.token
+    );
+    conversationId = rows?.[0]?.id || null;
+  }
+
+  if (op === 'prepare') {
+    let eventPath = `social_events?organization_id=eq.${encodeURIComponent(organizationId)}&event_type=in.(message.received,comment.created)&select=id,platform,event_type,author_name,author_external_id,occurred_at,raw_payload,lead_id,conversation_id,contact_id&order=occurred_at.desc&limit=30`;
+    if (conversationId) eventPath += `&conversation_id=eq.${encodeURIComponent(conversationId)}`;
+    else if (action.lead_id) eventPath += `&lead_id=eq.${encodeURIComponent(action.lead_id)}`;
+
+    const events = await sbGet(eventPath, auth.token);
+    const event = chooseProposalDeliveryEvent(events || [], {
+      ...action,
+      conversation_id: conversationId
+    });
+    if (!event) {
+      return json(res, 409, {
+        error: 'لا توجد محادثة اجتماعية واردة مرتبطة بهذا العرض للإرسال',
+        code: 'proposal_delivery_channel_missing'
+      });
+    }
+
+    const message = formatProposalForDelivery(action.payload?.proposal || {}, {
+      language: action.payload?.proposal?.language || 'ar',
+      maxLength: 3900
+    });
+
+    return json(res, 200, {
+      ready: true,
+      action_id: action.id,
+      event_id: event.id,
+      conversation_id: conversationId || event.conversation_id || null,
+      platform: event.platform,
+      recipient: event.author_name || event.author_external_id || null,
+      message,
+      validation
+    });
+  }
+
+  if (op === 'record_sent') {
+    const sourceEventId = String(body.source_event_id || '').trim();
+    const outboundExternalId = String(body.outbound_external_id || '').trim();
+    if (!sourceEventId || !outboundExternalId) {
+      return json(res, 400, { error: 'source_event_id and outbound_external_id required' });
+    }
+
+    const eventRows = await sbGet(
+      `social_events?id=eq.${encodeURIComponent(sourceEventId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=id,platform,lead_id,conversation_id&limit=1`,
+      auth.token
+    );
+    const sourceEvent = eventRows?.[0] || null;
+    if (!sourceEvent) return json(res, 404, { error: 'Source social event not found' });
+
+    if (action.lead_id && sourceEvent.lead_id && String(action.lead_id) !== String(sourceEvent.lead_id)) {
+      return json(res, 409, { error: 'Source event does not belong to proposal lead', code: 'proposal_event_mismatch' });
+    }
+    if (conversationId && sourceEvent.conversation_id && String(conversationId) !== String(sourceEvent.conversation_id)) {
+      return json(res, 409, { error: 'Source event does not belong to proposal conversation', code: 'proposal_event_mismatch' });
+    }
+
+    const now = new Date().toISOString();
+    const result = {
+      ...(action.result || {}),
+      outbound_external_id: outboundExternalId,
+      outbound_event_id: body.outbound_event_id || null,
+      source_event_id: sourceEventId,
+      platform: body.platform || sourceEvent.platform || null,
+      delivery_status: String(body.provider_status || 'sent').toLowerCase(),
+      sent_at: now
+    };
+
+    const rows = await sbWrite(
+      `actions?id=eq.${encodeURIComponent(action.id)}&organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.approved`,
+      {
+        method: 'PATCH',
+        body: {
+          status: 'completed',
+          result,
+          executed_at: now,
+          updated_at: now
+        }
+      },
+      auth.token
+    );
+    const updated = Array.isArray(rows) ? rows[0] : rows;
+    if (!updated) return json(res, 409, { error: 'Proposal action was already changed before send was recorded' });
+
+    if (action.lead_id) {
+      try {
+        await sbWrite('crm_activities', {
+          method: 'POST',
+          body: {
+            organization_id: organizationId,
+            lead_id: action.lead_id,
+            activity_type: 'proposal_sent',
+            title: 'تم إرسال العرض للعميل',
+            body: `القناة: ${result.platform || 'social'}`,
+            metadata: {
+              action_id: action.id,
+              outbound_external_id: outboundExternalId,
+              outbound_event_id: result.outbound_event_id,
+              source_event_id: sourceEventId
+            },
+            created_by: auth.profile.id
+          }
+        }, auth.token);
+      } catch {
+        // Audit action/result is the source of truth; activity is best-effort.
+      }
+    }
+
+    return json(res, 200, { action: updated, sent: true });
+  }
+
+  return json(res, 400, { error: 'op must be prepare|record_sent' });
 }
 
 async function handleActions(req, res, auth) {
@@ -438,6 +616,7 @@ export default async function handler(req, res) {
   try {
     if (route === 'draft_reply') return await handleDraftReply(req, res, auth);
     if (route === 'proposal') return await handleProposal(req, res, auth);
+    if (route === 'proposal_delivery') return await handleProposalDelivery(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
