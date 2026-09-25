@@ -189,6 +189,44 @@ async function tiqnoraOrgId(token = '') {
   return rows?.[0]?.id || null;
 }
 
+async function loadGbpAccessToken(organizationId) {
+  const rows = await sbGet(
+    `social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.google_business_profile&select=*&limit=1`
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) {
+    throw Object.assign(new Error('Google Business Profile is not connected.'), { status: 409, code: 'gbp_not_connected' });
+  }
+
+  let accessToken = decryptSocialToken(row.ciphertext, row.iv, row.tag);
+  const expiresAt = row.expires_at ? new Date(row.expires_at).getTime() : null;
+  const expiring = Number.isFinite(expiresAt) && expiresAt <= Date.now() + 60_000;
+
+  if (expiring) {
+    if (!row.refresh_ciphertext || !row.refresh_iv || !row.refresh_tag) {
+      throw Object.assign(new Error('Google Business Profile authorization must be renewed.'), { status: 401, code: 'reauthorize_required' });
+    }
+    const refreshToken = decryptSocialToken(row.refresh_ciphertext, row.refresh_iv, row.refresh_tag);
+    const refreshed = await refreshGbpToken(refreshToken);
+    const encrypted = encryptSocialToken(refreshed.access_token);
+    const patch = {
+      ...encrypted,
+      scopes: refreshed.scope || row.scopes || 'https://www.googleapis.com/auth/business.manage',
+      expires_at: refreshed.expires_in
+        ? new Date(Date.now() + Number(refreshed.expires_in) * 1000).toISOString()
+        : row.expires_at,
+      updated_at: new Date().toISOString()
+    };
+    await sbWrite(
+      `social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.google_business_profile`,
+      { method: 'PATCH', body: patch, prefer: 'return=minimal' }
+    );
+    accessToken = refreshed.access_token;
+  }
+
+  return { accessToken, row };
+}
+
 async function handleSalesChat(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const message = String(req.body?.message || '').trim();
@@ -1296,7 +1334,7 @@ async function handleReputation(req, res, auth) {
     let tokenRow = null;
     try {
       const rows = await sbGet(
-        `social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.google_business_profile&select=id,provider,expires_at,status,updated_at&limit=1`,
+        `social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.google_business_profile&select=id,provider,expires_at,refresh_ciphertext,updated_at&limit=1`,
         auth.token
       );
       tokenRow = Array.isArray(rows) ? rows[0] : null;
@@ -1313,13 +1351,11 @@ async function handleReputation(req, res, auth) {
     if (!gbpEnvConfigured()) {
       return json(res, 503, { error: 'Google Business Profile not configured', code: 'not_configured' });
     }
-    const state = Buffer.from(JSON.stringify({ organizationId, uid: auth.profile?.id, t: Date.now() })).toString('base64url');
-    try {
-      const url = buildGbpAuthUrl(state);
-      return json(res, 200, { url, state, note: 'Complete OAuth in browser; tokens stored server-side only' });
-    } catch (e) {
-      return json(res, 503, { error: e.message, code: e.code || 'not_configured' });
-    }
+    const url = `/api/social/oauth/google_business_profile?organization_id=${encodeURIComponent(organizationId)}`;
+    return json(res, 200, {
+      url,
+      note: 'OAuth state is signed server-side; tokens are encrypted in social_provider_tokens.'
+    });
   }
 
   if (op === 'locations' || op === 'reputation_locations') {
@@ -1331,6 +1367,150 @@ async function handleReputation(req, res, auth) {
       return json(res, 200, { locations: Array.isArray(rows) ? rows : [] });
     } catch (e) {
       return json(res, 200, { locations: [], warning: e.message });
+    }
+  }
+
+  if (op === 'sync' || op === 'reputation_sync') {
+    if (!gbpEnvConfigured()) {
+      return json(res, 503, { error: 'Google Business Profile not configured', code: 'not_configured' });
+    }
+
+    let syncJob = null;
+    try {
+      const jobs = await sbWrite('reputation_sync_jobs', {
+        method: 'POST',
+        body: {
+          organization_id: organizationId,
+          provider: 'google_business_profile',
+          status: 'running',
+          started_at: new Date().toISOString(),
+          metadata: { source: 'manual_admin_sync' }
+        }
+      }, auth.token);
+      syncJob = Array.isArray(jobs) ? jobs[0] : jobs;
+
+      const { accessToken } = await loadGbpAccessToken(organizationId);
+      const accounts = await listGbpAccounts(accessToken);
+      let locationsSaved = 0;
+      let reviewsSaved = 0;
+
+      for (const account of accounts.slice(0, 20)) {
+        const accountName = String(account?.name || '');
+        if (!accountName) continue;
+        const locations = await listGbpLocations(accessToken, accountName);
+
+        for (const rawLocation of locations.slice(0, 200)) {
+          const mapped = mapLocationToRecord(rawLocation, accountName);
+          if (!mapped.external_location_id) continue;
+
+          const saved = await sbWrite(
+            'reputation_locations?on_conflict=organization_id,provider,external_location_id',
+            {
+              method: 'POST',
+              prefer: 'resolution=merge-duplicates,return=representation',
+              body: {
+                organization_id: organizationId,
+                ...mapped,
+                last_synced_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }
+            },
+            auth.token
+          );
+          const locationRow = Array.isArray(saved) ? saved[0] : saved;
+          if (!locationRow?.id) continue;
+          locationsSaved += 1;
+
+          const locationName = String(rawLocation?.name || '');
+          const parent = locationName.startsWith('accounts/')
+            ? locationName
+            : `${accountName}/${locationName.replace(/^\/+/, '')}`;
+          const reviewResult = await listGbpReviews(accessToken, parent, { maxResults: 100 });
+          const normalized = normalizeReviewsFromApi(reviewResult.reviews, { ...mapped, id: locationRow.id });
+
+          for (const review of normalized) {
+            if (!review.external_review_id) continue;
+            const reviewPayload = {
+              organization_id: organizationId,
+              location_id: locationRow.id,
+              provider: review.provider,
+              external_review_id: review.external_review_id,
+              resource_name: review.resource_name || null,
+              rating: review.rating,
+              comment: review.comment,
+              reviewer_display_name: review.reviewer_display_name,
+              created_at_external: review.created_at_external,
+              updated_at_external: review.updated_at_external,
+              existing_reply: review.existing_reply,
+              existing_reply_updated_at: review.existing_reply_updated_at,
+              reply_status: review.reply_status,
+              sentiment: review.sentiment,
+              topics: review.topics,
+              priority: review.priority,
+              analysis: review.analysis,
+              sync_status: 'synced',
+              payload_minimal: review.payload_minimal,
+              updated_at: new Date().toISOString()
+            };
+            await sbWrite(
+              'reputation_reviews?on_conflict=organization_id,provider,external_review_id',
+              {
+                method: 'POST',
+                prefer: 'resolution=merge-duplicates,return=minimal',
+                body: reviewPayload
+              },
+              auth.token
+            );
+            reviewsSaved += 1;
+          }
+        }
+      }
+
+      if (syncJob?.id) {
+        await sbWrite(
+          `reputation_sync_jobs?id=eq.${encodeURIComponent(syncJob.id)}`,
+          {
+            method: 'PATCH',
+            prefer: 'return=minimal',
+            body: {
+              status: 'completed',
+              reviews_fetched: reviewsSaved,
+              completed_at: new Date().toISOString(),
+              metadata: {
+                ...(syncJob.metadata || {}),
+                accounts_found: accounts.length,
+                locations_saved: locationsSaved
+              }
+            }
+          },
+          auth.token
+        );
+      }
+
+      return json(res, 200, {
+        ok: true,
+        accounts_found: accounts.length,
+        locations_saved: locationsSaved,
+        reviews_saved: reviewsSaved,
+        auto_reply: false
+      });
+    } catch (e) {
+      if (syncJob?.id) {
+        await sbWrite(
+          `reputation_sync_jobs?id=eq.${encodeURIComponent(syncJob.id)}`,
+          {
+            method: 'PATCH',
+            prefer: 'return=minimal',
+            body: {
+              status: 'failed',
+              error_message: String(e.message || 'sync_failed').slice(0, 500),
+              completed_at: new Date().toISOString()
+            }
+          },
+          auth.token
+        ).catch(() => null);
+      }
+      return json(res, e.status || 502, { error: e.message || 'Reputation sync failed', code: e.code || 'sync_failed' });
     }
   }
 
@@ -1389,7 +1569,9 @@ async function handleReputation(req, res, auth) {
         actionType: 'reputation_reply',
         payload: {
           draft,
-          review_id: req.body?.review_id || req.body?.review?.external_review_id,
+          review_id: req.body?.review_id || req.body?.review?.id || req.body?.review?.external_review_id,
+          external_review_id: req.body?.review?.external_review_id || null,
+          resource_name: req.body?.review?.resource_name || null,
           requires_approval: true,
           auto_reply: false
         },
@@ -1405,17 +1587,102 @@ async function handleReputation(req, res, auth) {
   }
 
   if (op === 'approve_reply') {
-    const draft = approveReplyDraft(req.body?.draft || {}, auth.profile?.id);
-    return json(res, 200, { draft, auto_reply: false });
+    const actionId = String(req.body?.action_id || '').trim();
+    if (!actionId) return json(res, 400, { error: 'action_id is required', code: 'action_id_required' });
+    const action = await approveAction({
+      actionId,
+      approvedBy: auth.profile?.id,
+      autoExecute: false,
+      accessToken: auth.token
+    });
+    if (action?.organization_id !== organizationId || action?.action_type !== 'reputation_reply') {
+      return json(res, 409, { error: 'Action does not belong to this reputation workflow', code: 'action_mismatch' });
+    }
+    const draft = approveReplyDraft(action.payload?.draft || req.body?.draft || {}, auth.profile?.id);
+    return json(res, 200, { draft, action, auto_reply: false });
   }
 
   if (op === 'publish_reply') {
-    const draft = req.body?.draft || {};
-    const review = req.body?.review || {};
-    // Force non-live unless explicitly enabled AND approved (still default mock)
-    const live = false;
-    const result = await publishReply(draft, review, { live, accessToken: null });
+    const actionId = String(req.body?.action_id || '').trim();
+    if (!actionId) return json(res, 400, { error: 'action_id is required', code: 'action_id_required' });
+    const action = await getAction(actionId, auth.token);
+    if (!action || action.organization_id !== organizationId || action.action_type !== 'reputation_reply') {
+      return json(res, 404, { error: 'Approved reputation action not found', code: 'action_not_found' });
+    }
+    if (action.status !== 'approved') {
+      return json(res, 409, { error: 'Human approval is required before publishing', code: 'human_approval_required' });
+    }
+
+    const reviewRef = String(req.body?.review_id || action.payload?.review_id || '').trim();
+    const externalReviewId = String(action.payload?.external_review_id || '').trim();
+    let review = null;
+    if (reviewRef && /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(reviewRef)) {
+      const rows = await sbGet(
+        `reputation_reviews?id=eq.${encodeURIComponent(reviewRef)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=1`,
+        auth.token
+      );
+      review = Array.isArray(rows) ? rows[0] : null;
+    }
+    if (!review && (externalReviewId || reviewRef)) {
+      const ext = externalReviewId || reviewRef;
+      const rows = await sbGet(
+        `reputation_reviews?external_review_id=eq.${encodeURIComponent(ext)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=1`,
+        auth.token
+      );
+      review = Array.isArray(rows) ? rows[0] : null;
+    }
+    if (!review) return json(res, 404, { error: 'Review not found', code: 'review_not_found' });
+
+    const draft = approveReplyDraft(action.payload?.draft || {}, action.approved_by || auth.profile?.id);
+    const liveRequested = req.body?.live === true;
+    const liveEnabled = process.env.REPUTATION_LIVE_REPLY_ENABLED === 'true';
+    if (liveRequested && !liveEnabled) {
+      return json(res, 409, { error: 'Live reputation replies are disabled', code: 'live_reply_disabled' });
+    }
+
+    let accessToken = null;
+    if (liveRequested) {
+      accessToken = (await loadGbpAccessToken(organizationId)).accessToken;
+    }
+    const result = await publishReply(draft, review, { live: liveRequested, accessToken });
     if (!result.ok) return json(res, 409, result);
+
+    await sbWrite(
+      `reputation_reviews?id=eq.${encodeURIComponent(review.id)}&organization_id=eq.${encodeURIComponent(organizationId)}`,
+      {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: {
+          reply_status: liveRequested ? 'answered' : review.reply_status,
+          existing_reply: liveRequested ? result.external_reply : review.existing_reply,
+          existing_reply_updated_at: liveRequested ? result.published_at : review.existing_reply_updated_at,
+          updated_at: new Date().toISOString()
+        }
+      },
+      auth.token
+    );
+
+    await sbWrite(
+      `actions?id=eq.${encodeURIComponent(actionId)}&organization_id=eq.${encodeURIComponent(organizationId)}`,
+      {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: {
+          status: 'completed',
+          result: {
+            provider: 'google_business_profile',
+            live: Boolean(result.live),
+            review_id: review.id,
+            external_review_id: review.external_review_id,
+            published_at: result.published_at || null
+          },
+          executed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      },
+      auth.token
+    );
+
     return json(res, 200, { publish: result, auto_reply: false });
   }
 
@@ -1456,7 +1723,7 @@ async function handleReputation(req, res, auth) {
   return json(res, 400, {
     error: 'Unknown op',
     ops: [
-      'status', 'connect_url', 'locations', 'reviews', 'sync_mock',
+      'status', 'connect_url', 'locations', 'reviews', 'sync', 'sync_mock',
       'draft_reply', 'submit_reply', 'approve_reply', 'publish_reply',
       'dashboard', 'insights'
     ]
