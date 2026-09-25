@@ -8,7 +8,8 @@
     "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs",
     "prebuild": "npm run test:v6",
     "test:lead-enrichment": "node --test tests/v6-lead-enrichment.test.mjs",
-    "test:v6": "node --test tests/v6-inbox-crm.test.mjs tests/v6-lead-enrichment.test.mjs tests/v6-social-crm-bridge.test.mjs",
-    "test:social-crm-bridge": "node --test tests/v6-social-crm-bridge.test.mjs"
+    "test:v6": "node --test tests/v6-inbox-crm.test.mjs tests/v6-lead-enrichment.test.mjs tests/v6-social-crm-bridge.test.mjs tests/v6-sales-playbooks.test.mjs",
+    "test:social-crm-bridge": "node --test tests/v6-social-crm-bridge.test.mjs",
+    "test:sales-playbooks": "node --test tests/v6-sales-playbooks.test.mjs"
   }
 }
