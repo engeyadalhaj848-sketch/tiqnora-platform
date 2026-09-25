@@ -1,3 +1,4 @@
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 /**
  * Tiqnora V6 consolidated router.
  * Keeps Hobby deployments under the Serverless Function limit.
@@ -76,15 +77,46 @@ import {
   isGbpConfigured
 } from '../lib/v6/reputation/engine.js';
 import {
-  buildGbpAuthUrl,
   isGbpConfigured as gbpEnvConfigured,
-  mapLocationToRecord
+  mapLocationToRecord,
+  listAccounts as listGbpAccounts,
+  listLocations as listGbpLocations,
+  listReviews as listGbpReviews,
+  refreshGbpToken
 } from '../lib/v6/reputation/providers/google-business-profile.js';
 
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+function socialTokenKey() {
+  const key = Buffer.from(process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || '', 'base64');
+  if (key.length !== 32) {
+    throw Object.assign(new Error('SOCIAL_TOKEN_ENCRYPTION_KEY must be a base64 32-byte key'), { status: 503, code: 'token_vault_not_configured' });
+  }
+  return key;
+}
+
+function decryptSocialToken(ciphertext, iv, tag) {
+  const d = createDecipheriv('aes-256-gcm', socialTokenKey(), Buffer.from(iv, 'base64url'));
+  d.setAuthTag(Buffer.from(tag, 'base64url'));
+  return Buffer.concat([
+    d.update(Buffer.from(ciphertext, 'base64url')),
+    d.final()
+  ]).toString();
+}
+
+function encryptSocialToken(value) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', socialTokenKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(String(value)), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString('base64url'),
+    iv: iv.toString('base64url'),
+    tag: cipher.getAuthTag().toString('base64url')
+  };
+}
 
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
