@@ -276,11 +276,14 @@ async function handleProposal(req, res, auth) {
     lead_payload: { company_name: lead.company_name || company?.name || null }
   };
 
+  const storedPlaybook = custom.sales_playbook || {};
+  const verticalId = storedPlaybook?.playbook?.vertical_id || lead.industry || 'general';
+
   const enrichment = {
     vertical: {
-      id: lead.industry || 'general',
+      id: verticalId,
       confidence: 1,
-      reason: 'crm'
+      reason: storedPlaybook?.playbook?.vertical_id ? 'sales_playbook' : 'crm'
     },
     pack: custom.vertical_pack || null,
     quality: {
@@ -294,7 +297,7 @@ async function handleProposal(req, res, auth) {
     next_best_action: custom.next_best_action || null
   };
 
-  const playbook = custom.sales_playbook || {};
+  const playbook = storedPlaybook;
   const confirmedPricing = normalizeConfirmedPricing(body.confirmed_pricing);
 
   const proposal = buildProposalDraft({
