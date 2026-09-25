@@ -165,7 +165,8 @@ async function handleDraftReply(req, res, auth) {
     leadId: lead?.id || null,
     conversationId: conversation_id || null,
     createdBy: auth.profile.id,
-    requiresApproval: true
+    requiresApproval: true,
+    accessToken: auth.token
   });
 
   return json(res, 200, {
@@ -187,7 +188,7 @@ async function handleActions(req, res, auth) {
   if (req.method === 'GET') {
     const status = req.query?.status || null;
     const limit = Math.min(parseInt(req.query?.limit || '50', 10) || 50, 200);
-    const actions = await listActions({ organizationId, status, limit });
+    const actions = await listActions({ organizationId, status, limit, accessToken: auth.token });
     return json(res, 200, { actions: actions || [] });
   }
 
@@ -204,7 +205,8 @@ async function handleActions(req, res, auth) {
       conversationId: body.conversation_id || null,
       createdBy: auth.profile.id,
       requiresApproval: body.requires_approval !== false,
-      status: body.status || null
+      status: body.status || null,
+      accessToken: auth.token
     });
     return json(res, 201, { action });
   }
@@ -217,7 +219,7 @@ async function handleAction(req, res, auth) {
   if (!id) return json(res, 400, { error: 'id required' });
 
   if (req.method === 'GET') {
-    const action = await getAction(id);
+    const action = await getAction(id, auth.token);
     if (!action) return json(res, 404, { error: 'Not found' });
     return json(res, 200, { action });
   }
@@ -228,7 +230,8 @@ async function handleAction(req, res, auth) {
       const action = await approveAction({
         actionId: id,
         approvedBy: auth.profile.id,
-        autoExecute: Boolean(req.body?.autoExecute)
+        autoExecute: Boolean(req.body?.autoExecute),
+        accessToken: auth.token
       });
       return json(res, 200, { action });
     }
@@ -236,12 +239,13 @@ async function handleAction(req, res, auth) {
       const action = await rejectAction({
         actionId: id,
         approvedBy: auth.profile.id,
-        reason: req.body?.reason || ''
+        reason: req.body?.reason || '',
+        accessToken: auth.token
       });
       return json(res, 200, { action });
     }
     if (op === 'execute') {
-      const action = await executeAction({ actionId: id });
+      const action = await executeAction({ actionId: id, accessToken: auth.token });
       return json(res, 200, { action });
     }
     return json(res, 400, { error: 'op must be approve|reject|execute' });
@@ -262,61 +266,6 @@ export default async function handler(req, res) {
 
   if (route === 'sales_chat') {
     return handleSalesChat(req, res);
-  }
-
-  // Preview-only smoke test for V6 AI sales pipeline. Never available in production.
-  if (route === 'sales_smoke') {
-    if (process.env.VERCEL_ENV === 'production') {
-      return json(res, 404, { error: 'Not found' });
-    }
-    if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
-    try {
-      const sampleMessage = 'أريد موقع احترافي لعيادة أسنان في المدينة المنورة وأريد معرفة الخطوة التالية.';
-      const intent = await classifyIntent({ text: sampleMessage, language: 'ar' });
-      const sales = await generateSalesReply({
-        lead: { industry: 'dental_clinic', city: 'المدينة المنورة', source: 'preview_smoke_test' },
-        messages: [{ direction: 'inbound', body: sampleMessage }],
-        language: 'ar'
-      });
-      const organizationId = await tiqnoraOrgId() || 'aa2eb366-3fab-423f-9d47-4430dc9505da';
-      const action = await createAction({
-        organizationId,
-        actionType: 'send_whatsapp',
-        payload: {
-          test: true,
-          smoke_test: true,
-          reply_draft: sales.reply_draft,
-          qualification: sales.qualification,
-          next_best_action: sales.next_best_action,
-          suggested_stage: sales.suggested_stage,
-          internal_summary: sales.internal_summary,
-          intent,
-          model: sales.model,
-          provider: sales.provider
-        },
-        relatedEntityType: 'smoke_test',
-        createdBy: null,
-        requiresApproval: true
-      });
-      return json(res, 200, {
-        ok: true,
-        smoke_test: true,
-        intent,
-        draft: sales.reply_draft,
-        qualification: sales.qualification,
-        next_best_action: sales.next_best_action,
-        action: {
-          id: action?.id,
-          status: action?.status,
-          action_type: action?.action_type,
-          requires_approval: action?.requires_approval
-        },
-        model: sales.model,
-        provider: sales.provider
-      });
-    } catch (error) {
-      return json(res, error.status || 500, { error: error.message || 'Smoke test failed', code: error.code });
-    }
   }
 
   const auth = await requireAdmin(req);
