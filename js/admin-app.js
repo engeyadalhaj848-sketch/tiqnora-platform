@@ -8,7 +8,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const cfg = window.TIQNORA_CONFIG || {};
 const money = n => new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 2 }).format(Number(n) || 0) + ' ر.س';
-let db = null, me = null;
+let db = null, me = null, adminNotificationsChannel = null;
 
 const STATUS_AR = { pending: 'بانتظار', confirmed: 'مؤكد', processing: 'تجهيز', shipped: 'مشحون', delivered: 'مسلّم', cancelled: 'ملغي', refunded: 'مسترجع', unpaid: 'غير مدفوع', paid: 'مدفوع', failed: 'فاشل', draft: 'مسودة', published: 'منشور', archived: 'مؤرشف' };
 const pillCls = s => ['delivered', 'published', 'paid'].includes(s) ? 'ok' : ['pending', 'processing', 'draft', 'unpaid'].includes(s) ? 'warn' : ['cancelled', 'failed', 'refunded'].includes(s) ? 'danger' : 'muted';
@@ -17,6 +17,52 @@ function toast(msg, ok = true) {
   const t = $('#toast'); t.textContent = msg; t.style.borderColor = ok ? 'var(--ok)' : 'var(--danger)';
   t.classList.add('show'); clearTimeout(t._to); t._to = setTimeout(() => t.classList.remove('show'), 3200);
 }
+async function refreshAdminNotificationBadge() {
+  if (!db || !me?.id) return;
+  const { count, error } = await db
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', me.id)
+    .in('audience', ['admin', 'both'])
+    .is('read_at', null);
+  if (error) return;
+  const badge = $('#admin-notification-badge');
+  const navBadge = $('#admin-notification-nav-badge');
+  const value = Number(count || 0);
+  [badge, navBadge].forEach(el => {
+    if (!el) return;
+    el.textContent = value > 99 ? '99+' : String(value);
+    el.style.display = value ? 'inline-flex' : 'none';
+  });
+}
+
+function setupAdminNotifications() {
+  if (!db || !me?.id) return;
+  refreshAdminNotificationBadge();
+
+  if (adminNotificationsChannel) {
+    try { db.removeChannel(adminNotificationsChannel); } catch {}
+  }
+
+  adminNotificationsChannel = db
+    .channel('admin-notifications-' + me.id)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
+      const n = payload?.new || {};
+      if (!['admin', 'both'].includes(String(n.audience || ''))) return;
+      if (n.user_id && String(n.user_id) !== String(me.id)) return;
+
+      refreshAdminNotificationBadge();
+      const body = String(n.body_ar || '').trim();
+      toast('🔔 ' + String(n.title_ar || 'إشعار جديد') + (body ? ' — ' + body.slice(0, 120) : ''));
+
+      if (location.hash === '#notifications') {
+        const view = $('#view');
+        if (view) VIEWS.notifications(view);
+      }
+    })
+    .subscribe();
+}
+
 async function log(action, entity, entity_id, details = {}) {
   try { await db.from('activity_logs').insert({ user_id: me?.id, action, entity, entity_id: entity_id ? String(entity_id) : null, details }); } catch {}
 }
@@ -158,7 +204,7 @@ function renderShell() {
     <aside class="admin-side" id="admin-side">
       <div class="side-brand"><img src="assets/tiqnora-logo.png" alt=""> <span>Tiqnora AI</span></div>
       ${NAV.map(n => n.group ? `<div class="side-group">${n.group}</div>` :
-        `<a class="side-link" href="#${n.id}" data-nav="${n.id}"><span class="ic">${n.ic}</span>${n.label}</a>`).join('')}
+        `<a class="side-link" href="#${n.id}" data-nav="${n.id}"><span class="ic">${n.ic}</span>${n.label}${n.id === 'notifications' ? '<span id="admin-notification-nav-badge" style="display:none;margin-inline-start:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--danger);color:#fff;font-size:.72rem;align-items:center;justify-content:center"></span>' : ''}</a>`).join('')}
       <div style="margin-top:auto;padding:12px 8px">
         <button class="btn-ghost btn-sm" id="logout" style="width:100%">تسجيل الخروج</button>
       </div>
@@ -170,6 +216,12 @@ function renderShell() {
           <h1 id="page-title">لوحة التحكم</h1>
         </div>
         <div class="topbar-user">
+          <a id="admin-notification-bell" href="#notifications" aria-label="الإشعارات" title="الإشعارات"
+             style="position:relative;text-decoration:none;font-size:1.15rem;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:10px">
+            🔔
+            <span id="admin-notification-badge"
+              style="display:none;position:absolute;top:-7px;inset-inline-end:-7px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:var(--danger);color:#fff;font-size:.68rem;align-items:center;justify-content:center;border:2px solid var(--bg)"></span>
+          </a>
           <span>${esc(me.full_name || me.email)}</span>
           <span class="pill ${me.role === 'super_admin' ? 'ok' : ''}">${me.role === 'super_admin' ? 'مالك' : 'أدمن'}</span>
         </div>
@@ -181,6 +233,7 @@ function renderShell() {
   $('#burger').onclick = () => { $('#admin-side').classList.toggle('open'); $('#side-bd').style.display = $('#admin-side').classList.contains('open') ? 'block' : 'none'; };
   $('#side-bd').onclick = () => { $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none'; };
   window.addEventListener('hashchange', () => route(location.hash));
+  setupAdminNotifications();
 }
 function route(hash) {
   const id = (hash || '#dashboard').slice(1);
@@ -477,7 +530,7 @@ VIEWS.dashboard = async v => {
     db.from('service_requests').select('id,status,title,created_at').order('created_at',{ascending:false}).limit(8),
     db.from('subscriptions').select('id,status,saas_plans(slug,name_ar,price_monthly)').eq('status','active').limit(100),
     db.from('billing_invoices').select('amount,status').eq('status','pending').limit(50),
-    db.from('notifications').select('id', { count: 'exact', head: true }).eq('audience','admin').is('read_at', null),
+    db.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', me.id).in('audience',['admin','both']).is('read_at', null),
     db.from('service_requests').select('id', { count: 'exact', head: true }).eq('status','new'),
   ]);
   const val = (i) => settled[i].status === 'fulfilled' ? settled[i].value : { data: null, count: null };
@@ -2606,7 +2659,7 @@ VIEWS.analytics = async v => {
 VIEWS.notifications = async v => {
   v.innerHTML = `<div class="card"><div class="card-head"><h2 style="margin:0">إشعارات الإدارة</h2>
     <button class="btn-sm" id="mark-all">تعليم الكل كمقروء</button></div><div id="nlist"></div></div>`;
-  const { data } = await db.from('notifications').select('*').or('audience.eq.admin,audience.eq.both').order('created_at',{ascending:false}).limit(80);
+  const { data } = await db.from('notifications').select('*').eq('user_id', me.id).in('audience', ['admin','both']).order('created_at',{ascending:false}).limit(80);
   $('#nlist').innerHTML = (data||[]).map(n => `<div style="padding:12px 0;border-bottom:1px solid var(--line);opacity:${n.read_at?.5:1}">
     <b>${esc(n.title_ar)}</b> <span class="pill">${esc(n.type)}</span>
     <div style="color:var(--muted);font-size:.9rem">${esc(n.body_ar||'')}</div>
@@ -2615,11 +2668,13 @@ VIEWS.notifications = async v => {
   </div>`).join('') || '<p style="color:var(--muted)">لا إشعارات — نفّذ migration 013</p>';
   $$('[data-nr]').forEach(b => b.onclick = async () => {
     await db.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', b.dataset.nr);
+    await refreshAdminNotificationBadge();
     VIEWS.notifications(v);
   });
   $('#mark-all').onclick = async () => {
     const ids = (data||[]).filter(n=>!n.read_at).map(n=>n.id);
     for (const id of ids) await db.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
+    await refreshAdminNotificationBadge();
     toast('تم'); VIEWS.notifications(v);
   };
 };
