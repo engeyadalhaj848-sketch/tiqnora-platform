@@ -1,9 +1,15 @@
 import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import {
+  listAccounts as listGbpAccounts,
+  listLocations as listGbpLocations,
+  mapLocationToRecord as mapGbpLocationToRecord
+} from '../../../lib/v6/reputation/providers/google-business-profile.js';
 
 const providers = {
   meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_comments' },
   whatsapp: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,whatsapp_business_management,whatsapp_business_messaging' },
   tiktok: { auth: 'https://www.tiktok.com/v2/auth/authorize/', token: 'https://open.tiktokapis.com/v2/oauth/token/', scopes: 'user.info.basic,video.upload,video.publish' },
+  google_business_profile: { auth: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token', scopes: 'https://www.googleapis.com/auth/business.manage' },
   linkedin: { auth: 'https://www.linkedin.com/oauth/v2/authorization', token: 'https://www.linkedin.com/oauth/v2/accessToken', scopes: 'openid profile w_member_social r_organization_social w_organization_social' }
 };
 const secret = () => process.env.OAUTH_STATE_SECRET || process.env.META_APP_SECRET || process.env.SOCIAL_WEBHOOK_SHARED_SECRET;
@@ -31,6 +37,16 @@ function credentials(provider) {
       !(process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY) && 'TIKTOK_CLIENT_KEY',
       !process.env.TIKTOK_CLIENT_SECRET && 'TIKTOK_CLIENT_SECRET',
       !(process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL) && 'TIKTOK_REDIRECT_URI'
+    ].filter(Boolean)
+  };
+  if (provider === 'google_business_profile') return {
+    clientId: process.env.GOOGLE_BUSINESS_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_BUSINESS_CLIENT_SECRET,
+    redirect: process.env.GOOGLE_BUSINESS_REDIRECT_URI,
+    missing: [
+      !process.env.GOOGLE_BUSINESS_CLIENT_ID && 'GOOGLE_BUSINESS_CLIENT_ID',
+      !process.env.GOOGLE_BUSINESS_CLIENT_SECRET && 'GOOGLE_BUSINESS_CLIENT_SECRET',
+      !process.env.GOOGLE_BUSINESS_REDIRECT_URI && 'GOOGLE_BUSINESS_REDIRECT_URI'
     ].filter(Boolean)
   };
   return {
@@ -976,6 +992,11 @@ export default async function handler(req, res) {
     } else {
       url.searchParams.set('scope', scopes);
     }
+    if (provider === 'google_business_profile') {
+      url.searchParams.set('access_type', 'offline');
+      url.searchParams.set('prompt', 'consent');
+      url.searchParams.set('include_granted_scopes', 'true');
+    }
     return res.redirect(url.toString());
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
@@ -1110,9 +1131,39 @@ export default async function handler(req, res) {
         waba_ids: [...new Set(accounts.map(x => x.waba_id))],
         webhook_subscribed: accounts.some(x => x.webhook_subscribed)
       };
+    } else if (provider === 'google_business_profile') {
+      let accounts = [];
+      let locationsFound = 0;
+      try {
+        accounts = await listGbpAccounts(access);
+        for (const account of accounts.slice(0, 20)) {
+          const accountName = String(account?.name || '');
+          if (!accountName) continue;
+          const locations = await listGbpLocations(access, accountName);
+          for (const location of locations.slice(0, 200)) {
+            const mapped = mapGbpLocationToRecord(location, accountName);
+            if (!mapped.external_location_id) continue;
+            await supa('reputation_locations?on_conflict=organization_id,provider,external_location_id', {
+              method: 'POST',
+              headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+              body: JSON.stringify({
+                organization_id: org,
+                ...mapped,
+                last_synced_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+            });
+            locationsFound += 1;
+          }
+        }
+        accountMetadata = { accounts_found: accounts.length, locations_found: locationsFound };
+      } catch (e) {
+        console.warn('Google Business Profile discovery failed after OAuth', { message: e.message });
+        accountMetadata = { accounts_found: accounts.length, locations_found: locationsFound, discovery_error: String(e.message || 'discovery_failed').slice(0, 160) };
+      }
     }
 
-    const displayNames = { meta: 'Meta / Facebook / Instagram', whatsapp: 'WhatsApp Cloud', tiktok: 'TikTok', linkedin: 'LinkedIn' };
+    const displayNames = { meta: 'Meta / Facebook / Instagram', whatsapp: 'WhatsApp Cloud', tiktok: 'TikTok', linkedin: 'LinkedIn', google_business_profile: 'Google Business Profile' };
     await supa('integration_connections?on_conflict=provider', {
       method: 'POST',
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -1127,7 +1178,8 @@ export default async function handler(req, res) {
         metadata: { scopes: grantedScopes, ...(accountMetadata || {}) }
       })
     });
-    return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
+    const targetHash = provider === 'google_business_profile' ? 'reputation' : 'social-inbox';
+    return res.redirect(`/admin.html#${targetHash}&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
 
