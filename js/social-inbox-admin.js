@@ -986,9 +986,9 @@
               button.disabled = true;
               button.textContent = 'جارٍ…';
               try {
-                const session = await window.TiqnoraDB?.client?.auth?.getSession?.();
-                const token = session?.data?.session?.access_token;
-                if (!token) throw new Error('يجب تسجيل الدخول كمسؤول');
+                const { data: { session } } = await db.auth.getSession();
+                const token = session?.access_token;
+                if (!token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
                 const r = await fetch('/api/social/reply', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
