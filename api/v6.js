@@ -77,6 +77,19 @@ import {
   isGbpConfigured
 } from '../lib/v6/reputation/engine.js';
 import {
+  buildCanonicalUrl,
+  normalizeCanonicalPath,
+  isIndexablePage,
+  buildOrganizationSchema,
+  buildWebSiteSchema,
+  buildBrandFactSheet,
+  CANONICAL_BRAND,
+  isAllowedAuditUrl
+} from '../lib/v6/seo/core.js';
+import { runSiteAudit, sampleTiqnoraPages, filterSitemapUrls } from '../lib/v6/seo/audit.js';
+import { buildKeywordMap, detectCannibalization, generateContentOpportunities } from '../lib/v6/seo/keywords.js';
+import { evaluateAiVisibility, evaluateLlmsTxt, entityClarityReport } from '../lib/v6/seo/ai-visibility.js';
+import {
   isGbpConfigured as gbpEnvConfigured,
   mapLocationToRecord,
   listAccounts as listGbpAccounts,
@@ -1731,6 +1744,126 @@ async function handleReputation(req, res, auth) {
 }
 
 
+
+async function handleSeo(req, res, auth) {
+  const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const op = String(req.query?.op || req.body?.op || 'status').toLowerCase();
+
+  if (op === 'status' || op === 'seo_status') {
+    return json(res, 200, {
+      brand: CANONICAL_BRAND.name,
+      domain: CANONICAL_BRAND.domain,
+      search_console: 'not_configured',
+      auto_publish: false,
+      approval_required: true
+    });
+  }
+
+  if (op === 'entity' || op === 'seo_entity') {
+    return json(res, 200, {
+      entity: CANONICAL_BRAND,
+      fact_sheet: buildBrandFactSheet({}, CANONICAL_BRAND),
+      clarity: entityClarityReport(),
+      organization_schema: buildOrganizationSchema(),
+      website_schema: buildWebSiteSchema()
+    });
+  }
+
+  if (op === 'audit' || op === 'seo_audit_start' || op === 'seo_audit_result') {
+    const pages = Array.isArray(req.body?.pages) && req.body.pages.length
+      ? req.body.pages
+      : sampleTiqnoraPages();
+    // SSRF: reject any live URL audit payloads that are not allowed
+    for (const p of pages) {
+      if (p.url && !isAllowedAuditUrl(p.url)) {
+        return json(res, 400, { error: 'URL not allowed', code: 'ssrf_blocked', url: p.url });
+      }
+    }
+    const audit = runSiteAudit(pages);
+    return json(res, 200, { audit, auto_fix: false, approval_required: true });
+  }
+
+  if (op === 'pages' || op === 'seo_pages') {
+    const audit = runSiteAudit(sampleTiqnoraPages());
+    return json(res, 200, { pages: audit.pages });
+  }
+
+  if (op === 'issues' || op === 'seo_issues') {
+    const audit = runSiteAudit(sampleTiqnoraPages());
+    return json(res, 200, { issues: audit.issues, severity_count: audit.severity_count });
+  }
+
+  if (op === 'keywords' || op === 'seo_keywords') {
+    const keywords = buildKeywordMap(req.body?.extra || []);
+    return json(res, 200, {
+      keywords,
+      cannibalization: detectCannibalization(keywords),
+      note: 'No invented search volumes'
+    });
+  }
+
+  if (op === 'opportunities' || op === 'seo_opportunities') {
+    const opportunities = generateContentOpportunities({
+      industries: req.body?.industries,
+      city: req.body?.city,
+      count: req.body?.count || 3
+    });
+    return json(res, 200, {
+      opportunities,
+      requires_approval: true,
+      auto_publish: false
+    });
+  }
+
+  if (op === 'ai_visibility' || op === 'seo_ai_visibility') {
+    const page = req.body?.page || sampleTiqnoraPages()[0];
+    return json(res, 200, {
+      visibility: evaluateAiVisibility(page),
+      disclaimer: 'Checks only — not a ranking or citation guarantee'
+    });
+  }
+
+  if (op === 'schema_check' || op === 'seo_schema_check') {
+    return json(res, 200, {
+      organization: buildOrganizationSchema(),
+      website: buildWebSiteSchema(),
+      rules: {
+        no_fake_ratings: true,
+        no_fixed_service_prices: true,
+        approval_required_for_publish: true
+      }
+    });
+  }
+
+  if (op === 'search_console_status') {
+    return json(res, 200, {
+      status: 'not_configured',
+      metrics: null,
+      note: 'No mock metrics presented as real'
+    });
+  }
+
+  if (op === 'sitemap_filter') {
+    const urls = filterSitemapUrls(req.body?.urls || []);
+    return json(res, 200, { urls });
+  }
+
+  if (op === 'llms_check') {
+    return json(res, 200, evaluateLlmsTxt(req.body?.content || ''));
+  }
+
+  return json(res, 400, {
+    error: 'Unknown op',
+    ops: [
+      'status', 'entity', 'audit', 'pages', 'issues', 'keywords',
+      'opportunities', 'ai_visibility', 'schema_check', 'search_console_status',
+      'sitemap_filter', 'llms_check'
+    ]
+  });
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -1761,6 +1894,7 @@ export default async function handler(req, res) {
     if (route === 'research') return await handleLeadResearch(req, res, auth);
     if (route === 'social_studio') return await handleSocialStudio(req, res, auth);
     if (route === 'reputation') return await handleReputation(req, res, auth);
+    if (route === 'seo') return await handleSeo(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
