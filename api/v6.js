@@ -268,41 +268,6 @@ export default async function handler(req, res) {
     return handleSalesChat(req, res);
   }
 
-  // Temporary preview-only diagnostic route. No database mutation and never available in production.
-  if (route === 'sales_probe') {
-    if (process.env.VERCEL_ENV === 'production') return json(res, 404, { error: 'Not found' });
-    if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
-    try {
-      const sampleMessage = 'أبي أسوي موقع احترافي لعيادة أسنان في المدينة المنورة مع حجز مواعيد وربط واتساب ومتابعة العملاء.';
-      const intent = await classifyIntent({ text: sampleMessage, language: 'ar' });
-      const sales = await generateSalesReply({
-        lead: {
-          company_name: 'عيادة اختبار V6',
-          industry: 'dental_clinic',
-          city: 'المدينة المنورة',
-          source: 'v6_preview_probe',
-          opportunity_score: 88
-        },
-        messages: [{ direction: 'inbound', body: sampleMessage }],
-        language: 'ar'
-      });
-      return json(res, 200, {
-        ok: true,
-        sample_message: sampleMessage,
-        intent,
-        draft: sales.reply_draft,
-        qualification: sales.qualification,
-        next_best_action: sales.next_best_action,
-        suggested_stage: sales.suggested_stage,
-        internal_summary: sales.internal_summary,
-        model: sales.model,
-        provider: sales.provider
-      });
-    } catch (error) {
-      return json(res, error.status || 500, { error: error.message || 'Probe failed', code: error.code });
-    }
-  }
-
   const auth = await requireAdmin(req);
   if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
