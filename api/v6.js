@@ -61,6 +61,26 @@ import {
   detectDuplicateContent,
   buildPerformanceInsight
 } from '../lib/v6/social-studio.js';
+import {
+  analyzeReview,
+  generateReviewReplyDraft,
+  canPublishReply,
+  approveReplyDraft,
+  submitReplyForApproval,
+  publishReply,
+  buildReputationDashboard,
+  buildReputationInsights,
+  normalizeReviewsFromApi,
+  mergeReviewRows,
+  connectionStatus,
+  isGbpConfigured
+} from '../lib/v6/reputation/engine.js';
+import {
+  buildGbpAuthUrl,
+  isGbpConfigured as gbpEnvConfigured,
+  mapLocationToRecord
+} from '../lib/v6/reputation/providers/google-business-profile.js';
+
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -1234,6 +1254,184 @@ async function handleSocialStudio(req, res, auth) {
 }
 
 
+
+async function handleReputation(req, res, auth) {
+  const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const op = String(req.query?.op || req.body?.op || 'status').toLowerCase();
+
+  if (op === 'status' || op === 'reputation_status') {
+    let tokenRow = null;
+    try {
+      const rows = await sbGet(
+        `social_provider_tokens?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.google_business_profile&select=id,provider,expires_at,status,updated_at&limit=1`,
+        auth.token
+      );
+      tokenRow = Array.isArray(rows) ? rows[0] : null;
+    } catch (_) {}
+    return json(res, 200, {
+      configured: isGbpConfigured(),
+      connection_status: connectionStatus(tokenRow),
+      auto_reply: false,
+      provider: 'google_business_profile'
+    });
+  }
+
+  if (op === 'connect_url') {
+    if (!gbpEnvConfigured()) {
+      return json(res, 503, { error: 'Google Business Profile not configured', code: 'not_configured' });
+    }
+    const state = Buffer.from(JSON.stringify({ organizationId, uid: auth.profile?.id, t: Date.now() })).toString('base64url');
+    try {
+      const url = buildGbpAuthUrl(state);
+      return json(res, 200, { url, state, note: 'Complete OAuth in browser; tokens stored server-side only' });
+    } catch (e) {
+      return json(res, 503, { error: e.message, code: e.code || 'not_configured' });
+    }
+  }
+
+  if (op === 'locations' || op === 'reputation_locations') {
+    try {
+      const rows = await sbGet(
+        `reputation_locations?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=updated_at.desc&limit=100`,
+        auth.token
+      );
+      return json(res, 200, { locations: Array.isArray(rows) ? rows : [] });
+    } catch (e) {
+      return json(res, 200, { locations: [], warning: e.message });
+    }
+  }
+
+  if (op === 'reviews' || op === 'reputation_reviews') {
+    let path = `reputation_reviews?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=created_at_external.desc.nullslast&limit=100`;
+    const status = String(req.query?.reply_status || req.body?.reply_status || '').trim();
+    const priority = String(req.query?.priority || req.body?.priority || '').trim();
+    const locationId = String(req.query?.location_id || req.body?.location_id || '').trim();
+    if (status) path += `&reply_status=eq.${encodeURIComponent(status)}`;
+    if (priority) path += `&priority=eq.${encodeURIComponent(priority)}`;
+    if (locationId) path += `&location_id=eq.${encodeURIComponent(locationId)}`;
+    try {
+      const rows = await sbGet(path, auth.token);
+      return json(res, 200, { reviews: Array.isArray(rows) ? rows : [] });
+    } catch (e) {
+      return json(res, 200, { reviews: [], warning: e.message });
+    }
+  }
+
+  if (op === 'sync_mock' || op === 'reputation_sync_mock') {
+    // Offline/demo sync: accept locations+reviews payloads without calling Google
+    const locations = Array.isArray(req.body?.locations) ? req.body.locations : [];
+    const reviewsIn = Array.isArray(req.body?.reviews) ? req.body.reviews : [];
+    const normalizedLocs = locations.map((l) => mapLocationToRecord(l, l.external_account_id || 'accounts/mock'));
+    const loc = normalizedLocs[0] || { id: null, title: req.body?.location_title || 'Mock Location', external_location_id: 'loc-mock' };
+    const normalized = normalizeReviewsFromApi(reviewsIn, loc);
+    return json(res, 200, {
+      locations: normalizedLocs,
+      reviews: normalized,
+      dashboard: buildReputationDashboard(normalized, normalizedLocs),
+      mock: true,
+      auto_reply: false
+    });
+  }
+
+  if (op === 'draft_reply' || op === 'reputation_draft_reply') {
+    const review = req.body?.review || {};
+    const location = req.body?.location || {};
+    let brand = getDefaultBrandProfile();
+    try {
+      const rows = await sbGet(
+        `brand_profiles?organization_id=eq.${encodeURIComponent(organizationId)}&is_default=eq.true&select=profile&limit=1`,
+        auth.token
+      );
+      if (Array.isArray(rows) && rows[0]?.profile) brand = rows[0].profile;
+    } catch (_) {}
+    const draft = generateReviewReplyDraft(review, location, brand, { language: req.body?.language });
+    return json(res, 200, { draft, auto_reply: false, requires_approval: true });
+  }
+
+  if (op === 'submit_reply') {
+    const draft = submitReplyForApproval(req.body?.draft || {});
+    try {
+      const action = await createAction({
+        organizationId,
+        actionType: 'reputation_reply',
+        payload: {
+          draft,
+          review_id: req.body?.review_id || req.body?.review?.external_review_id,
+          requires_approval: true,
+          auto_reply: false
+        },
+        createdBy: auth.profile.id,
+        requiresApproval: true,
+        status: 'pending_approval',
+        accessToken: auth.token
+      });
+      return json(res, 201, { draft, action, auto_reply: false });
+    } catch (e) {
+      return json(res, 201, { draft, action: null, warning: e.message, auto_reply: false });
+    }
+  }
+
+  if (op === 'approve_reply') {
+    const draft = approveReplyDraft(req.body?.draft || {}, auth.profile?.id);
+    return json(res, 200, { draft, auto_reply: false });
+  }
+
+  if (op === 'publish_reply') {
+    const draft = req.body?.draft || {};
+    const review = req.body?.review || {};
+    // Force non-live unless explicitly enabled AND approved (still default mock)
+    const live = false;
+    const result = await publishReply(draft, review, { live, accessToken: null });
+    if (!result.ok) return json(res, 409, result);
+    return json(res, 200, { publish: result, auto_reply: false });
+  }
+
+  if (op === 'dashboard' || op === 'reputation_dashboard') {
+    let reviews = [];
+    let locations = [];
+    try {
+      reviews = await sbGet(
+        `reputation_reviews?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=500`,
+        auth.token
+      );
+      locations = await sbGet(
+        `reputation_locations?organization_id=eq.${encodeURIComponent(organizationId)}&select=id,title&limit=100`,
+        auth.token
+      );
+    } catch (_) {}
+    reviews = Array.isArray(reviews) ? reviews : [];
+    locations = Array.isArray(locations) ? locations : [];
+    return json(res, 200, {
+      dashboard: buildReputationDashboard(reviews, locations),
+      insights: buildReputationInsights(reviews)
+    });
+  }
+
+  if (op === 'insights') {
+    let reviews = req.body?.reviews;
+    if (!reviews) {
+      try {
+        reviews = await sbGet(
+          `reputation_reviews?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&limit=500`,
+          auth.token
+        );
+      } catch (_) { reviews = []; }
+    }
+    return json(res, 200, buildReputationInsights(Array.isArray(reviews) ? reviews : []));
+  }
+
+  return json(res, 400, {
+    error: 'Unknown op',
+    ops: [
+      'status', 'connect_url', 'locations', 'reviews', 'sync_mock',
+      'draft_reply', 'submit_reply', 'approve_reply', 'publish_reply',
+      'dashboard', 'insights'
+    ]
+  });
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -1263,6 +1461,7 @@ export default async function handler(req, res) {
     if (route === 'proposal_manage') return await handleProposalManage(req, res, auth);
     if (route === 'research') return await handleLeadResearch(req, res, auth);
     if (route === 'social_studio') return await handleSocialStudio(req, res, auth);
+    if (route === 'reputation') return await handleReputation(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
