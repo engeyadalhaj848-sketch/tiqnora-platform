@@ -149,82 +149,176 @@ alter table public.content_variants enable row level security;
 alter table public.publishing_queue enable row level security;
 alter table public.content_metrics enable row level security;
 
--- Admin-oriented policies (authenticated members of org) — service_role bypasses RLS
+-- Admin-only, organization-scoped policies.
+-- Access requires an active admin/super_admin profile plus explicit org membership
+-- (or the profile's default organization). Service role remains server-side only.
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='brand_profiles' and policyname='brand_profiles_org_access') then
-    create policy brand_profiles_org_access on public.brand_profiles
-      for all using (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      ) with check (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      );
-  end if;
-exception when others then null;
+  drop policy if exists brand_profiles_org_access on public.brand_profiles;
+  create policy brand_profiles_org_access on public.brand_profiles
+    for all to authenticated
+    using (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = brand_profiles.organization_id
+        )
+      )
+    )
+    with check (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = brand_profiles.organization_id
+        )
+      )
+    );
 end $$;
 
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='marketing_campaigns' and policyname='marketing_campaigns_org_access') then
-    create policy marketing_campaigns_org_access on public.marketing_campaigns
-      for all using (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      ) with check (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      );
-  end if;
-exception when others then null;
+  drop policy if exists marketing_campaigns_org_access on public.marketing_campaigns;
+  create policy marketing_campaigns_org_access on public.marketing_campaigns
+    for all to authenticated
+    using (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = marketing_campaigns.organization_id
+        )
+      )
+    )
+    with check (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = marketing_campaigns.organization_id
+        )
+      )
+    );
 end $$;
 
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='content_items' and policyname='content_items_org_access') then
-    create policy content_items_org_access on public.content_items
-      for all using (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      ) with check (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      );
-  end if;
-exception when others then null;
+  drop policy if exists content_items_org_access on public.content_items;
+  create policy content_items_org_access on public.content_items
+    for all to authenticated
+    using (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = content_items.organization_id
+        )
+      )
+    )
+    with check (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = content_items.organization_id
+        )
+      )
+    );
 end $$;
 
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='content_variants' and policyname='content_variants_org_access') then
-    create policy content_variants_org_access on public.content_variants
-      for all using (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      ) with check (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      );
-  end if;
-exception when others then null;
+  drop policy if exists content_variants_org_access on public.content_variants;
+  create policy content_variants_org_access on public.content_variants
+    for all to authenticated
+    using (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = content_variants.organization_id
+        )
+      )
+    )
+    with check (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = content_variants.organization_id
+        )
+      )
+    );
 end $$;
 
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='publishing_queue' and policyname='publishing_queue_org_access') then
-    create policy publishing_queue_org_access on public.publishing_queue
-      for all using (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      ) with check (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      );
-  end if;
-exception when others then null;
+  drop policy if exists publishing_queue_org_access on public.publishing_queue;
+  create policy publishing_queue_org_access on public.publishing_queue
+    for all to authenticated
+    using (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = publishing_queue.organization_id
+        )
+      )
+    )
+    with check (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = publishing_queue.organization_id
+        )
+      )
+    );
 end $$;
 
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='content_metrics' and policyname='content_metrics_org_access') then
-    create policy content_metrics_org_access on public.content_metrics
-      for all using (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      ) with check (
-        organization_id in (select organization_id from public.profiles where id = auth.uid())
-      );
-  end if;
-exception when others then null;
+  drop policy if exists content_metrics_org_access on public.content_metrics;
+  create policy content_metrics_org_access on public.content_metrics
+    for all to authenticated
+    using (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = content_metrics.organization_id
+        )
+      )
+    )
+    with check (
+      public.is_admin()
+      and (
+        organization_id = (select p.default_organization_id from public.profiles p where p.id = auth.uid())
+        or exists (
+          select 1 from public.organization_members m
+          where m.user_id = auth.uid() and m.organization_id = content_metrics.organization_id
+        )
+      )
+    );
 end $$;
 
-grant select, insert, update, delete on public.brand_profiles to authenticated;
-grant select, insert, update, delete on public.marketing_campaigns to authenticated;
-grant select, insert, update, delete on public.content_items to authenticated;
-grant select, insert, update, delete on public.content_variants to authenticated;
-grant select, insert, update, delete on public.publishing_queue to authenticated;
-grant select, insert, update, delete on public.content_metrics to authenticated;
+-- Explicit least-privilege grants. No anonymous access; no direct DELETE/TRUNCATE.
+revoke all on public.brand_profiles from anon, authenticated;
+revoke all on public.marketing_campaigns from anon, authenticated;
+revoke all on public.content_items from anon, authenticated;
+revoke all on public.content_variants from anon, authenticated;
+revoke all on public.publishing_queue from anon, authenticated;
+revoke all on public.content_metrics from anon, authenticated;
+
+grant select, insert, update on public.brand_profiles to authenticated;
+grant select, insert, update on public.marketing_campaigns to authenticated;
+grant select, insert, update on public.content_items to authenticated;
+grant select, insert, update on public.content_variants to authenticated;
+grant select, insert, update on public.publishing_queue to authenticated;
+grant select, insert, update on public.content_metrics to authenticated;
