@@ -264,6 +264,62 @@ export default async function handler(req, res) {
     return handleSalesChat(req, res);
   }
 
+  // Preview-only smoke test for V6 AI sales pipeline. Never available in production.
+  if (route === 'sales_smoke') {
+    if (process.env.VERCEL_ENV === 'production') {
+      return json(res, 404, { error: 'Not found' });
+    }
+    if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+    try {
+      const sampleMessage = 'أريد موقع احترافي لعيادة أسنان في المدينة المنورة وأريد معرفة الخطوة التالية.';
+      const intent = await classifyIntent({ text: sampleMessage, language: 'ar' });
+      const sales = await generateSalesReply({
+        lead: { industry: 'dental_clinic', city: 'المدينة المنورة', source: 'preview_smoke_test' },
+        messages: [{ direction: 'inbound', body: sampleMessage }],
+        language: 'ar'
+      });
+      const organizationId = await tiqnoraOrgId();
+      if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+      const action = await createAction({
+        organizationId,
+        actionType: 'send_whatsapp',
+        payload: {
+          test: true,
+          smoke_test: true,
+          reply_draft: sales.reply_draft,
+          qualification: sales.qualification,
+          next_best_action: sales.next_best_action,
+          suggested_stage: sales.suggested_stage,
+          internal_summary: sales.internal_summary,
+          intent,
+          model: sales.model,
+          provider: sales.provider
+        },
+        relatedEntityType: 'smoke_test',
+        createdBy: null,
+        requiresApproval: true
+      });
+      return json(res, 200, {
+        ok: true,
+        smoke_test: true,
+        intent,
+        draft: sales.reply_draft,
+        qualification: sales.qualification,
+        next_best_action: sales.next_best_action,
+        action: {
+          id: action?.id,
+          status: action?.status,
+          action_type: action?.action_type,
+          requires_approval: action?.requires_approval
+        },
+        model: sales.model,
+        provider: sales.provider
+      });
+    } catch (error) {
+      return json(res, error.status || 500, { error: error.message || 'Smoke test failed', code: error.code });
+    }
+  }
+
   const auth = await requireAdmin(req);
   if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
