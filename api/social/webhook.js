@@ -1,4 +1,5 @@
 import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -560,7 +561,7 @@ async function metaGraphPost(path, accessToken, payload) {
 async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens = 180 } = {}) {
   const failures = [];
 
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (geminiKey) {
     try {
       const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
@@ -762,9 +763,9 @@ async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
   const outboundExternalId = String(apiResult.wamid || apiResult.id || '').trim();
   if (!outboundExternalId) throw new Error('YCloud accepted automatic reply without message ID');
 
-  await rest('social_events?on_conflict=platform,external_event_id', {
+  const outboundEvent = await rest('social_events?on_conflict=platform,external_event_id', {
     method: 'POST',
-    headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
     body: JSON.stringify({
       organization_id: organizationId,
       connection_id: connection.id,
@@ -777,6 +778,9 @@ async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
       content: text,
       occurred_at: new Date().toISOString(),
       processing_status: 'processed',
+      lead_id: storedEvent.lead_id || null,
+      contact_id: storedEvent.contact_id || null,
+      conversation_id: storedEvent.conversation_id || null,
       raw_payload: {
         adapter: 'tiqnora_outbound',
         provider: 'ycloud',
@@ -787,6 +791,38 @@ async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
       }
     })
   });
+
+  if (storedEvent.conversation_id) {
+    const now = new Date().toISOString();
+    const normalizedStatus = String(apiResult.status || 'accepted').toLowerCase() === 'accepted' ? 'sent' : String(apiResult.status || 'sent').toLowerCase();
+    await rest('messages?on_conflict=organization_id,external_message_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        conversation_id: storedEvent.conversation_id,
+        direction: 'outbound',
+        body: text,
+        external_message_id: `whatsapp:${outboundExternalId}`,
+        sender_name: 'Tiqnora',
+        social_event_id: outboundEvent?.[0]?.id || null,
+        created_at: now,
+        ai_meta: {
+          source: 'auto_reply',
+          provider: 'ycloud',
+          provider_message_id: outboundExternalId,
+          delivery_status: normalizedStatus,
+          delivery_status_at: now,
+          sent_at: now
+        }
+      })
+    });
+    await rest(`conversations?id=eq.${encodeURIComponent(storedEvent.conversation_id)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ last_message_at: now, updated_at: now })
+    });
+  }
 
   return {
     sent: true,
@@ -1264,6 +1300,9 @@ export default async function handler(req, res) {
     let duplicateCount = 0;
     let queued = 0;
     let ignored = 0;
+    let crmLinked = 0;
+    let crmErrors = 0;
+    let deliveryUpdates = 0;
 
     for (const event of normalized) {
       if (!event.platform || !event.external_event_id) continue;
@@ -1284,12 +1323,41 @@ export default async function handler(req, res) {
         body: JSON.stringify(dbEvent)
       });
 
-      const storedEvent = inserted?.[0];
-      if (!storedEvent) {
+      let storedEvent = inserted?.[0];
+      const duplicate = !storedEvent;
+      if (duplicate) {
         duplicateCount += 1;
-        continue;
+        const rows = await rest(
+          `social_events?platform=eq.${encodeURIComponent(event.platform)}&external_event_id=eq.${encodeURIComponent(event.external_event_id)}&select=*&limit=1`
+        );
+        storedEvent = rows?.[0] || null;
+      } else {
+        insertedCount += 1;
       }
-      insertedCount += 1;
+      if (!storedEvent) continue;
+
+      try {
+        const delivery = isDeliveryStatusEvent(event);
+        const crm = delivery
+          ? await persistDeliveryStatusEvent({ event, storedEvent, organizationId, rest })
+          : await persistSocialCrmEvent({ event, storedEvent, organizationId, rest, useAI: false });
+        if (delivery && !crm?.skipped) deliveryUpdates += 1;
+        if (!crm?.skipped && crm?.conversation_id) crmLinked += 1;
+        if (crm && !crm.skipped) {
+          storedEvent.lead_id = crm.lead_id || storedEvent.lead_id || null;
+          storedEvent.contact_id = crm.contact_id || storedEvent.contact_id || null;
+          storedEvent.conversation_id = crm.conversation_id || storedEvent.conversation_id || null;
+        }
+      } catch (error) {
+        crmErrors += 1;
+        console.warn('V6 social CRM bridge failed', {
+          platform: event.platform,
+          event_id: storedEvent.id,
+          message: String(error?.message || error).slice(0, 500)
+        });
+      }
+
+      if (duplicate) continue;
 
       if (platform === 'ycloud' && ['app_echo', 'status'].includes(event.raw_payload?.kind)) {
         ignored += 1;
@@ -1310,7 +1378,10 @@ export default async function handler(req, res) {
       duplicates: duplicateCount,
       matched,
       queued,
-      ignored
+      ignored,
+      crm_linked: crmLinked,
+      crm_errors: crmErrors,
+      delivery_updates: deliveryUpdates
     });
   } catch (error) {
     return send(res, 500, { error: error.message });
