@@ -1,6 +1,6 @@
 -- ============================================================
 -- TIQNORA V6.1 — CRM Core + Conversations + Actions + Booking
--- Migration: 046_v6_crm_core.sql
+-- Migration: 048_v6_crm_core.sql
 -- Safe / idempotent. Additive only. No destructive changes.
 -- Run in Supabase SQL Editor after confirming previous migrations.
 -- ============================================================

@@ -8,7 +8,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const cfg = window.TIQNORA_CONFIG || {};
 const money = n => new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 2 }).format(Number(n) || 0) + ' ر.س';
-let db = null, me = null;
+let db = null, me = null, adminNotificationsChannel = null;
 
 const STATUS_AR = { pending: 'بانتظار', confirmed: 'مؤكد', processing: 'تجهيز', shipped: 'مشحون', delivered: 'مسلّم', cancelled: 'ملغي', refunded: 'مسترجع', unpaid: 'غير مدفوع', paid: 'مدفوع', failed: 'فاشل', draft: 'مسودة', published: 'منشور', archived: 'مؤرشف' };
 const pillCls = s => ['delivered', 'published', 'paid'].includes(s) ? 'ok' : ['pending', 'processing', 'draft', 'unpaid'].includes(s) ? 'warn' : ['cancelled', 'failed', 'refunded'].includes(s) ? 'danger' : 'muted';
@@ -17,6 +17,52 @@ function toast(msg, ok = true) {
   const t = $('#toast'); t.textContent = msg; t.style.borderColor = ok ? 'var(--ok)' : 'var(--danger)';
   t.classList.add('show'); clearTimeout(t._to); t._to = setTimeout(() => t.classList.remove('show'), 3200);
 }
+async function refreshAdminNotificationBadge() {
+  if (!db || !me?.id) return;
+  const { count, error } = await db
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', me.id)
+    .in('audience', ['admin', 'both'])
+    .is('read_at', null);
+  if (error) return;
+  const badge = $('#admin-notification-badge');
+  const navBadge = $('#admin-notification-nav-badge');
+  const value = Number(count || 0);
+  [badge, navBadge].forEach(el => {
+    if (!el) return;
+    el.textContent = value > 99 ? '99+' : String(value);
+    el.style.display = value ? 'inline-flex' : 'none';
+  });
+}
+
+function setupAdminNotifications() {
+  if (!db || !me?.id) return;
+  refreshAdminNotificationBadge();
+
+  if (adminNotificationsChannel) {
+    try { db.removeChannel(adminNotificationsChannel); } catch {}
+  }
+
+  adminNotificationsChannel = db
+    .channel('admin-notifications-' + me.id)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
+      const n = payload?.new || {};
+      if (!['admin', 'both'].includes(String(n.audience || ''))) return;
+      if (n.user_id && String(n.user_id) !== String(me.id)) return;
+
+      refreshAdminNotificationBadge();
+      const body = String(n.body_ar || '').trim();
+      toast('🔔 ' + String(n.title_ar || 'إشعار جديد') + (body ? ' — ' + body.slice(0, 120) : ''));
+
+      if (location.hash === '#notifications') {
+        const view = $('#view');
+        if (view) VIEWS.notifications(view);
+      }
+    })
+    .subscribe();
+}
+
 async function log(action, entity, entity_id, details = {}) {
   try { await db.from('activity_logs').insert({ user_id: me?.id, action, entity, entity_id: entity_id ? String(entity_id) : null, details }); } catch {}
 }
@@ -159,7 +205,7 @@ function renderShell() {
     <aside class="admin-side" id="admin-side">
       <div class="side-brand"><img src="assets/tiqnora-logo.png" alt=""> <span>Tiqnora AI</span></div>
       ${NAV.map(n => n.group ? `<div class="side-group">${n.group}</div>` :
-        `<a class="side-link" href="#${n.id}" data-nav="${n.id}"><span class="ic">${n.ic}</span>${n.label}</a>`).join('')}
+        `<a class="side-link" href="#${n.id}" data-nav="${n.id}"><span class="ic">${n.ic}</span>${n.label}${n.id === 'notifications' ? '<span id="admin-notification-nav-badge" style="display:none;margin-inline-start:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--danger);color:#fff;font-size:.72rem;align-items:center;justify-content:center"></span>' : ''}</a>`).join('')}
       <div style="margin-top:auto;padding:12px 8px">
         <button class="btn-ghost btn-sm" id="logout" style="width:100%">تسجيل الخروج</button>
       </div>
@@ -171,6 +217,12 @@ function renderShell() {
           <h1 id="page-title">لوحة التحكم</h1>
         </div>
         <div class="topbar-user">
+          <a id="admin-notification-bell" href="#notifications" aria-label="الإشعارات" title="الإشعارات"
+             style="position:relative;text-decoration:none;font-size:1.15rem;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:10px">
+            🔔
+            <span id="admin-notification-badge"
+              style="display:none;position:absolute;top:-7px;inset-inline-end:-7px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:var(--danger);color:#fff;font-size:.68rem;align-items:center;justify-content:center;border:2px solid var(--bg)"></span>
+          </a>
           <span>${esc(me.full_name || me.email)}</span>
           <span class="pill ${me.role === 'super_admin' ? 'ok' : ''}">${me.role === 'super_admin' ? 'مالك' : 'أدمن'}</span>
         </div>
@@ -182,6 +234,7 @@ function renderShell() {
   $('#burger').onclick = () => { $('#admin-side').classList.toggle('open'); $('#side-bd').style.display = $('#admin-side').classList.contains('open') ? 'block' : 'none'; };
   $('#side-bd').onclick = () => { $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none'; };
   window.addEventListener('hashchange', () => route(location.hash));
+  setupAdminNotifications();
 }
 function route(hash) {
   const id = (hash || '#dashboard').slice(1);
@@ -1033,6 +1086,7 @@ VIEWS['sales-v6'] = async v => {
   await load();
 };
 
+
 VIEWS['social-inbox'] = async v => {
   v.innerHTML = dbBanner() + `
   <div class="grid-stats" id="social-stats"></div>
@@ -1057,8 +1111,8 @@ VIEWS['social-inbox'] = async v => {
   </div>`;
 
   const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
-    db.from('social_connections').select('id,platform,status,account_name'),
-    db.from('social_events').select('id,platform,intent,processing_status,received_at,author_name,content').order('received_at', { ascending: false }).limit(80)
+    db.from('social_connections').select('id,platform,status,account_name,capabilities'),
+    db.from('social_events').select('id,platform,intent,processing_status,received_at,occurred_at,author_name,author_external_id,content,event_type,connection_id,external_event_id,external_parent_id,raw_payload').order('received_at', { ascending: false }).limit(120)
   ]);
 
   // Mount extended admin cards (connections, rules, webhook) without breaking
@@ -1073,20 +1127,23 @@ VIEWS['social-inbox'] = async v => {
     return;
   }
 
+  const statusEvents = events.filter(x => String(x.event_type || '').startsWith('message.status.'));
+  const visibleEvents = events.filter(x => !String(x.event_type || '').startsWith('message.status.'));
+
   const activePlatforms = new Set((connections || []).filter(x => x.status === 'active').map(x => String(x.platform || '').toLowerCase()));
   // Keep only filter options that exist or are always available; hide empty optional platforms if none connected and no events
   const platformSelect = $('#social-platform-filter');
   if (platformSelect) {
     [...platformSelect.options].forEach(opt => {
       if (!opt.value) return;
-      const has = activePlatforms.has(opt.value) || events.some(e => e.platform === opt.value);
+      const has = activePlatforms.has(opt.value) || visibleEvents.some(e => e.platform === opt.value);
       // Always keep WhatsApp/Instagram/Facebook/TikTok as known product channels even if empty
       if (!has && !['whatsapp','instagram','facebook','tiktok'].includes(opt.value)) opt.hidden = true;
     });
   }
 
-  const matched = events.filter(x => x.intent === 'business_audit').length;
-  const unread = events.filter(x => x.processing_status === 'new').length;
+  const matched = visibleEvents.filter(x => x.intent === 'business_audit').length;
+  const unread = visibleEvents.filter(x => x.processing_status === 'new').length;
   $('#social-stats').innerHTML = [
     ['المنصات المتصلة', connections.filter(x => x.status === 'active').length],
     ['غير مقروء / جديد', unread],
@@ -1125,14 +1182,91 @@ VIEWS['social-inbox'] = async v => {
       <div class="thread-reply">
         <p class="card-desc">الرد يتم عبر مسارات المنصة الحالية (OAuth / API). لا تغيير على Webhooks.</p>
         <a class="btn-primary btn-sm" style="display:inline-block;text-decoration:none;padding:8px 14px" href="#social-inbox">تحديث القائمة</a>
-      </div>`;
+      </div>
+      <div class="thread-delivery-status"></div>`;
+
+    const outbound = visibleEvents.find(item =>
+      item.platform === 'whatsapp' &&
+      item.event_type === 'message.sent' &&
+      (item.raw_payload?.in_reply_to === ev.id || item.external_parent_id === ev.external_event_id)
+    );
+    const latestStatus = outbound
+      ? statusEvents.find(item => item.external_parent_id === outbound.external_event_id)
+      : null;
+    const deliveryBox = panel.querySelector('.thread-delivery-status');
+    if (deliveryBox && outbound) {
+      const st = String(latestStatus?.content || outbound.raw_payload?.status || 'accepted').toLowerCase();
+      const deliveryLabels = {
+        accepted: '✓ قبل YCloud الرسالة',
+        sent: '✓ أُرسلت إلى WhatsApp',
+        delivered: '✓✓ تم التسليم',
+        read: '✓✓ تمت القراءة',
+        failed: '⚠ فشل التسليم'
+      };
+      deliveryBox.innerHTML = `<p class="card-desc" style="margin-top:10px"><strong>حالة آخر رد:</strong> ${esc(deliveryLabels[st] || st)}</p>`;
+    }
+
+    const connection = connections.find(item => item.id === ev.connection_id);
+    const sentAt = Date.parse(ev.occurred_at || '');
+    const ageMs = Date.now() - sentAt;
+    const canReply = ev.platform === 'whatsapp' && ev.event_type === 'message.received'
+      && ev.processing_status !== 'processed' && connection?.status === 'active'
+      && connection?.capabilities?.messaging === true
+      && Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
+    if (canReply) {
+      const area = panel.querySelector('.thread-reply');
+      area.replaceChildren();
+      const label = document.createElement('label');
+      label.textContent = 'رد واتساب إلى ' + (ev.author_external_id || ev.author_name || 'العميل');
+      const input = document.createElement('textarea');
+      input.rows = 4;
+      input.maxLength = 4096;
+      input.placeholder = 'اكتب ردك هنا';
+      label.appendChild(input);
+      area.appendChild(label);
+      const sendButton = document.createElement('button');
+      sendButton.type = 'button';
+      sendButton.className = 'btn-primary btn-sm';
+      sendButton.textContent = 'إرسال الرد';
+      area.appendChild(sendButton);
+      const feedback = document.createElement('p');
+      feedback.className = 'card-desc';
+      area.appendChild(feedback);
+      sendButton.onclick = async () => {
+        const message = input.value.trim();
+        if (!message) { feedback.textContent = 'اكتب الرد أولًا.'; return; }
+        sendButton.disabled = true;
+        feedback.textContent = 'جارٍ إرسال الرد…';
+        try {
+          const { data: { session } } = await db.auth.getSession();
+          const token = session?.access_token;
+          if (!token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+          const response = await fetch('/api/social/reply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+            body: JSON.stringify({ event_id: ev.id, message })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || result.code || ('HTTP ' + response.status));
+          feedback.textContent = result.status === 'accepted'
+            ? 'قبل YCloud الرد، وهو قيد الإرسال. تحقق من واتساب للتسليم.'
+            : 'تم إرسال الرد.';
+          sendButton.textContent = 'تم';
+          ev.processing_status = 'processed';
+          renderList();
+        } catch (error) {
+          feedback.textContent = 'تعذر إرسال الرد: ' + (error.message || error);
+          sendButton.disabled = false;
+        }
+      };
+    }
   };
 
   const renderList = () => {
     const platform = $('#social-platform-filter').value;
     const status = $('#social-status-filter').value;
     const intent = $('#social-intent-filter').value;
-    const filtered = events.filter(e =>
+    const filtered = visibleEvents.filter(e =>
       (!platform || e.platform === platform) &&
       (!status || e.processing_status === status) &&
       (!intent || e.intent === intent)
@@ -1158,7 +1292,7 @@ VIEWS['social-inbox'] = async v => {
     }).join('');
     $$('#social-events [data-id]').forEach(btn => {
       btn.onclick = () => {
-        const ev = events.find(x => x.id === btn.dataset.id);
+        const ev = visibleEvents.find(x => x.id === btn.dataset.id);
         if (ev) openThread(ev);
       };
     });
@@ -1191,7 +1325,7 @@ VIEWS.dashboard = async v => {
     db.from('service_requests').select('id,status,title,created_at').order('created_at',{ascending:false}).limit(8),
     db.from('subscriptions').select('id,status,saas_plans(slug,name_ar,price_monthly)').eq('status','active').limit(100),
     db.from('billing_invoices').select('amount,status').eq('status','pending').limit(50),
-    db.from('notifications').select('id', { count: 'exact', head: true }).eq('audience','admin').is('read_at', null),
+    db.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', me.id).in('audience',['admin','both']).is('read_at', null),
     db.from('service_requests').select('id', { count: 'exact', head: true }).eq('status','new'),
   ]);
   const val = (i) => settled[i].status === 'fulfilled' ? settled[i].value : { data: null, count: null };
@@ -3320,7 +3454,7 @@ VIEWS.analytics = async v => {
 VIEWS.notifications = async v => {
   v.innerHTML = `<div class="card"><div class="card-head"><h2 style="margin:0">إشعارات الإدارة</h2>
     <button class="btn-sm" id="mark-all">تعليم الكل كمقروء</button></div><div id="nlist"></div></div>`;
-  const { data } = await db.from('notifications').select('*').or('audience.eq.admin,audience.eq.both').order('created_at',{ascending:false}).limit(80);
+  const { data } = await db.from('notifications').select('*').eq('user_id', me.id).in('audience', ['admin','both']).order('created_at',{ascending:false}).limit(80);
   $('#nlist').innerHTML = (data||[]).map(n => `<div style="padding:12px 0;border-bottom:1px solid var(--line);opacity:${n.read_at?.5:1}">
     <b>${esc(n.title_ar)}</b> <span class="pill">${esc(n.type)}</span>
     <div style="color:var(--muted);font-size:.9rem">${esc(n.body_ar||'')}</div>
@@ -3329,11 +3463,13 @@ VIEWS.notifications = async v => {
   </div>`).join('') || '<p style="color:var(--muted)">لا إشعارات — نفّذ migration 013</p>';
   $$('[data-nr]').forEach(b => b.onclick = async () => {
     await db.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', b.dataset.nr);
+    await refreshAdminNotificationBadge();
     VIEWS.notifications(v);
   });
   $('#mark-all').onclick = async () => {
     const ids = (data||[]).filter(n=>!n.read_at).map(n=>n.id);
     for (const id of ids) await db.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
+    await refreshAdminNotificationBadge();
     toast('تم'); VIEWS.notifications(v);
   };
 };

@@ -17,3 +17,14 @@ test('Outbound replies persist into CRM and YCloud delivery receipts are subscri
   assert.equal(webhook.includes("'whatsapp.message.updated'"), true);
   assert.equal(webhook.includes('persistDeliveryStatusEvent'), true);
 });
+
+
+test('Pre-production webhook preserves guarded WhatsApp AI auto reply and V6 CRM bridge together', () => {
+  assert.equal(webhook.includes('async function sendYCloudAutoReply'), true);
+  assert.equal(webhook.includes("rule.match_mode === 'always'"), true);
+  assert.equal(webhook.includes("actionType: 'auto_reply'"), true);
+  assert.equal(webhook.includes('persistSocialCrmEvent'), true);
+  assert.equal(webhook.includes('persistDeliveryStatusEvent'), true);
+  assert.equal(webhook.includes("source: 'auto_reply'"), true);
+  assert.equal(webhook.includes('GOOGLE_GEMINI_API_KEY'), true);
+});

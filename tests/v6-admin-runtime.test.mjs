@@ -42,3 +42,11 @@ test('V6 Proposal history UI exposes filters, details and delivery status', () =
   assert.equal(source.includes('data-v6-history-view'), true);
   assert.equal(source.includes('v6DeliveryStatusLabel'), true);
 });
+
+
+test('Pre-production admin preserves current realtime notification features', () => {
+  assert.equal(source.includes('setupAdminNotifications'), true);
+  assert.equal(source.includes('refreshAdminNotificationBadge'), true);
+  assert.equal(source.includes('admin-notification-badge'), true);
+  assert.equal(source.includes('thread-delivery-status'), true);
+});
