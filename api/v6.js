@@ -30,6 +30,14 @@ import {
   crmStageSuggestion,
   prepareDeliveryMessage
 } from '../lib/v6/proposal-service.js';
+import {
+  createResearchJobSpec,
+  runResearchJob,
+  normalizeBusinessRecord,
+  buildResearchOutreachDraft,
+  analyzeResearchCandidate,
+  buildCrmLeadPayload
+} from '../lib/v6/lead-research.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -828,6 +836,210 @@ async function handleProposalPublic(req, res) {
 }
 
 
+
+async function handleLeadResearch(req, res, auth) {
+  const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const op = String(req.query?.op || req.body?.op || 'list_jobs').toLowerCase();
+
+  if (op === 'run' || op === 'create_and_run') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+    const spec = createResearchJobSpec({
+      query: req.body?.query,
+      city: req.body?.city,
+      industry: req.body?.industry,
+      target_count: req.body?.target_count || req.body?.limit,
+      source: req.body?.source || 'fixture',
+      filters: req.body?.filters
+    });
+
+    // Load existing leads for dedupe (best effort)
+    let existing = [];
+    try {
+      const rows = await sbGet(
+        `leads?organization_id=eq.${encodeURIComponent(organizationId)}&select=id,company_name,name,phone,whatsapp,email,website,city,industry&limit=500`,
+        auth.token
+      );
+      existing = Array.isArray(rows) ? rows : [];
+    } catch (_) {}
+
+    const result = await runResearchJob(spec, {
+      existingCandidates: existing,
+      provider: req.body?.source || 'fixture',
+      rows: req.body?.rows || []
+    });
+
+    // Persist job + candidates when service role available (non-fatal if tables missing)
+    let jobId = null;
+    try {
+      const key = SERVICE || auth.token;
+      const jobInsert = await fetch(`${SUPABASE_URL}/rest/v1/research_jobs`, {
+        method: 'POST',
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          query: result.job.query,
+          city: result.job.city,
+          industry: result.job.industry,
+          target_count: result.job.target_count,
+          source: result.job.source,
+          status: result.job.status,
+          discovered_count: result.summary.discovered,
+          qualified_count: result.summary.qualified,
+          duplicate_count: result.summary.duplicates || 0,
+          completed_at: result.job.completed_at,
+          created_by: auth.profile?.id || null
+        })
+      });
+      const jobRows = await jobInsert.json().catch(() => []);
+      jobId = Array.isArray(jobRows) ? jobRows[0]?.id : jobRows?.id;
+      if (jobId) {
+        const candRows = result.candidates.map((c) => ({
+          organization_id: organizationId,
+          job_id: jobId,
+          status: c.status,
+          business_name: c.record?.business_name || null,
+          industry: c.record?.industry || null,
+          city: c.record?.city || null,
+          country: c.record?.country || 'SA',
+          website: c.record?.website || null,
+          domain: c.record?.domain || null,
+          phone: c.record?.phone || null,
+          whatsapp: c.record?.whatsapp || null,
+          email: c.record?.email || null,
+          source: c.record?.source || result.job.source,
+          source_url: c.record?.source_url || null,
+          address: c.record?.address || null,
+          rating: c.record?.rating ?? null,
+          reviews_count: c.record?.reviews_count ?? null,
+          description: c.record?.description || null,
+          social_links: c.record?.social_links || {},
+          opportunity_score: c.opportunity_score,
+          grade: c.grade,
+          reasons: c.reasons || [],
+          missing_data: c.missing_data || [],
+          recommended_services: c.recommended_services || [],
+          next_best_action: c.next_best_action || null,
+          vertical: c.vertical || null,
+          match_on: c.match_on || null,
+          payload: { crm_payload: c.crm_payload || null, outreach_draft: c.outreach_draft || null },
+          requires_approval: true
+        }));
+        if (candRows.length) {
+          await fetch(`${SUPABASE_URL}/rest/v1/research_candidates`, {
+            method: 'POST',
+            headers: {
+              apikey: key,
+              Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              Prefer: 'return=minimal'
+            },
+            body: JSON.stringify(candRows)
+          }).catch(() => null);
+        }
+      }
+    } catch (_) { /* tables may not exist yet */ }
+
+    return json(res, 200, { job: { ...result.job, id: jobId }, candidates: result.candidates, summary: result.summary });
+  }
+
+  if (op === 'list_jobs') {
+    try {
+      const rows = await sbGet(
+        `research_jobs?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=created_at.desc&limit=50`,
+        auth.token
+      );
+      return json(res, 200, { jobs: Array.isArray(rows) ? rows : [] });
+    } catch (e) {
+      return json(res, 200, { jobs: [], warning: e.message });
+    }
+  }
+
+  if (op === 'list_candidates') {
+    const jobId = String(req.query?.job_id || req.body?.job_id || '').trim();
+    let path = `research_candidates?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=opportunity_score.desc.nullslast&limit=100`;
+    if (jobId) path += `&job_id=eq.${encodeURIComponent(jobId)}`;
+    const status = String(req.query?.status || '').trim();
+    if (status) path += `&status=eq.${encodeURIComponent(status)}`;
+    try {
+      const rows = await sbGet(path, auth.token);
+      return json(res, 200, { candidates: Array.isArray(rows) ? rows : [] });
+    } catch (e) {
+      return json(res, 200, { candidates: [], warning: e.message });
+    }
+  }
+
+  if (op === 'import_crm') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+    const candidate = req.body?.candidate || req.body;
+    const payload = candidate?.crm_payload || candidate?.payload?.crm_payload || buildCrmLeadPayload({
+      record: normalizeBusinessRecord(candidate),
+      opportunity_score: candidate.opportunity_score,
+      grade: candidate.grade,
+      reasons: candidate.reasons || [],
+      missing_data: candidate.missing_data || [],
+      recommended_services: candidate.recommended_services || [],
+      next_best_action: candidate.next_best_action,
+      vertical: candidate.vertical
+    }, {});
+    payload.organization_id = organizationId;
+    const key = SERVICE || auth.token;
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation'
+      },
+      body: JSON.stringify(payload)
+    });
+    const rows = await r.json().catch(() => null);
+    if (!r.ok) return json(res, r.status, { error: rows?.message || 'CRM insert failed' });
+    const lead = Array.isArray(rows) ? rows[0] : rows;
+    if (candidate?.id) {
+      await fetch(`${SUPABASE_URL}/rest/v1/research_candidates?id=eq.${encodeURIComponent(candidate.id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify({ status: 'imported', lead_id: lead?.id, updated_at: new Date().toISOString() })
+      }).catch(() => null);
+    }
+    return json(res, 201, { lead, requires_approval: true });
+  }
+
+  if (op === 'draft_outreach') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+    const record = normalizeBusinessRecord(req.body?.candidate || req.body || {});
+    const analysis = await analyzeResearchCandidate(record);
+    const draft = buildResearchOutreachDraft(analysis, { language: req.body?.language || 'ar' });
+    // Create pending action only — no send
+    const action = await createAction({
+      organizationId,
+      actionType: 'research_outreach',
+      payload: { draft, candidate: record, requires_approval: true },
+      leadId: req.body?.lead_id || null,
+      createdBy: auth.profile.id,
+      requiresApproval: true,
+      status: 'pending_approval',
+      accessToken: auth.token
+    });
+    return json(res, 201, { draft, action, requires_approval: true, auto_send: false });
+  }
+
+  return json(res, 400, { error: 'Unknown op', ops: ['run', 'list_jobs', 'list_candidates', 'import_crm', 'draft_outreach'] });
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -855,6 +1067,7 @@ export default async function handler(req, res) {
     if (route === 'proposal_delivery') return await handleProposalDelivery(req, res, auth);
     if (route === 'proposal_history') return await handleProposalHistory(req, res, auth);
     if (route === 'proposal_manage') return await handleProposalManage(req, res, auth);
+    if (route === 'research') return await handleLeadResearch(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });

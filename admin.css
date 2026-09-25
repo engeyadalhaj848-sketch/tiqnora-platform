@@ -648,3 +648,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .pill.lifecycle-negotiation{background:rgba(167,139,250,.15);color:#a78bfa}
 .pill.lifecycle-accepted{background:rgba(52,211,153,.18);color:#34d399}
 .pill.lifecycle-rejected,.pill.lifecycle-expired{background:rgba(248,113,113,.15);color:#f87171}
+
+.v6-research-controls{display:grid;grid-template-columns:2fr 1fr 1fr 90px auto;gap:8px;margin:12px 0}
+.v6-research-controls input,.v6-research-filters select{width:100%}
+.v6-research-filters{margin-bottom:10px}
+@media (max-width:800px){.v6-research-controls{grid-template-columns:1fr}}
