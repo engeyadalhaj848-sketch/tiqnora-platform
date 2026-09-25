@@ -670,16 +670,20 @@ async function generateAgentReply(event, rule) {
   const fallback = String(rule?.reply_template || 'شكرًا لتواصلك معنا. يسعدنا مساعدتك، أرسل لنا تفاصيل أكثر عن نشاطك.').replaceAll('{{author_name}}', event.author_name || '');
 
   // Deterministic facts such as the official website should not be rewritten by AI.
-  if (rule?.intent === 'platform_link') return fallback.slice(0, 220);
+  if (rule?.intent === 'platform_link') return fallback.slice(0, 320);
 
   const prompt = [
-    'أنت وكيل خدمة عملاء وسوشيال ميديا لمنصة Tiqnora AI في السعودية.',
-    'اكتب ردًا عربيًا طبيعيًا ومختصرًا على تعليق العميل.',
-    'افهم مقصده من نص التعليق، ولا تخترع معلومات أو أسعارًا أو وعودًا.',
-    'إذا كان يطلب تحليل نشاطه، اطلب منه اسم النشاط ورابط الحساب أو الموقع للبدء.',
-    'اجعل الرد من جملة أو جملتين وبحد أقصى 220 حرفًا، بدون تنسيق Markdown.',
+    'أنت وكيل خدمة عملاء لمنصة Tiqnora AI في السعودية.',
+    'اكتب ردًا عربيًا طبيعيًا ومختصرًا على رسالة أو تعليق العميل، وبأسلوب مهني وودود.',
+    'افهم المطلوب من النص نفسه. لا تخترع أسعارًا أو خصومات أو مواعيد أو وعودًا أو قدرات غير مؤكدة.',
+    'Tiqnora تقدم حلول مواقع وأتمتة وذكاء اصطناعي وخدمات تقنية. عند طلب سعر أو عرض، اطلب تفاصيل المشروع بدل إعطاء سعر ثابت.',
+    'إذا كان العميل يطلب تحليل نشاطه، اطلب اسم النشاط ورابط الحساب أو الموقع.',
+    'إذا كانت الرسالة مجرد تحية، رد بتحية طبيعية واسأله كيف يمكن مساعدته.',
+    'لا تطلب كلمات مرور أو رموز تحقق أو بيانات حساسة. إذا احتاج الأمر موظفًا، قل إن الفريق سيتابع معه دون ادعاء موعد.',
+    'اجعل الرد من جملة أو جملتين وبحد أقصى 320 حرفًا، بدون Markdown.',
+    `المنصة: ${event.platform}`,
     `اسم العميل إن توفر: ${event.author_name || 'غير معروف'}`,
-    `التعليق: ${event.content || ''}`,
+    `رسالة العميل: ${event.content || ''}`,
     `النية المتوقعة: ${rule?.intent || 'general'}`
   ].join('\n');
 
@@ -695,13 +699,109 @@ async function generateAgentReply(event, rule) {
         length: text.length,
         words: words.length
       });
-      return fallback.slice(0, 220);
+      return fallback.slice(0, 320);
     }
-    return text.slice(0, 220);
+    return text.slice(0, 320);
   } catch (error) {
     console.warn('Social AI reply generation failed; using template fallback', { message: error.message });
     return fallback;
   }
+}
+
+async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
+  if (event.platform !== 'whatsapp' || event.event_type !== 'message.received' || event.raw_payload?.adapter !== 'ycloud') {
+    return { sent: false, reason: 'unsupported_ycloud_auto_reply_event' };
+  }
+
+  const rawMessage = event.raw_payload?.message || {};
+  if (String(rawMessage.type || 'text') !== 'text') {
+    return { sent: false, reason: 'non_text_message_requires_manual_review' };
+  }
+
+  const rows = storedEvent.connection_id
+    ? await rest(`social_connections?id=eq.${encodeURIComponent(storedEvent.connection_id)}&organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.whatsapp&select=*&limit=1`)
+    : [];
+  const connection = rows?.[0];
+  const from = normalizedPhone(connection?.external_account_id);
+  const to = normalizedPhone(rawMessage.from);
+  const occurredAt = Date.parse(event.occurred_at || '');
+  const ageMs = Date.now() - occurredAt;
+
+  if (connection?.status !== 'active'
+    || connection?.settings?.provider !== 'ycloud'
+    || connection?.settings?.ycloud_verified !== true
+    || connection?.settings?.webhook_subscribed !== true
+    || connection?.capabilities?.messaging !== true
+    || !from || !to
+    || from !== normalizedPhone(rawMessage.to)
+    || to !== normalizedPhone(event.author_external_id)
+    || String(connection?.settings?.waba_id || '') !== String(rawMessage.wabaId || '')
+    || !Number.isFinite(occurredAt)
+    || ageMs < -5 * 60 * 1000
+    || ageMs >= 24 * 60 * 60 * 1000) {
+    throw new Error('YCloud automatic reply connection/window validation failed');
+  }
+
+  const apiKey = process.env.YCLOUD_API_KEY;
+  if (!apiKey) throw new Error('YCLOUD_API_KEY is missing');
+
+  const payload = { from, to, type: 'text', text: { body: String(text || '').slice(0, 4096) } };
+  if (/^wamid\./.test(String(rawMessage.wamid || ''))) payload.context = { message_id: rawMessage.wamid };
+
+  const response = await fetch('https://api.ycloud.com/v2/whatsapp/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000)
+  });
+  const apiResult = await response.json().catch(() => ({}));
+  if (!response.ok || apiResult?.error) {
+    throw new Error(apiResult?.error?.code || apiResult?.error?.message || apiResult?.code || `YCloud HTTP ${response.status}`);
+  }
+
+  const outboundExternalId = String(apiResult.wamid || apiResult.id || '').trim();
+  if (!outboundExternalId) throw new Error('YCloud accepted automatic reply without message ID');
+
+  await rest('social_events?on_conflict=platform,external_event_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify({
+      organization_id: organizationId,
+      connection_id: connection.id,
+      platform: 'whatsapp',
+      event_type: 'message.sent',
+      external_event_id: outboundExternalId,
+      external_parent_id: event.external_event_id || null,
+      author_external_id: 'tiqnora',
+      author_name: 'Tiqnora',
+      content: text,
+      occurred_at: new Date().toISOString(),
+      processing_status: 'processed',
+      raw_payload: {
+        adapter: 'tiqnora_outbound',
+        provider: 'ycloud',
+        mode: 'auto_reply',
+        status: apiResult.status || 'accepted',
+        in_reply_to: storedEvent.id,
+        ycloud_message_id: apiResult.id || null
+      }
+    })
+  });
+
+  return {
+    sent: true,
+    provider: 'ycloud',
+    connection_id: connection.id,
+    external_reply_id: outboundExternalId,
+    accepted_status: apiResult.status || 'accepted'
+  };
+}
+
+async function sendAutomaticReply(event, storedEvent, organizationId, text) {
+  if (event.platform === 'whatsapp' && event.raw_payload?.adapter === 'ycloud') {
+    return sendYCloudAutoReply(event, storedEvent, organizationId, text);
+  }
+  return sendMetaAutoReply(event, storedEvent, organizationId, text);
 }
 
 async function sendMetaAutoReply(event, storedEvent, organizationId, text) {
@@ -786,6 +886,10 @@ function keywordScore(text, keyword, mode) {
 
 function evaluateRule(rule, event) {
   if (!platformAllowed(rule, event.platform) || !eventTypeAllowed(rule, event.event_type)) return null;
+
+  if (rule.match_mode === 'always') {
+    return { rule, confidence: 1, reason: 'always' };
+  }
 
   if (rule.match_mode === 'intent_or_keyword' && rule.intent && event.detected_intent === rule.intent) {
     return {
@@ -1025,16 +1129,26 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   }
 
   if (rule.auto_reply && rule.reply_template) {
+    const reserved = await createActionOnce({
+      organizationId,
+      eventId: storedEvent.id,
+      ruleId: rule.id,
+      actionType: 'auto_reply',
+      status: 'pending',
+      result: { platform: event.platform, external_event_id: event.external_event_id }
+    });
+    if (!reserved) return { matched: true, intent: rule.intent || null, confidence, auto_reply_duplicate: true };
+
     const text = await generateAgentReply(event, rule);
     try {
-      const delivery = await sendMetaAutoReply(event, storedEvent, organizationId, text);
-      await createActionOnce({
-        organizationId,
-        eventId: storedEvent.id,
-        ruleId: rule.id,
-        actionType: 'auto_reply',
-        status: delivery.sent ? 'completed' : 'skipped',
-        result: { text, platform: event.platform, external_event_id: event.external_event_id, ...delivery }
+      const delivery = await sendAutomaticReply(event, storedEvent, organizationId, text);
+      await rest(`social_event_actions?event_id=eq.${encodeURIComponent(storedEvent.id)}&action_type=eq.auto_reply&status=eq.pending`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: delivery.sent ? 'completed' : 'skipped',
+          result: { text, platform: event.platform, external_event_id: event.external_event_id, ...delivery },
+          completed_at: new Date().toISOString()
+        })
       });
       if (delivery.sent) {
         await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
@@ -1043,13 +1157,18 @@ async function processEvent(event, storedEvent, organizationId, rules) {
         });
       }
     } catch (error) {
-      await createActionOnce({
-        organizationId,
-        eventId: storedEvent.id,
-        ruleId: rule.id,
-        actionType: 'auto_reply',
-        status: 'failed',
-        result: { text, platform: event.platform, external_event_id: event.external_event_id, error: String(error.message || error).slice(0, 500) }
+      await rest(`social_event_actions?event_id=eq.${encodeURIComponent(storedEvent.id)}&action_type=eq.auto_reply&status=eq.pending`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'failed',
+          error_message: String(error.message || error).slice(0, 500),
+          result: { text, platform: event.platform, external_event_id: event.external_event_id },
+          completed_at: new Date().toISOString()
+        })
+      });
+      await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ processing_status: 'failed' })
       });
       console.warn('Social auto reply failed', { platform: event.platform, event_id: storedEvent.id, message: error.message });
     }
@@ -1139,8 +1258,7 @@ export default async function handler(req, res) {
     const organizationId = organizations?.[0]?.id;
     if (!organizationId) throw new Error('Tiqnora organization is missing');
 
-    const rules = platform === 'ycloud' ? []
-      : await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
+    const rules = await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
     let matched = 0;
     let insertedCount = 0;
     let duplicateCount = 0;
@@ -1173,11 +1291,8 @@ export default async function handler(req, res) {
       }
       insertedCount += 1;
 
-      if (platform === 'ycloud') {
-        // Keep inbound messages for an administrator. Status and echo events
-        // are stored for observability/UI but must never enter the reply queue.
-        if (['app_echo', 'status'].includes(event.raw_payload?.kind)) ignored += 1;
-        else queued += 1;
+      if (platform === 'ycloud' && ['app_echo', 'status'].includes(event.raw_payload?.kind)) {
+        ignored += 1;
         continue;
       }
 
