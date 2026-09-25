@@ -60,7 +60,15 @@
       || !['comment.created', 'message.received'].includes(String(event.event_type || ''))) return false;
     if (platform !== 'whatsapp') return true;
     const connection = connectionById.get(event.connection_id);
-    return event.raw_payload?.adapter !== 'ycloud' && connection?.settings?.provider !== 'ycloud';
+    if (event.raw_payload?.adapter === 'ycloud') {
+      const age = Date.now() - Date.parse(event.occurred_at || '');
+      return event.event_type === 'message.received' && event.raw_payload?.kind === 'inbound'
+        && event.processing_status !== 'processed'
+        && connection?.settings?.provider === 'ycloud' && connection?.capabilities?.messaging === true
+        && whatsAppConnectionVerified(connection)
+        && Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000;
+    }
+    return connection?.settings?.provider !== 'ycloud';
   }
 
   function addCell(row, value, dir) {
@@ -975,6 +983,10 @@
             replyBtn.onclick = async () => {
               const text = window.prompt('اكتب الرد الذي سيُرسل عبر ' + item.platform + ':', '');
               if (!text || !String(text).trim()) return;
+              if (item.raw_payload?.adapter === 'ycloud') {
+                const to = item.author_external_id || 'العميل';
+                if (!window.confirm(`إرسال رد واتساب إلى ${to}؟\n\n${String(text).trim()}`)) return;
+              }
               replyBtn.disabled = true;
               replyBtn.textContent = 'جارٍ…';
               try {
@@ -988,7 +1000,7 @@
                 });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || j.code || ('HTTP ' + r.status));
-                replyBtn.textContent = 'تم';
+                replyBtn.textContent = j.status === 'accepted' ? 'قيد الإرسال' : 'تم';
                 await refresh();
               } catch (e) {
                 alert('فشل الرد: ' + (e.message || e));
@@ -1015,3 +1027,4 @@
   window.addEventListener('hashchange', () => setTimeout(mount, 150));
   setInterval(mount, 700);
 })();
+
