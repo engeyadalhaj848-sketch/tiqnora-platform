@@ -264,7 +264,7 @@ VIEWS['social-inbox'] = async v => {
 
   const [{ data: connections = [] }, { data: events = [], error }] = await Promise.all([
     db.from('social_connections').select('id,platform,status,account_name,capabilities'),
-    db.from('social_events').select('id,platform,intent,processing_status,received_at,occurred_at,author_name,author_external_id,content,event_type,connection_id').order('received_at', { ascending: false }).limit(80)
+    db.from('social_events').select('id,platform,intent,processing_status,received_at,occurred_at,author_name,author_external_id,content,event_type,connection_id,external_event_id,external_parent_id,raw_payload').order('received_at', { ascending: false }).limit(120)
   ]);
 
   // Mount extended admin cards (connections, rules, webhook) without breaking
@@ -279,20 +279,23 @@ VIEWS['social-inbox'] = async v => {
     return;
   }
 
+  const statusEvents = events.filter(x => String(x.event_type || '').startsWith('message.status.'));
+  const visibleEvents = events.filter(x => !String(x.event_type || '').startsWith('message.status.'));
+
   const activePlatforms = new Set((connections || []).filter(x => x.status === 'active').map(x => String(x.platform || '').toLowerCase()));
   // Keep only filter options that exist or are always available; hide empty optional platforms if none connected and no events
   const platformSelect = $('#social-platform-filter');
   if (platformSelect) {
     [...platformSelect.options].forEach(opt => {
       if (!opt.value) return;
-      const has = activePlatforms.has(opt.value) || events.some(e => e.platform === opt.value);
+      const has = activePlatforms.has(opt.value) || visibleEvents.some(e => e.platform === opt.value);
       // Always keep WhatsApp/Instagram/Facebook/TikTok as known product channels even if empty
       if (!has && !['whatsapp','instagram','facebook','tiktok'].includes(opt.value)) opt.hidden = true;
     });
   }
 
-  const matched = events.filter(x => x.intent === 'business_audit').length;
-  const unread = events.filter(x => x.processing_status === 'new').length;
+  const matched = visibleEvents.filter(x => x.intent === 'business_audit').length;
+  const unread = visibleEvents.filter(x => x.processing_status === 'new').length;
   $('#social-stats').innerHTML = [
     ['المنصات المتصلة', connections.filter(x => x.status === 'active').length],
     ['غير مقروء / جديد', unread],
@@ -331,7 +334,29 @@ VIEWS['social-inbox'] = async v => {
       <div class="thread-reply">
         <p class="card-desc">الرد يتم عبر مسارات المنصة الحالية (OAuth / API). لا تغيير على Webhooks.</p>
         <a class="btn-primary btn-sm" style="display:inline-block;text-decoration:none;padding:8px 14px" href="#social-inbox">تحديث القائمة</a>
-      </div>`;
+      </div>
+      <div class="thread-delivery-status"></div>`;
+
+    const outbound = visibleEvents.find(item =>
+      item.platform === 'whatsapp' &&
+      item.event_type === 'message.sent' &&
+      (item.raw_payload?.in_reply_to === ev.id || item.external_parent_id === ev.external_event_id)
+    );
+    const latestStatus = outbound
+      ? statusEvents.find(item => item.external_parent_id === outbound.external_event_id)
+      : null;
+    const deliveryBox = panel.querySelector('.thread-delivery-status');
+    if (deliveryBox && outbound) {
+      const st = String(latestStatus?.content || outbound.raw_payload?.status || 'accepted').toLowerCase();
+      const deliveryLabels = {
+        accepted: '✓ قبل YCloud الرسالة',
+        sent: '✓ أُرسلت إلى WhatsApp',
+        delivered: '✓✓ تم التسليم',
+        read: '✓✓ تمت القراءة',
+        failed: '⚠ فشل التسليم'
+      };
+      deliveryBox.innerHTML = `<p class="card-desc" style="margin-top:10px"><strong>حالة آخر رد:</strong> ${esc(deliveryLabels[st] || st)}</p>`;
+    }
 
     const connection = connections.find(item => item.id === ev.connection_id);
     const sentAt = Date.parse(ev.occurred_at || '');
@@ -393,7 +418,7 @@ VIEWS['social-inbox'] = async v => {
     const platform = $('#social-platform-filter').value;
     const status = $('#social-status-filter').value;
     const intent = $('#social-intent-filter').value;
-    const filtered = events.filter(e =>
+    const filtered = visibleEvents.filter(e =>
       (!platform || e.platform === platform) &&
       (!status || e.processing_status === status) &&
       (!intent || e.intent === intent)
@@ -419,7 +444,7 @@ VIEWS['social-inbox'] = async v => {
     }).join('');
     $$('#social-events [data-id]').forEach(btn => {
       btn.onclick = () => {
-        const ev = events.find(x => x.id === btn.dataset.id);
+        const ev = visibleEvents.find(x => x.id === btn.dataset.id);
         if (ev) openThread(ev);
       };
     });
