@@ -70,7 +70,7 @@ async function callAnthropic(agent, messages) {
 }
 
 async function callGemini(agent, messages) {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY في Vercel بعد.'), { status: 503 });
   const model = agent.model?.startsWith('gemini-') ? agent.model : (process.env.GEMINI_MODEL || 'gemini-3.8-flash');
   const systemInstruction = messages.find(message => message.role === 'system')?.content || '';
@@ -118,7 +118,7 @@ function resolveProvider(agent) {
   if (['xai', 'grok'].includes(configured)) return 'xai';
   if (configured === 'openai' && process.env.OPENAI_API_KEY) return 'openai';
   // Prefer explicitly available keys when agent provider is generic/unset
-  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) return 'google_ai';
+  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) return 'google_ai';
   if (process.env.OPENAI_API_KEY) return 'openai';
   if (process.env.XAI_API_KEY) return 'xai';
   if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
@@ -138,9 +138,9 @@ function providerStatusPayload() {
     {
       id: 'google_ai',
       name: 'Google Gemini',
-      configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
+      configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
       defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-      envVars: ['GEMINI_API_KEY', 'GEMINI_MODEL']
+      envVars: ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GEMINI_MODEL']
     },
     {
       id: 'openai',
