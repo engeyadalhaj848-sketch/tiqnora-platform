@@ -17,6 +17,19 @@ import {
   formatProposalForDelivery,
   chooseProposalDeliveryEvent
 } from '../lib/v6/proposal-delivery.js';
+import {
+  mapActionToLifecycle,
+  buildProposalCard,
+  createProposalVersion,
+  applyProposalEdits,
+  buildProposalTimeline,
+  buildPublicProposalView,
+  canSendProposal,
+  generateShareToken,
+  recommendProposalFollowUp,
+  crmStageSuggestion,
+  prepareDeliveryMessage
+} from '../lib/v6/proposal-service.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
 const ANON = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -550,15 +563,27 @@ async function handleProposalHistory(req, res, auth) {
       || proposal.client?.name
       || null;
 
+    const card = buildProposalCard(action);
+    const timeline = buildProposalTimeline(action);
     return {
       id: action.id,
       status: action.status,
+      lifecycle_status: card.lifecycle_status,
+      lifecycle_label: card.lifecycle_label,
       lead_id: action.lead_id || null,
       conversation_id: action.conversation_id || null,
       client_name: clientName,
+      company_name: card.company_name,
       title: proposal.title || 'Proposal',
       language: proposal.language || 'ar',
       vertical: proposal.client?.vertical || null,
+      amount: card.amount,
+      currency: card.currency,
+      version_number: card.version_number,
+      share_token: card.share_token,
+      follow_up_at: card.follow_up_at,
+      timeline,
+      can_send: canSendProposal(action).ok,
       proposal_status: action.payload?.proposal_status || proposal.status || null,
       pricing_status: action.payload?.pricing_status || pricing.status || null,
       currency: pricing.currency || 'SAR',
@@ -669,6 +694,140 @@ async function handleAction(req, res, auth) {
   return json(res, 405, { error: 'Method not allowed' });
 }
 
+
+async function handleProposalManage(req, res, auth) {
+  const organizationId = req.body?.organization_id || req.query?.organization_id || await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const id = String(req.query?.id || req.body?.id || req.body?.action_id || '').trim();
+  const op = String(req.query?.op || req.body?.op || 'get').toLowerCase();
+  if (!id && op !== 'list') return json(res, 400, { error: 'id required' });
+  if (op === 'list' || (req.method === 'GET' && !id)) return handleProposalHistory(req, res, auth);
+  const action = await getAction(id, auth.token);
+  if (!action) return json(res, 404, { error: 'Not found' });
+  if (action.organization_id && String(action.organization_id) !== String(organizationId)) return json(res, 403, { error: 'Forbidden' });
+  if (action.action_type && action.action_type !== 'proposal_review') return json(res, 409, { error: 'Not a proposal action' });
+  if (req.method === 'GET' || op === 'get') {
+    return json(res, 200, { action, card: buildProposalCard(action), timeline: buildProposalTimeline(action), can_send: canSendProposal(action), versions: action.payload?.versions || [] });
+  }
+  if (req.method !== 'POST' && req.method !== 'PATCH') return json(res, 405, { error: 'Method not allowed' });
+  const payload = { ...(action.payload || {}) };
+  if (op === 'update') {
+    const edits = req.body?.edits || req.body?.proposal || {};
+    const nextProposal = applyProposalEdits(payload.proposal || {}, edits);
+    payload.proposal = nextProposal;
+    if (edits.pricing) payload.price_updated_at = new Date().toISOString();
+    if (req.body?.follow_up_at) payload.follow_up_at = req.body.follow_up_at;
+    if (req.body?.lifecycle_status) payload.lifecycle_status = req.body.lifecycle_status;
+    if (action.status === 'approved' || action.status === 'completed') {
+      const current = Number(payload.version_number || 1);
+      const version = createProposalVersion({ proposal: nextProposal, version_number: current + 1, created_by: auth.profile.id, change_summary: req.body?.change_summary || 'Human edit after approval' });
+      payload.versions = [...(payload.versions || []), version];
+      payload.version_number = version.version_number;
+      payload.lifecycle_status = 'needs_review';
+    }
+    const updated = await sbPatchAction(id, organizationId, { payload }, auth.token);
+    return json(res, 200, { action: updated || { ...action, payload }, card: buildProposalCard({ ...action, payload }) });
+  }
+  if (op === 'version') {
+    const current = Number(payload.version_number || 1);
+    const version = createProposalVersion({ proposal: payload.proposal || {}, version_number: current + 1, created_by: auth.profile.id, change_summary: req.body?.change_summary || 'Manual version snapshot' });
+    payload.versions = [...(payload.versions || []), version];
+    payload.version_number = version.version_number;
+    const updated = await sbPatchAction(id, organizationId, { payload }, auth.token);
+    return json(res, 200, { action: updated || { ...action, payload }, version });
+  }
+  if (op === 'share_link') {
+    if (!payload.share_token) payload.share_token = generateShareToken();
+    const updated = await sbPatchAction(id, organizationId, { payload }, auth.token);
+    return json(res, 200, { share_token: payload.share_token, path: `/proposal/${payload.share_token}`, action: updated || { ...action, payload } });
+  }
+  if (op === 'set_lifecycle') {
+    const lc = String(req.body?.lifecycle_status || '').toLowerCase();
+    const allowed = ['negotiation', 'accepted', 'rejected', 'expired', 'viewed', 'sent'];
+    if (!allowed.includes(lc)) return json(res, 400, { error: 'invalid lifecycle_status' });
+    payload.lifecycle_status = lc;
+    if (lc === 'accepted') payload.accepted_at = new Date().toISOString();
+    if (lc === 'negotiation') payload.negotiation_at = new Date().toISOString();
+    if (lc === 'rejected') payload.reject_reason = req.body?.reason || '';
+    const crm = crmStageSuggestion(lc);
+    payload.crm_suggestion = crm;
+    if (action.lead_id && crm.opportunity_stage) {
+      try {
+        const stage = crm.opportunity_stage;
+        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${encodeURIComponent(action.lead_id)}`, {
+          method: 'PATCH',
+          headers: { apikey: SERVICE || ANON, Authorization: `Bearer ${SERVICE || auth.token}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ pipeline_stage: stage, status: stage === 'won' ? 'won' : stage === 'lost' ? 'lost' : undefined })
+        });
+      } catch (_) {}
+    }
+    const updated = await sbPatchAction(id, organizationId, { payload }, auth.token);
+    return json(res, 200, { action: updated || { ...action, payload }, crm_suggestion: crm });
+  }
+  if (op === 'follow_up') {
+    const rec = recommendProposalFollowUp(action, { hours: Number(req.body?.hours) || 48 });
+    if (rec.recommended) {
+      payload.follow_up_at = rec.follow_up_at;
+      payload.follow_up_draft = rec.draft_goal;
+      await sbPatchAction(id, organizationId, { payload }, auth.token);
+    }
+    return json(res, 200, { follow_up: rec, requires_approval: true, auto_send: false });
+  }
+  if (op === 'timeline') return json(res, 200, { timeline: buildProposalTimeline(action), card: buildProposalCard(action) });
+  if (op === 'can_send') return json(res, 200, canSendProposal(action));
+  return json(res, 400, { error: 'Unknown op' });
+}
+
+async function sbPatchAction(id, organizationId, fields, token) {
+  const key = SERVICE || token;
+  const body = { ...fields, updated_at: new Date().toISOString() };
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/actions?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organizationId)}`, {
+    method: 'PATCH',
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    body: JSON.stringify(body)
+  });
+  const data = await r.json().catch(() => null);
+  if (!r.ok) { const err = new Error((data && data.message) || `Patch failed (${r.status})`); err.status = r.status; throw err; }
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function handleProposalPublic(req, res) {
+  if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+  const token = String(req.query?.token || req.body?.token || '').trim();
+  if (!token || token.length < 16) return json(res, 400, { error: 'token required' });
+  const key = SERVICE || ANON;
+  const path = `actions?action_type=eq.proposal_review&payload->>share_token=eq.${encodeURIComponent(token)}&select=id,status,payload,result,created_at,updated_at,executed_at,approved_at,organization_id&limit=1`;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+  const rows = await r.json().catch(() => []);
+  const action = Array.isArray(rows) ? rows[0] : null;
+  if (!action) return json(res, 404, { error: 'Not found' });
+  const wantView = req.method === 'POST' || String(req.query?.record_view || '') === '1';
+  if (wantView) {
+    const payload = { ...(action.payload || {}) };
+    const views = Array.isArray(payload.views) ? payload.views : [];
+    const last = views[views.length - 1];
+    const now = Date.now();
+    if (!last || (now - new Date(last.at).getTime()) > 30 * 60 * 1000) {
+      views.push({ at: new Date().toISOString(), version: payload.version_number || 1 });
+      payload.views = views.slice(-20);
+      if (!payload.viewed_at) payload.viewed_at = views[views.length - 1].at;
+      if (payload.lifecycle_status === 'sent' || mapActionToLifecycle({ ...action, payload: { ...payload, lifecycle_status: payload.lifecycle_status || 'sent' } }) === 'sent') {
+        payload.lifecycle_status = 'viewed';
+      }
+      await fetch(`${SUPABASE_URL}/rest/v1/actions?id=eq.${encodeURIComponent(action.id)}`, {
+        method: 'PATCH',
+        headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ payload, updated_at: new Date().toISOString() })
+      }).catch(() => null);
+      action.payload = payload;
+    }
+  }
+  const view = buildPublicProposalView(action);
+  if (!view.ok) return json(res, 404, { error: view.message || 'Not available' });
+  return json(res, 200, { proposal: view });
+}
+
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -683,6 +842,10 @@ export default async function handler(req, res) {
     return handleSalesChat(req, res);
   }
 
+  if (route === 'proposal_public') {
+    return handleProposalPublic(req, res);
+  }
+
   const auth = await requireAdmin(req);
   if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
@@ -691,6 +854,7 @@ export default async function handler(req, res) {
     if (route === 'proposal') return await handleProposal(req, res, auth);
     if (route === 'proposal_delivery') return await handleProposalDelivery(req, res, auth);
     if (route === 'proposal_history') return await handleProposalHistory(req, res, auth);
+    if (route === 'proposal_manage') return await handleProposalManage(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });

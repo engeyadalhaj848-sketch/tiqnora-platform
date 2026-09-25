@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>عرض Tiqnora</title>
+  <style>
+    :root { --bg:#0b1220; --card:#121a2b; --text:#e8eefc; --muted:#9db0d0; --accent:#2dd4bf; --line:#243047; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: system-ui, "Segoe UI", Tahoma, sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+    .wrap { max-width:820px; margin:0 auto; padding:24px 16px 64px; }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+    .brand b { font-size:1.15rem; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px; margin-bottom:16px; }
+    h1 { font-size:1.45rem; margin:0 0 8px; }
+    h2 { font-size:1.05rem; margin:0 0 10px; color:var(--accent); }
+    .muted { color:var(--muted); }
+    .price { font-size:1.4rem; font-weight:700; color:var(--accent); }
+    ul { margin:0; padding-inline-start:1.2rem; }
+    .err { color:#fca5a5; }
+    @media (max-width:600px){ .wrap{padding:16px 12px 48px;} h1{font-size:1.2rem;} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><b>Tiqnora</b><span class="muted">عرض مقترح</span></div>
+    <div id="app" class="muted">جارٍ التحميل…</div>
+  </div>
+  <script type="module">
+    const app = document.getElementById('app');
+    const token = location.pathname.split('/').filter(Boolean).pop() || new URLSearchParams(location.search).get('token');
+    function esc(s){ return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    async function load(){
+      if(!token || token.length < 8){ app.innerHTML = '<p class="err">رابط غير صالح</p>'; return; }
+      try{
+        const r = await fetch(`/api/v6?route=proposal_public&token=${encodeURIComponent(token)}&record_view=1`);
+        const j = await r.json();
+        if(!r.ok){ app.innerHTML = `<p class="err">${esc(j.error||'غير متاح')}</p>`; return; }
+        const p = j.proposal;
+        const sol = (p.recommended_solution||[]).map(x => `<li>${esc(x.label||x.value||x.service||'')}</li>`).join('');
+        const del = (p.deliverables||[]).map(d => {
+          const items = (d.items||[]).map(i=>`<li>${esc(i)}</li>`).join('');
+          return `<h2>${esc(d.service||'')}</h2><ul>${items}</ul>`;
+        }).join('');
+        const price = p.pricing?.total!=null ? `${p.pricing.total} ${p.pricing.currency||'SAR'}` :
+                      p.pricing?.subtotal!=null ? `${p.pricing.subtotal} ${p.pricing.currency||'SAR'}` : 'يُحدد بعد التأكيد';
+        app.innerHTML = `
+          <div class="card">
+            <h1>${esc(p.title)}</h1>
+            <p class="muted">${esc(p.client?.company_name||p.client?.name||'')}</p>
+            <p>${esc(p.executive_summary||'')}</p>
+          </div>
+          <div class="card"><h2>الحل المقترح</h2><ul>${sol||'<li class="muted">—</li>'}</ul></div>
+          <div class="card"><h2>المخرجات</h2>${del||'<p class="muted">—</p>'}</div>
+          <div class="card"><h2>الاستثمار</h2><div class="price">${esc(price)}</div>
+            ${p.pricing?.status==='requires_human_pricing'?'<p class="muted">التسعير النهائي بعد التأكيد</p>':''}
+          </div>
+          ${p.timeline?.requested_timeline?`<div class="card"><h2>الجدول</h2><p>${esc(p.timeline.requested_timeline)}</p></div>`:''}
+          ${p.terms?`<div class="card"><h2>الشروط</h2><p>${esc(p.terms)}</p></div>`:''}
+          ${p.valid_until?`<div class="card"><h2>ساري حتى</h2><p>${esc(p.valid_until)}</p></div>`:''}
+        `;
+        document.documentElement.lang = p.language==='en'?'en':'ar';
+        document.documentElement.dir = p.language==='en'?'ltr':'rtl';
+      }catch(e){ app.innerHTML = '<p class="err">تعذر التحميل</p>'; }
+    }
+    load();
+  </script>
+</body>
+</html>

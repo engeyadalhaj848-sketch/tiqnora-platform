@@ -152,6 +152,14 @@
   ],
   "rewrites": [
     {
+      "source": "/proposal/:token/",
+      "destination": "/proposal.html"
+    },
+    {
+      "source": "/proposal/:token",
+      "destination": "/proposal.html"
+    },
+    {
       "source": "/api/ai-sales/draft-reply",
       "destination": "/api/v6?route=draft_reply"
     },
