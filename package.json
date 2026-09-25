@@ -4,6 +4,18 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs",
+    "prebuild": "npm run test:v6",
+    "test:lead-enrichment": "node --test tests/v6-lead-enrichment.test.mjs",
+    "test:v6": "node --test tests/v6-inbox-crm.test.mjs tests/v6-lead-enrichment.test.mjs tests/v6-social-crm-bridge.test.mjs tests/v6-sales-playbooks.test.mjs tests/v6-proposal-composer.test.mjs tests/v6-proposal-delivery.test.mjs tests/v6-admin-runtime.test.mjs tests/v6-social-delivery-runtime.test.mjs tests/v6-proposal-history-runtime.test.mjs tests/v6-preprod.test.mjs",
+    "test:social-crm-bridge": "node --test tests/v6-social-crm-bridge.test.mjs",
+    "test:sales-playbooks": "node --test tests/v6-sales-playbooks.test.mjs",
+    "test:proposal-composer": "node --test tests/v6-proposal-composer.test.mjs",
+    "test:admin-runtime": "node --test tests/v6-admin-runtime.test.mjs",
+    "test:proposal-delivery": "node --test tests/v6-proposal-delivery.test.mjs",
+    "test:social-delivery-runtime": "node --test tests/v6-social-delivery-runtime.test.mjs",
+    "test:proposal-history-runtime": "node --test tests/v6-proposal-history-runtime.test.mjs",
+    "test:preprod": "node --test tests/v6-preprod.test.mjs"
   }
 }
