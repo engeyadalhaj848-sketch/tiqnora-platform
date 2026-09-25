@@ -122,6 +122,7 @@ const NAV = [
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
   { id: 'analytics', ic: '▦', label: 'التحليلات' },
   { id: 'growth', ic: '↗', label: 'النمو والسوق' },
+  { id: 'sales-v6', ic: '⌁', label: 'مركز المبيعات V6' },
   { id: 'blog', ic: '✎', label: 'المدونة SEO' },
   { id: 'notifications', ic: '◉', label: 'الإشعارات' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
@@ -238,6 +239,285 @@ function dbBanner() {
    VIEWS
    ============================================================ */
 const VIEWS = {};
+
+async function v6Api(route, { method = 'GET', body = null, query = {} } = {}) {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+  const qs = new URLSearchParams({ route, ...query });
+  const res = await fetch('/api/v6?' + qs.toString(), {
+    method,
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: 'Bearer ' + session.access_token
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(payload.error || ('V6 API ' + res.status));
+    err.code = payload.code || '';
+    err.status = res.status;
+    throw err;
+  }
+  return payload;
+}
+
+const v6ActionStatusLabel = {
+  draft: 'مسودة',
+  pending_approval: 'بانتظار الموافقة',
+  approved: 'معتمد',
+  executing: 'قيد التنفيذ',
+  completed: 'مكتمل',
+  failed: 'فشل',
+  cancelled: 'ملغي'
+};
+
+function v6ActionPill(status) {
+  if (status === 'completed' || status === 'approved') return 'ok';
+  if (status === 'pending_approval' || status === 'draft' || status === 'executing') return 'warn';
+  if (status === 'failed' || status === 'cancelled') return 'danger';
+  return 'muted';
+}
+
+VIEWS['sales-v6'] = async v => {
+  v.innerHTML = `
+    <div class="v6-hero card">
+      <div>
+        <div class="v6-eyebrow">TIQNORA V6 · SALES CONTROL CENTER</div>
+        <h2>مركز المبيعات الذكي</h2>
+        <p class="card-desc">Lead → AI Qualification → Draft → Approval → CRM. لا إرسال تلقائي بدون موافقتك.</p>
+      </div>
+      <div class="v6-hero-actions">
+        <button class="btn-primary" id="v6-new-draft">تجربة رد AI</button>
+        <button class="btn-ghost" id="v6-refresh">تحديث</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="v6-kpis">
+      <div class="kpi"><div class="k">إجمالي العملاء المحتملين</div><div class="v">—</div></div>
+      <div class="kpi"><div class="k">فرص قوية 70+</div><div class="v">—</div></div>
+      <div class="kpi"><div class="k">فرص CRM مفتوحة</div><div class="v">—</div></div>
+      <div class="kpi"><div class="k">بانتظار الموافقة</div><div class="v">—</div></div>
+    </div>
+
+    <div class="v6-grid">
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>الموافقات المعلقة</h2>
+            <p class="card-desc">أي رد أو إجراء خارجي يبدأ هنا كمسودة.</p>
+          </div>
+          <span class="pill warn" id="v6-pending-count">0</span>
+        </div>
+        <div id="v6-actions"><div class="loading-hint">جارٍ التحميل…</div></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>Pipeline المبيعات</h2>
+            <p class="card-desc">أحدث فرص CRM المفتوحة وقيمتها الحالية.</p>
+          </div>
+          <a class="btn-sm btn-ghost" href="#leads">العملاء المحتملون</a>
+        </div>
+        <div id="v6-pipeline"><div class="loading-hint">جارٍ التحميل…</div></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>AI Sales Draft</h2>
+          <p class="card-desc">اكتب رسالة عميل تجريبية. سيقوم Gemini بفهم النية والتأهيل وإنشاء Action بحالة pending_approval.</p>
+        </div>
+      </div>
+      <div class="v6-draft-grid">
+        <div>
+          <label>رسالة العميل</label>
+          <textarea id="v6-message" rows="5" placeholder="مثال: أبي موقع لعيادة أسنان في المدينة وأحتاج حجز ومتابعة واتساب"></textarea>
+        </div>
+        <div>
+          <label>القناة</label>
+          <select id="v6-platform">
+            <option value="whatsapp">WhatsApp</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+          </select>
+          <button class="btn-primary" id="v6-generate" style="width:100%;margin-top:12px">تحليل وتجهيز المسودة</button>
+          <p class="card-desc" style="margin-top:10px">لن يتم إرسال الرسالة للعميل. سيتم حفظها للموافقة فقط.</p>
+        </div>
+      </div>
+      <div id="v6-draft-result"></div>
+    </section>`;
+
+  const load = async () => {
+    const actionsEl = $('#v6-actions');
+    const pipeEl = $('#v6-pipeline');
+    actionsEl.innerHTML = '<div class="loading-hint">جارٍ تحميل الموافقات…</div>';
+    pipeEl.innerHTML = '<div class="loading-hint">جارٍ تحميل Pipeline…</div>';
+
+    const nowIso = new Date().toISOString();
+    const settled = await Promise.allSettled([
+      db.from('leads').select('id', { count: 'exact', head: true }),
+      db.from('leads').select('id', { count: 'exact', head: true }).gte('opportunity_score', 70),
+      db.from('crm_opportunities').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+      db.from('crm_opportunities')
+        .select('id,title,value,currency,status,created_at,crm_pipeline_stages(name,slug,position),leads(company_name,contact_name)')
+        .eq('status', 'open').order('created_at', { ascending: false }).limit(12),
+      db.from('appointments').select('id', { count: 'exact', head: true }).in('status', ['scheduled','confirmed']).gte('starts_at', nowIso),
+      v6Api('actions', { query: { status: 'pending_approval', limit: '30' } })
+    ]);
+
+    const safe = (i, fallback = {}) => settled[i].status === 'fulfilled' ? settled[i].value : fallback;
+    const leadsCount = safe(0).count ?? 0;
+    const hotCount = safe(1).count ?? 0;
+    const oppCount = safe(2).count ?? 0;
+    const oppRows = safe(3).data || [];
+    const apptCount = safe(4).count ?? 0;
+    const pendingActions = safe(5, { actions: [] }).actions || [];
+
+    $('#v6-kpis').innerHTML = `
+      <div class="kpi"><div class="k">إجمالي العملاء المحتملين</div><div class="v">${leadsCount}</div></div>
+      <div class="kpi"><div class="k">فرص قوية 70+</div><div class="v">${hotCount}</div></div>
+      <div class="kpi"><div class="k">فرص CRM مفتوحة</div><div class="v">${oppCount}</div></div>
+      <div class="kpi"><div class="k">مواعيد قادمة</div><div class="v">${apptCount}</div></div>
+    `;
+
+    $('#v6-pending-count').textContent = pendingActions.length;
+
+    if (!pendingActions.length) {
+      actionsEl.innerHTML = '<div class="empty">لا توجد إجراءات بانتظار الموافقة حاليًا</div>';
+    } else {
+      actionsEl.innerHTML = pendingActions.map(a => {
+        const p = a.payload || {};
+        const draft = p.reply_draft || p.draft_message || p.message || 'إجراء بدون نص';
+        const intent = p.intent?.intent || '—';
+        const next = p.next_best_action || '—';
+        return `
+          <div class="v6-action-item" data-action-id="${esc(a.id)}">
+            <div class="v6-action-top">
+              <div>
+                <strong>${esc(a.action_type || 'action')}</strong>
+                <div class="muted">${new Date(a.created_at).toLocaleString('ar-SA')}</div>
+              </div>
+              <span class="pill ${v6ActionPill(a.status)}">${esc(v6ActionStatusLabel[a.status] || a.status)}</span>
+            </div>
+            <div class="v6-action-draft">${esc(draft)}</div>
+            <div class="v6-action-meta">
+              <span>النية: <b>${esc(intent)}</b></span>
+              <span>الخطوة التالية: <b>${esc(next)}</b></span>
+            </div>
+            <div class="v6-action-buttons">
+              <button class="btn-primary btn-sm" data-v6-approve="${esc(a.id)}">موافقة</button>
+              <button class="btn-danger btn-sm" data-v6-reject="${esc(a.id)}">رفض</button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    if (!oppRows.length) {
+      pipeEl.innerHTML = '<div class="empty">لا توجد فرص CRM مفتوحة بعد</div>';
+    } else {
+      pipeEl.innerHTML = tbl(
+        ['الفرصة','المرحلة','القيمة','العميل'],
+        oppRows.map(o => `
+          <tr>
+            <td><b>${esc(o.title)}</b></td>
+            <td><span class="pill">${esc(o.crm_pipeline_stages?.name || '—')}</span></td>
+            <td>${money(o.value || 0)}</td>
+            <td>${esc(o.leads?.company_name || o.leads?.contact_name || '—')}</td>
+          </tr>`).join('')
+      );
+    }
+
+    $('[data-v6-approve]').forEach(btn => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await v6Api('action', {
+            method: 'POST',
+            query: { id: btn.dataset.v6Approve },
+            body: { op: 'approve', autoExecute: false }
+          });
+          toast('تم اعتماد الإجراء — لم يتم الإرسال بعد');
+          await load();
+        } catch (e) {
+          toast('تعذر الاعتماد: ' + e.message, false);
+          btn.disabled = false;
+        }
+      };
+    });
+
+    $('[data-v6-reject]').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('رفض هذه المسودة؟')) return;
+        btn.disabled = true;
+        try {
+          await v6Api('action', {
+            method: 'POST',
+            query: { id: btn.dataset.v6Reject },
+            body: { op: 'reject', reason: 'Rejected from V6 Sales Control Center' }
+          });
+          toast('تم رفض المسودة');
+          await load();
+        } catch (e) {
+          toast('تعذر الرفض: ' + e.message, false);
+          btn.disabled = false;
+        }
+      };
+    });
+  };
+
+  $('#v6-refresh').onclick = load;
+  $('#v6-new-draft').onclick = () => $('#v6-message')?.focus();
+
+  $('#v6-generate').onclick = async () => {
+    const btn = $('#v6-generate');
+    const msg = ($('#v6-message').value || '').trim();
+    const result = $('#v6-draft-result');
+    if (!msg) return toast('اكتب رسالة العميل أولًا', false);
+    btn.disabled = true;
+    result.innerHTML = '<div class="loading-hint">Gemini يحلل الرسالة ويجهز المسودة…</div>';
+    try {
+      const out = await v6Api('draft_reply', {
+        method: 'POST',
+        body: {
+          message: msg,
+          platform: $('#v6-platform').value,
+          language: 'ar'
+        }
+      });
+      const q = out.qualification || {};
+      result.innerHTML = `
+        <div class="v6-result">
+          <div class="v6-result-head">
+            <div>
+              <span class="pill ok">AI Draft جاهزة</span>
+              <span class="pill warn">بانتظار الموافقة</span>
+            </div>
+            <span class="muted">Model: ${esc(out.model || 'Gemini')}</span>
+          </div>
+          <h3>الرد المقترح</h3>
+          <div class="v6-action-draft">${esc(out.draft || '—')}</div>
+          <div class="v6-qual-grid">
+            <div><span>درجة الاهتمام</span><b>${esc(q.temperature || '—')}</b></div>
+            <div><span>الخدمة</span><b>${esc(q.service_interest || '—')}</b></div>
+            <div><span>الخطوة التالية</span><b>${esc(out.next_best_action || '—')}</b></div>
+            <div><span>النية</span><b>${esc(out.intent?.intent || '—')}</b></div>
+          </div>
+        </div>`;
+      toast('تم إنشاء المسودة وإضافتها للموافقات');
+      await load();
+    } catch (e) {
+      result.innerHTML = `<div class="v6-error">تعذر إنشاء المسودة: ${esc(e.message)}</div>`;
+      toast('فشل AI Draft: ' + e.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  await load();
+};
 
 VIEWS['social-inbox'] = async v => {
   v.innerHTML = dbBanner() + `
