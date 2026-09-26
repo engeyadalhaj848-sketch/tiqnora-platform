@@ -66,6 +66,19 @@ function setupAdminNotifications() {
 async function log(action, entity, entity_id, details = {}) {
   try { await db.from('activity_logs').insert({ user_id: me?.id, action, entity, entity_id: entity_id ? String(entity_id) : null, details }); } catch {}
 }
+async function commerceAi(url = '/api/commerce/ai', init = {}) {
+  if (!db) throw new Error('جلسة الإدارة غير جاهزة');
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+  return fetch(url, {
+    ...init,
+    headers: {
+      ...(init.headers || {}),
+      Authorization: `Bearer ${session.access_token}`
+    }
+  });
+}
+
 const openModal = html => { $('#modal').innerHTML = html; $('#modal-back').classList.add('show'); };
 const closeModal = () => $('#modal-back').classList.remove('show');
 $('#modal-back')?.addEventListener('click', e => { if (e.target.id === 'modal-back') closeModal(); });
@@ -2304,7 +2317,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'product_seo', name_ar: row.name_ar, name_en: row.name_en, sku: row.sku,
               description_ar: row.description_ar, price: row.price, category: row.categories?.name_ar, brand: row.brands?.name
             })});
@@ -2339,7 +2352,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
             const j = await r.json();
             const overall = j.overall_score != null ? j.overall_score : j.score;
             if (overall == null) continue;
@@ -2373,7 +2386,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'market_research', product_name: row.name_ar, category: row.categories?.name_ar,
               brand: row.brands?.name, supplier: row.supplier_name, cost: row.cost_price, shipping: 0
             })});
@@ -2403,7 +2416,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'dynamic_pricing', product_id: id, product_name: row.name_ar, cost: row.cost_price,
               shipping: 0, current_price: row.price, category: row.categories?.name_ar
             })});
@@ -2428,7 +2441,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'supplier_compare', product_id: id, product_name: row.name_ar, cost: row.cost_price || 200
             })});
             const j = await r.json();
@@ -2503,7 +2516,7 @@ VIEWS.products = async v => {
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\\n') }, onSave: async d => { await db.from('products').update(fixImgs(d)).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
   const runReviewAndSave = async (row) => {
-    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
+    const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
     const j = await r.json();
     if (j.score == null && j.overall_score == null) throw new Error(j.error || 'فشل التحقق');
     const overall = j.overall_score != null ? j.overall_score : j.score;
@@ -2717,7 +2730,7 @@ VIEWS.products = async v => {
     if (!confirm('توليد محتوى SEO بالذكاء الاصطناعي لهذا المنتج؟ (للمراجعة فقط)')) return;
     toast('جارٍ التوليد…');
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
         mode: 'product_seo', name_ar: row.name_ar, name_en: row.name_en, sku: row.sku,
         description_ar: row.description_ar, price: row.price, category: row.categories?.name_ar, brand: row.brands?.name
       })});
@@ -2736,7 +2749,7 @@ VIEWS.products = async v => {
         specifications: specs
       }).eq('id', row.id);
       // refresh quality
-      const qr = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: { ...row, ...j, specifications: specs } })});
+      const qr = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: { ...row, ...j, specifications: specs } })});
       const qj = await qr.json();
       if (qj.score != null) await db.from('products').update({ quality_score: qj.score, quality_notes: { notes: qj.notes, ready: qj.ready_to_publish } }).eq('id', row.id);
       toast('تم توليد SEO — راجع قبل النشر');
@@ -2847,6 +2860,7 @@ VIEWS.commerce = async v => {
         <option value="dsers">DSers</option>
       </select>
       <button class="btn-sm" id="sc-test">اختبار الاتصال</button>
+      <button class="btn-sm" id="ae-oauth-connect">ربط / إعادة ربط AliExpress</button>
       <button class="btn-primary" id="sc-sync">مزامنة الآن</button>
       <button class="btn-sm" id="sc-inv">فحص المخزون/الأسعار</button>
       <button class="btn-primary" id="sc-import" style="background:var(--accent,#0d9488)">استيراد منتج تجريبي (CJ)</button>
@@ -3012,7 +3026,7 @@ VIEWS.commerce = async v => {
     $('#ae-product-stage').disabled = true;
     window.__lastAeProduct = null;
     try {
-      const r = await fetch('/api/commerce/ai?action=connector_product&provider=aliexpress&product_id=' + encodeURIComponent(id));
+      const r = await commerceAi('/api/commerce/ai?action=connector_product&provider=aliexpress&product_id=' + encodeURIComponent(id));
       const j = await r.json();
       if (!r.ok || !j.ok || !j.product) {
         $('#ae-product-out').textContent = j.error || j.message || 'تعذر جلب المنتج';
@@ -3099,7 +3113,7 @@ VIEWS.commerce = async v => {
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     $('#scout-out').textContent = 'جارٍ تحليل Scout…';
     try {
-      const r = await fetch('/api/commerce/ai', {
+      const r = await commerceAi('/api/commerce/ai', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
@@ -3163,7 +3177,7 @@ VIEWS.commerce = async v => {
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     $('#mi-out').textContent = 'جارٍ تحليل السوق…';
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) { $('#mi-out').textContent = j.error; return; }
       window.__lastMi = j;
@@ -3225,7 +3239,7 @@ VIEWS.commerce = async v => {
     };
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) return toast(j.error);
       window.__lastMi = j;
@@ -3261,7 +3275,7 @@ VIEWS.commerce = async v => {
     if (!payload.cost && !payload.current_price) return toast('أدخل التكلفة');
     $('#dp-out').textContent = 'جارٍ الحساب…';
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) { $('#dp-out').textContent = j.error; return; }
       window.__lastDp = j;
@@ -3318,7 +3332,7 @@ VIEWS.commerce = async v => {
     };
     $('#scmp-out').textContent = 'جارٍ المقارنة…';
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) { $('#scmp-out').textContent = j.error; return; }
       window.__lastScmp = j;
@@ -3348,7 +3362,7 @@ VIEWS.commerce = async v => {
 
   // Supplier Center
   const scApi = async (payload) => {
-    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'supplier_center', ...payload }) });
+    const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'supplier_center', ...payload }) });
     return r.json();
   };
   const refreshScStatus = async () => {
@@ -3360,6 +3374,32 @@ VIEWS.commerce = async v => {
     } catch(_) {}
   };
   refreshScStatus();
+
+  const aeOauthConnect = $('#ae-oauth-connect');
+  if (aeOauthConnect) aeOauthConnect.onclick = async () => {
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session?.access_token) return toast('انتهت جلسة الأدمن — سجّل الدخول من جديد', false);
+      aeOauthConnect.disabled = true;
+      const response = await fetch('/api/aliexpress/connect?format=json', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          Accept: 'application/json'
+        }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.authorize_url) {
+        toast(payload.message || payload.error || 'تعذر بدء ربط AliExpress', false);
+        return;
+      }
+      window.location.href = payload.authorize_url;
+    } catch (e) {
+      toast(e.message || 'تعذر بدء ربط AliExpress', false);
+    } finally {
+      aeOauthConnect.disabled = false;
+    }
+  };
+
   const scTest = $('#sc-test');
   if (scTest) scTest.onclick = async () => {
     const provider = $('#sc-provider')?.value;
@@ -3446,7 +3486,7 @@ VIEWS.commerce = async v => {
     if (!message) return toast('اكتب وصفاً للبحث');
     $('#ai-out').textContent = 'جارٍ التحليل…';
     try {
-      const r = await fetch('/api/commerce/ai', {
+      const r = await commerceAi('/api/commerce/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: $('#ai-mode').value, message })

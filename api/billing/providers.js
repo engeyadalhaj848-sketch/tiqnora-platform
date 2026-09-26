@@ -123,8 +123,12 @@ function resolveRoute(req) {
   return { route: '', url };
 }
 
-async function handleAliExpressConnect(req, res) {
+async function handleAliExpressConnect(req, res, url) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'Method not allowed' });
+
+  const admin = await requireAdminUser(req);
+  if (!admin.ok) return json(res, admin.status, { ok: false, error: admin.error });
+
   const cfg = getAeConfig();
   if (!cfg.configured) {
     return json(res, 503, {
@@ -134,7 +138,11 @@ async function handleAliExpressConnect(req, res) {
       missing: cfg.missing,
     });
   }
-  const state = createOAuthState();
+
+  const state = createOAuthState({
+    admin_user_id: admin.user.id,
+    issued_at: Date.now(),
+  });
   const auth = buildAuthorizeUrl({ state });
   if (!auth?.ok || !auth?.url) {
     return json(res, 500, {
@@ -143,7 +151,12 @@ async function handleAliExpressConnect(req, res) {
       message: auth?.message || 'Could not build AliExpress authorize URL.',
     });
   }
-  return redirect(res, auth.url);
+
+  const wantJson = url?.searchParams?.get('format') === 'json'
+    || String(req.headers?.accept || '').includes('application/json');
+  return wantJson
+    ? json(res, 200, { ok: true, provider: 'aliexpress', authorize_url: auth.url })
+    : redirect(res, auth.url);
 }
 
 async function handleAliExpressCallback(req, res, url) {
@@ -168,12 +181,21 @@ async function handleAliExpressCallback(req, res, url) {
     };
     return wantJson ? json(res, 400, payload) : redirect(res, `${ADMIN_ERR}&reason=missing_code`);
   }
-  if (state) {
-    const st = verifyOAuthState(state);
-    if (!st.ok) {
-      const payload = { ok: false, error: 'invalid_state', reason: st.reason };
-      return wantJson ? json(res, 400, payload) : redirect(res, `${ADMIN_ERR}&reason=invalid_state`);
-    }
+  const st = verifyOAuthState(state);
+  const stateData = st?.data || {};
+  if (!st.ok || stateData.provider !== 'aliexpress' || !stateData.admin_user_id) {
+    const payload = { ok: false, error: 'invalid_state', reason: st?.reason || 'missing_authorized_admin' };
+    return wantJson ? json(res, 400, payload) : redirect(res, `${ADMIN_ERR}&reason=invalid_state`);
+  }
+
+  const stateProfileRes = await sb(
+    `profiles?id=eq.${encodeURIComponent(stateData.admin_user_id)}&select=id,role,is_active&limit=1`
+  );
+  const stateProfile = Array.isArray(stateProfileRes.data) ? stateProfileRes.data[0] : null;
+  if (stateProfileRes.error || !stateProfile || stateProfile.is_active === false
+      || !['admin', 'super_admin'].includes(String(stateProfile.role || ''))) {
+    const payload = { ok: false, error: 'invalid_state', reason: 'initiating_admin_not_authorized' };
+    return wantJson ? json(res, 403, payload) : redirect(res, `${ADMIN_ERR}&reason=invalid_state`);
   }
   const cfg = getAeConfig();
   if (!cfg.configured) {
@@ -222,8 +244,6 @@ async function handleAliExpressCallback(req, res, url) {
 
 async function handleAliExpressStatus(req, res) {
   const cfg = getAeConfig();
-  const state = createOAuthState();
-  const auth = cfg.configured ? buildAuthorizeUrl({ state }) : null;
   let connection = null;
   try {
     const cr = await sb(
@@ -247,8 +267,8 @@ async function handleAliExpressStatus(req, res) {
     hours_remaining: hoursRemaining,
     reauthorize_required: expired || (hoursRemaining != null && hoursRemaining <= 168),
     last_error: connection?.last_error || null,
-    authorize_url_ready: !!(auth && auth.url && cfg.configured),
-    authorize_url: auth && cfg.configured ? auth.url : null,
+    authorize_url_ready: false,
+    authorize_url: null,
   });
 }
 
@@ -258,7 +278,8 @@ async function requireAdminUser(req) {
   const auth = String(req.headers?.authorization || '');
   const match = auth.match(/^Bearer\s+(.+)$/i);
   const token = match?.[1] || '';
-  if (!token || !SERVICE) return { ok: false, status: 401, error: 'admin_auth_required' };
+  if (!SERVICE) return { ok: false, status: 503, error: 'server_not_configured' };
+  if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
 
   try {
     const ur = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
@@ -276,7 +297,7 @@ async function requireAdminUser(req) {
       `profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`
     );
     const profile = Array.isArray(pr.data) ? pr.data[0] : null;
-    const allowed = ['admin', 'super_admin', 'owner'].includes(String(profile?.role || ''));
+    const allowed = ['admin', 'super_admin'].includes(String(profile?.role || ''));
     if (!profile || profile.is_active === false || !allowed) {
       return { ok: false, status: 403, error: 'admin_permission_required' };
     }
@@ -1211,7 +1232,7 @@ export default async function handler(req, res) {
       }
     }
 
-    if (route === 'aliexpress_connect') return handleAliExpressConnect(req, res);
+    if (route === 'aliexpress_connect') return handleAliExpressConnect(req, res, url);
     if (route === 'aliexpress_callback') return handleAliExpressCallback(req, res, url);
     if (route === 'aliexpress_status') return handleAliExpressStatus(req, res);
     if (route === 'supplier_fulfillment_submit') return handleSupplierFulfillmentSubmit(req, res);

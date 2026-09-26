@@ -227,25 +227,43 @@ function decrypt(ciphertext, iv, tag) {
   return Buffer.concat([d.update(Buffer.from(ciphertext, 'base64url')), d.final()]).toString();
 }
 
-async function verifyAdmin(authHeader) {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
+async function authenticateAdmin(authHeader) {
+  const match = String(authHeader || '').match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1] || '';
+  if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
+
   const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
   const apikey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  const r = await fetch(`${base}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey } });
-  if (!r.ok) return null;
-  const user = await r.json().catch(() => null);
-  if (!user?.id) return null;
-  const rows = await supa(`profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`);
-  const profile = Array.isArray(rows) ? rows[0] : null;
-  if (!profile || profile.is_active === false || !['super_admin','admin','owner'].includes(String(profile.role || ''))) return null;
-  return { ...user, role: profile.role };
+  if (!apikey) return { ok: false, status: 503, error: 'auth_not_configured' };
+
+  try {
+    const r = await fetch(`${base}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey }
+    });
+    const user = await r.json().catch(() => null);
+    if (!r.ok || !user?.id) return { ok: false, status: 401, error: 'invalid_admin_session' };
+
+    const rows = await supa(`profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`);
+    const profile = Array.isArray(rows) ? rows[0] : null;
+    if (!profile || profile.is_active === false || !['super_admin', 'admin'].includes(String(profile.role || ''))) {
+      return { ok: false, status: 403, error: 'admin_permission_required' };
+    }
+    return { ok: true, admin: { ...user, role: profile.role } };
+  } catch {
+    return { ok: false, status: 503, error: 'admin_auth_unavailable' };
+  }
+}
+
+async function verifyAdmin(authHeader) {
+  const result = await authenticateAdmin(authHeader);
+  return result.ok ? result.admin : null;
 }
 
 async function resolveOrganization(requestedId, admin) {
-  if (requestedId && ['super_admin','owner'].includes(admin.role)) return String(requestedId);
   if (requestedId) {
-    const rows = await supa(`organization_members?organization_id=eq.${encodeURIComponent(requestedId)}&user_id=eq.${encodeURIComponent(admin.id)}&select=organization_id&limit=1`);
+    const rows = await supa(
+      `organization_members?organization_id=eq.${encodeURIComponent(requestedId)}&user_id=eq.${encodeURIComponent(admin.id)}&select=organization_id&limit=1`
+    );
     if (Array.isArray(rows) && rows[0]?.organization_id) return String(rows[0].organization_id);
     throw Object.assign(new Error('Organization access denied'), { status: 403 });
   }
@@ -974,33 +992,60 @@ export default async function handler(req, res) {
   if (provider === 'tiktok' && req.method === 'POST') return handleTikTokPosting(req, res);
   if (req.method === 'GET' && !req.query.code) {
     if (!secret()) return send(res, 503, { error: 'OAuth state secret is not configured' });
-    const state = sign(JSON.stringify({ provider, organization_id: String(req.query.organization_id || ''), nonce: randomBytes(12).toString('hex'), exp: Date.now() + 600000 }));
+
+    const authn = await authenticateAdmin(req.headers.authorization || '');
+    if (!authn.ok) return send(res, authn.status, { error: authn.error });
+
+    let organizationId;
+    try {
+      organizationId = await resolveOrganization(req.query.organization_id, authn.admin);
+    } catch (e) {
+      return send(res, e.status || 403, { error: e.message || 'Organization access denied' });
+    }
+
+    const state = sign(JSON.stringify({
+      provider,
+      organization_id: organizationId,
+      admin_user_id: authn.admin.id,
+      nonce: randomBytes(12).toString('hex'),
+      exp: Date.now() + 600000
+    }));
     const { clientId, redirect, missing } = credentials(provider);
     const initialMissing = missing.filter(name => !name.endsWith('_SECRET') && name !== 'META_APP_SECRET' && name !== 'LINKEDIN_CLIENT_SECRET');
     if (initialMissing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing: initialMissing });
     const url = new URL(cfg.auth);
-    // TikTok's OAuth authorize endpoint requires client_key; other providers use client_id.
     url.searchParams.set(provider === 'tiktok' ? 'client_key' : 'client_id', clientId);
     url.searchParams.set('redirect_uri', redirect);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('state', state);
-    // Facebook Login for Business: use config_id (permissions live in Meta dashboard config).
-    // Do NOT send scope when config_id is present — avoids Invalid Scopes errors.
     const metaConfigId = String(process.env.META_LOGIN_CONFIG_ID || '').trim();
-    if (provider === 'meta' && metaConfigId) {
-      url.searchParams.set('config_id', metaConfigId);
-    } else {
-      url.searchParams.set('scope', scopes);
-    }
+    if (provider === 'meta' && metaConfigId) url.searchParams.set('config_id', metaConfigId);
+    else url.searchParams.set('scope', scopes);
     if (provider === 'google_business_profile') {
       url.searchParams.set('access_type', 'offline');
       url.searchParams.set('prompt', 'consent');
       url.searchParams.set('include_granted_scopes', 'true');
     }
-    return res.redirect(url.toString());
+
+    const authorizeUrl = url.toString();
+    const wantJson = String(req.query?.format || '').toLowerCase() === 'json'
+      || String(req.headers?.accept || '').includes('application/json');
+    return wantJson
+      ? send(res, 200, { ok: true, provider, organization_id: organizationId, authorize_url: authorizeUrl })
+      : res.redirect(authorizeUrl);
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
-  const state = verify(req.query.state); if (!state || state.exp < Date.now() || state.provider !== provider) return send(res, 400, { error: 'Invalid or expired OAuth state' });
+  const state = verify(req.query.state);
+  if (!state || state.exp < Date.now() || state.provider !== provider || !state.organization_id || !state.admin_user_id) {
+    return send(res, 400, { error: 'Invalid or expired OAuth state' });
+  }
+  const stateAdminRows = await supa(
+    `profiles?id=eq.${encodeURIComponent(state.admin_user_id)}&select=id,role,is_active&limit=1`
+  );
+  const stateAdmin = Array.isArray(stateAdminRows) ? stateAdminRows[0] : null;
+  if (!stateAdmin || stateAdmin.is_active === false || !['admin', 'super_admin'].includes(String(stateAdmin.role || ''))) {
+    return send(res, 403, { error: 'OAuth initiating admin is no longer authorized' });
+  }
   if (req.query.error) return send(res, 400, { error: String(req.query.error_description || req.query.error) });
   try {
     const { clientId, clientSecret, redirect, missing } = credentials(provider);
@@ -1011,7 +1056,7 @@ export default async function handler(req, res) {
     const encrypted = encrypt(access);
     const refreshToken = token.refresh_token || token.data?.refresh_token || null;
     const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
-    const org = state.organization_id || (await supa('organizations?slug=eq.tiqnora&select=id&limit=1'))?.[0]?.id;
+    const org = state.organization_id;
     if (!org) throw new Error('Organization is missing');
     const grantedScopes = token.scope || token.data?.scope || scopes;
     const tokenRow = {

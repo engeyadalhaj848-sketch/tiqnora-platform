@@ -12,27 +12,33 @@ function json(res, status, payload) {
 }
 
 async function verifyAdmin(authHeader) {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { Authorization: `Bearer ${token}`, apikey: ANON || SERVICE },
-  });
-  if (!r.ok) return null;
-  const user = await r.json();
-  if (!user?.id) return null;
-  if (SERVICE) {
+  if (!SERVICE) return { ok: false, status: 503, error: 'server_not_configured' };
+  const match = String(authHeader || '').match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1] || '';
+  if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
+
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: ANON || SERVICE },
+    });
+    const user = await r.json().catch(() => null);
+    if (!r.ok || !user?.id) return { ok: false, status: 401, error: 'invalid_admin_session' };
+
     const pr = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role`,
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role,is_active&limit=1`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } }
     );
+    if (!pr.ok) return { ok: false, status: 503, error: 'admin_profile_unavailable' };
     const rows = await pr.json().catch(() => []);
-    const row = Array.isArray(rows) ? rows[0] : null;
-    const role = (row && row.role) || '';
-    if (['admin', 'super_admin', 'owner'].includes(role)) return user;
-    // profiles may use different role names — still allow authenticated admin session
-    if (role && /admin/i.test(role)) return user;
+    const profile = Array.isArray(rows) ? rows[0] : null;
+    const role = String(profile?.role || '');
+    if (!profile || profile.is_active === false || !['admin', 'super_admin'].includes(role)) {
+      return { ok: false, status: 403, error: 'admin_permission_required' };
+    }
+    return { ok: true, user, role };
+  } catch {
+    return { ok: false, status: 503, error: 'admin_auth_unavailable' };
   }
-  return user;
 }
 
 async function sbPatch(ids, body) {
@@ -78,7 +84,7 @@ export default async function handler(req, res) {
 
   try {
     const admin = await verifyAdmin(req.headers.authorization || '');
-    if (!admin) return json(res, 401, { error: 'admin auth required' });
+    if (!admin.ok) return json(res, admin.status, { error: admin.error });
 
     let patch = null;
     if (action === 'publish') patch = { is_active: true };
