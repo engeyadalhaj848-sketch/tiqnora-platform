@@ -66,26 +66,62 @@ function isAuthorizedCron(req) {
 }
 
 async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
-  const workforce = await ensureDailyWorkforceTasks();
-  const growth = await runAutonomousGrowth();
+  let workforce = { agents_enabled: [], tasks_created: 0, tasks_existing: 0, error: null };
+  let growth = {
+    degraded: true,
+    prospecting: { candidates: 0, saved: 0, degraded: true },
+    tasks: { completed: 0, failed: 0, due: 0 },
+    error: null
+  };
+
+  try {
+    workforce = await ensureDailyWorkforceTasks();
+  } catch (error) {
+    console.error('ensureDailyWorkforceTasks failed', { message: error.message, stack: error.stack });
+    workforce = {
+      agents_enabled: [],
+      tasks_created: 0,
+      tasks_existing: 0,
+      error: String(error.message || error).slice(0, 500)
+    };
+  }
+
+  try {
+    growth = await runAutonomousGrowth();
+  } catch (error) {
+    console.error('runAutonomousGrowth failed', { message: error.message, stack: error.stack });
+    growth = {
+      degraded: true,
+      prospecting: { candidates: 0, saved: 0, degraded: true, error_code: error.code || 'GROWTH_FAILED', error_message: String(error.message || error).slice(0, 500) },
+      tasks: { completed: 0, failed: 1, due: 0 },
+      error: String(error.message || error).slice(0, 500)
+    };
+  }
+
   const saved = growth?.prospecting?.saved || 0;
   const completed = growth?.tasks?.completed || 0;
   const failed = growth?.tasks?.failed || 0;
+  const provider = growth?.prospecting?.provider || growth?.tasks?.runs?.[0]?.provider || 'unknown';
+  const fallback = Boolean(growth?.degraded || growth?.prospecting?.fallback_used || growth?.prospecting?.degraded);
 
   await telegramIfConfigured([
     '<b>Tiqnora Daily Workforce</b>',
     '',
     `Agents enabled: <b>${workforce?.agents_enabled?.length || 0}</b>`,
     `New daily tasks: <b>${workforce?.tasks_created || 0}</b>`,
+    `Existing daily tasks: <b>${workforce?.tasks_existing || 0}</b>`,
     `AI prospects: <b>${growth?.prospecting?.candidates || 0}</b>`,
     `Saved/updated prospects: <b>${saved}</b>`,
     `AI mode: <b>${growth?.degraded ? 'degraded' : 'normal'}</b>`,
+    `Provider: <b>${provider}</b>${fallback ? ' (fallback)' : ''}`,
     `Completed agent tasks: <b>${completed}</b>`,
     `Failed tasks: <b>${failed}</b>`,
     `Scheduled social jobs processed: <b>${publishing.processed || 0}</b>`,
+    workforce?.error ? `Workforce note: ${String(workforce.error).slice(0, 200)}` : null,
+    growth?.prospecting?.error_message ? `Prospecting note: ${String(growth.prospecting.error_message).slice(0, 200)}` : null,
     '',
     'Drafts stay under review. No automatic publishing or customer outreach before approval.'
-  ].join('\n')).catch(error => console.warn('Growth Telegram notification failed', { message: error.message }));
+  ].filter(Boolean).join('\n')).catch(error => console.warn('Growth Telegram notification failed', { message: error.message }));
 
   return json(res, 200, { ok: true, mode: 'growth', workforce, growth, publishing });
 }
