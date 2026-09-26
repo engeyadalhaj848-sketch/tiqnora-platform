@@ -190,7 +190,7 @@ describe('workforce persistence guards', () => {
 });
 
 
-test('workforce orchestrator exports registry bindings required by the V6 API', async () => {
+it('workforce orchestrator exports registry bindings required by the V6 API', async () => {
   const mod = await import('../lib/v6/workforce/orchestrator.js');
   assert.equal(typeof mod.listWorkflows, 'function');
   assert.equal(typeof mod.getWorkflow, 'function');
