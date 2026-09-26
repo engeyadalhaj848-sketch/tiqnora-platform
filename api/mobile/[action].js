@@ -29,7 +29,6 @@ export default async function handler(req, res) {
   const supabaseUrl = (process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/$/, '');
   const anon = process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
-  // GET health (merged to stay under Hobby 12-function limit)
   if (action === 'health') {
     if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method' });
     const checks = {
@@ -38,11 +37,7 @@ export default async function handler(req, res) {
       gemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
       telegram: false
     };
-    let telegramDetail = {
-      configured: false,
-      paired: false,
-      chat_id_source: null
-    };
+    let telegramDetail = { configured: false, paired: false, chat_id_source: null };
     let latencyMs = null;
     try {
       const t0 = Date.now();
@@ -55,9 +50,8 @@ export default async function handler(req, res) {
     } catch {
       checks.supabase = false;
     }
-    // Align with telegram_health: token + chat from env OR DB pair (not env-only TELEGRAM_CHAT_ID).
     try {
-      const { telegramConfigurationStatus } = await import('../../../lib/telegram-command-center.js');
+      const { telegramConfigurationStatus } = await import('../../../lib/telegram-status.js');
       const status = await telegramConfigurationStatus();
       checks.telegram = Boolean(status.configured);
       telegramDetail = {
@@ -93,7 +87,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // GET app-version
   if (action === 'app-version' || (req.method === 'GET' && !action)) {
     if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
     const platform = String(req.query?.platform || '').toLowerCase();
@@ -114,7 +107,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST register-device
   if (action === 'register-device' || req.method === 'POST') {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const token = bearer(req);
