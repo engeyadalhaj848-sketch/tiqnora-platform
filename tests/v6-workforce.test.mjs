@@ -188,3 +188,11 @@ describe('workforce persistence guards', () => {
     assert.ok(source.includes("['completed', 'waiting_approval'].includes(result.status)"));
   });
 });
+
+
+it('workforce orchestrator exports registry bindings required by the V6 API', async () => {
+  const mod = await import('../lib/v6/workforce/orchestrator.js');
+  assert.equal(typeof mod.listWorkflows, 'function');
+  assert.equal(typeof mod.getWorkflow, 'function');
+  assert.equal(typeof mod.GLOBAL_GUARDS, 'object');
+});

@@ -56,7 +56,7 @@
       const box = document.querySelector('#track-result');
       box.innerHTML = '<p style="color:var(--muted)">جارٍ البحث…</p>';
       const ok = await window.TiqnoraDB.ready();
-      if (!ok) { box.innerHTML = '<p style="color:var(--muted)">التتبع يحتاج ربط قاعدة البيانات — سيُفعّل قريبًا.</p>'; return; }
+      if (!ok) { box.innerHTML = '<p style="color:var(--muted)">خدمة التتبع غير متاحة مؤقتًا. تواصل معنا عبر واتساب وسنساعدك في متابعة طلبك.</p>'; return; }
       const r = await window.TiqnoraDB.trackOrder(num.trim());
       if (!r) { box.innerHTML = '<p style="color:var(--muted)">لم نجد طلبًا بهذا الرقم. تأكد من الرقم أو تواصل معنا.</p>'; return; }
       const idx = FLOW.indexOf(r.status);

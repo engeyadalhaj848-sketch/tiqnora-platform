@@ -1248,7 +1248,7 @@ export default async function handler(req, res) {
     const whop = getWhopConfig();
     const ae = getAeConfig();
     return res.status(200).end(JSON.stringify({
-      livePayments: false,
+      livePayments: !!whop.configured && !whop.sandbox,
       providers: [
         { slug: 'manual', name: 'Manual Admin', enabled: true, envRequired: [] },
         { slug: 'whop', name: 'Whop', enabled: !!whop.configured, mode: whop.sandbox ? 'sandbox' : 'live', configured: whop.configured, has_product_id: !!whop.productId, envRequired: ['WHOP_API_KEY', 'WHOP_ACCOUNT_ID', 'WHOP_WEBHOOK_SECRET'], recommended: ['WHOP_PRODUCT_ID'] },
@@ -1258,7 +1258,7 @@ export default async function handler(req, res) {
         { slug: 'mada', name: 'Mada', enabled: false, envRequired: ['MADA_VIA_PROVIDER'], note: 'Typically via HyperPay or Tap' },
       ],
       aliexpress: { credentials_configured: ae.configured, missing: ae.missing },
-      message: 'Architecture ready — Whop sandbox + AliExpress OAuth via this hub (no extra serverless functions).',
+      message: whop.configured\n        ? `Payments ready — Whop ${whop.sandbox ? 'sandbox' : 'live'} + AliExpress OAuth through the consolidated hub.`\n        : 'Payments require Whop configuration; manual orders remain available.',
     }));
   } catch (e) {
     return json(res, 500, { ok: false, error: 'internal_error', message: e.message || 'error' });
