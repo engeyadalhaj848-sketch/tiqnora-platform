@@ -8,7 +8,7 @@
     "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs",
     "prebuild": "npm run test:v6",
     "test:lead-enrichment": "node --test tests/v6-lead-enrichment.test.mjs",
-    "test:v6": "node --test tests/v6-inbox-crm.test.mjs tests/v6-lead-enrichment.test.mjs tests/v6-social-crm-bridge.test.mjs tests/v6-sales-playbooks.test.mjs tests/v6-proposal-composer.test.mjs tests/v6-proposal-delivery.test.mjs tests/v6-admin-runtime.test.mjs tests/v6-social-delivery-runtime.test.mjs tests/v6-proposal-history-runtime.test.mjs tests/v6-preprod.test.mjs tests/v6-proposal-service.test.mjs tests/v6-sales-engine-e2e.test.mjs tests/v6-lead-research.test.mjs tests/v6-google-places.test.mjs tests/v6-social-studio.test.mjs tests/v6-reputation.test.mjs tests/v6-seo-geo.test.mjs tests/v6-workforce.test.mjs tests/v6-rc-resilience.test.mjs tests/v6-rc-p0-security.test.mjs tests/v6-mcp-social-bridge.test.mjs tests/v6-social-publish-worker.test.mjs tests/telegram-command-center-regression.test.mjs",
+    "test:v6": "node --test tests/v6-inbox-crm.test.mjs tests/v6-lead-enrichment.test.mjs tests/v6-social-crm-bridge.test.mjs tests/v6-sales-playbooks.test.mjs tests/v6-proposal-composer.test.mjs tests/v6-proposal-delivery.test.mjs tests/v6-admin-runtime.test.mjs tests/v6-social-delivery-runtime.test.mjs tests/v6-proposal-history-runtime.test.mjs tests/v6-preprod.test.mjs tests/v6-proposal-service.test.mjs tests/v6-sales-engine-e2e.test.mjs tests/v6-lead-research.test.mjs tests/v6-google-places.test.mjs tests/v6-social-studio.test.mjs tests/v6-reputation.test.mjs tests/v6-seo-geo.test.mjs tests/v6-workforce.test.mjs tests/v6-rc-resilience.test.mjs tests/v6-rc-p0-security.test.mjs tests/v6-mcp-social-bridge.test.mjs tests/v6-social-publish-worker.test.mjs tests/telegram-command-center-regression.test.mjs tests/v6-apify-integration.test.mjs",
     "test:social-crm-bridge": "node --test tests/v6-social-crm-bridge.test.mjs",
     "test:sales-playbooks": "node --test tests/v6-sales-playbooks.test.mjs",
     "test:proposal-composer": "node --test tests/v6-proposal-composer.test.mjs",
@@ -28,6 +28,7 @@
     "test:rc": "node --test tests/v6-rc-resilience.test.mjs",
     "test:rc-security": "node --test tests/v6-rc-p0-security.test.mjs",
     "test:mcp-social": "node --test tests/v6-mcp-social-bridge.test.mjs",
-    "test:telegram-cc": "node --test tests/telegram-command-center-regression.test.mjs"
+    "test:telegram-cc": "node --test tests/telegram-command-center-regression.test.mjs",
+    "test:apify": "node --test tests/v6-apify-integration.test.mjs"
   }
 }
