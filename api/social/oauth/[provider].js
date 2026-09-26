@@ -1,9 +1,15 @@
 import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import {
+  listAccounts as listGbpAccounts,
+  listLocations as listGbpLocations,
+  mapLocationToRecord as mapGbpLocationToRecord
+} from '../../../lib/v6/reputation/providers/google-business-profile.js';
 
 const providers = {
   meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_comments' },
   whatsapp: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,whatsapp_business_management,whatsapp_business_messaging' },
   tiktok: { auth: 'https://www.tiktok.com/v2/auth/authorize/', token: 'https://open.tiktokapis.com/v2/oauth/token/', scopes: 'user.info.basic,video.upload,video.publish' },
+  google_business_profile: { auth: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token', scopes: 'https://www.googleapis.com/auth/business.manage' },
   linkedin: { auth: 'https://www.linkedin.com/oauth/v2/authorization', token: 'https://www.linkedin.com/oauth/v2/accessToken', scopes: 'openid profile w_member_social r_organization_social w_organization_social' }
 };
 const secret = () => process.env.OAUTH_STATE_SECRET || process.env.META_APP_SECRET || process.env.SOCIAL_WEBHOOK_SHARED_SECRET;
@@ -31,6 +37,16 @@ function credentials(provider) {
       !(process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_API_KEY) && 'TIKTOK_CLIENT_KEY',
       !process.env.TIKTOK_CLIENT_SECRET && 'TIKTOK_CLIENT_SECRET',
       !(process.env.TIKTOK_REDIRECT_URI || process.env.TIKTOK_REDIRECT_URL) && 'TIKTOK_REDIRECT_URI'
+    ].filter(Boolean)
+  };
+  if (provider === 'google_business_profile') return {
+    clientId: process.env.GOOGLE_BUSINESS_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_BUSINESS_CLIENT_SECRET,
+    redirect: process.env.GOOGLE_BUSINESS_REDIRECT_URI,
+    missing: [
+      !process.env.GOOGLE_BUSINESS_CLIENT_ID && 'GOOGLE_BUSINESS_CLIENT_ID',
+      !process.env.GOOGLE_BUSINESS_CLIENT_SECRET && 'GOOGLE_BUSINESS_CLIENT_SECRET',
+      !process.env.GOOGLE_BUSINESS_REDIRECT_URI && 'GOOGLE_BUSINESS_REDIRECT_URI'
     ].filter(Boolean)
   };
   return {
@@ -211,25 +227,43 @@ function decrypt(ciphertext, iv, tag) {
   return Buffer.concat([d.update(Buffer.from(ciphertext, 'base64url')), d.final()]).toString();
 }
 
-async function verifyAdmin(authHeader) {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
+async function authenticateAdmin(authHeader) {
+  const match = String(authHeader || '').match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1] || '';
+  if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
+
   const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
   const apikey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  const r = await fetch(`${base}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey } });
-  if (!r.ok) return null;
-  const user = await r.json().catch(() => null);
-  if (!user?.id) return null;
-  const rows = await supa(`profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`);
-  const profile = Array.isArray(rows) ? rows[0] : null;
-  if (!profile || profile.is_active === false || !['super_admin','admin','owner'].includes(String(profile.role || ''))) return null;
-  return { ...user, role: profile.role };
+  if (!apikey) return { ok: false, status: 503, error: 'auth_not_configured' };
+
+  try {
+    const r = await fetch(`${base}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey }
+    });
+    const user = await r.json().catch(() => null);
+    if (!r.ok || !user?.id) return { ok: false, status: 401, error: 'invalid_admin_session' };
+
+    const rows = await supa(`profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`);
+    const profile = Array.isArray(rows) ? rows[0] : null;
+    if (!profile || profile.is_active === false || !['super_admin', 'admin'].includes(String(profile.role || ''))) {
+      return { ok: false, status: 403, error: 'admin_permission_required' };
+    }
+    return { ok: true, admin: { ...user, role: profile.role } };
+  } catch {
+    return { ok: false, status: 503, error: 'admin_auth_unavailable' };
+  }
+}
+
+async function verifyAdmin(authHeader) {
+  const result = await authenticateAdmin(authHeader);
+  return result.ok ? result.admin : null;
 }
 
 async function resolveOrganization(requestedId, admin) {
-  if (requestedId && ['super_admin','owner'].includes(admin.role)) return String(requestedId);
   if (requestedId) {
-    const rows = await supa(`organization_members?organization_id=eq.${encodeURIComponent(requestedId)}&user_id=eq.${encodeURIComponent(admin.id)}&select=organization_id&limit=1`);
+    const rows = await supa(
+      `organization_members?organization_id=eq.${encodeURIComponent(requestedId)}&user_id=eq.${encodeURIComponent(admin.id)}&select=organization_id&limit=1`
+    );
     if (Array.isArray(rows) && rows[0]?.organization_id) return String(rows[0].organization_id);
     throw Object.assign(new Error('Organization access denied'), { status: 403 });
   }
@@ -532,7 +566,69 @@ async function handleTikTokPosting(req, res) {
   }
 }
 
-async function handleYCloudReply(req, res, { admin, body, event, organizationId, message }) {
+async function persistOutboundCrmMessage({
+  organizationId,
+  event,
+  outboundEvent,
+  platform,
+  outboundExternalId,
+  message,
+  provider,
+  status = 'sent',
+  actionId = null
+}) {
+  if (!event?.conversation_id || !outboundExternalId) return null;
+  const outboundRow = Array.isArray(outboundEvent) ? outboundEvent[0] : null;
+  const now = new Date().toISOString();
+  const normalizedStatus = String(status || 'sent').toLowerCase() === 'accepted' ? 'sent' : String(status || 'sent').toLowerCase();
+  const rows = await supa('messages?on_conflict=organization_id,external_message_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({
+      organization_id: organizationId,
+      conversation_id: event.conversation_id,
+      direction: 'outbound',
+      body: message || null,
+      external_message_id: `${platform}:${outboundExternalId}`,
+      sender_name: 'Tiqnora',
+      social_event_id: outboundRow?.id || null,
+      created_at: now,
+      ai_meta: {
+        delivery_status: normalizedStatus,
+        delivery_status_at: now,
+        sent_at: now,
+        provider: provider || null,
+        provider_message_id: outboundExternalId,
+        source: actionId ? 'approved_proposal' : 'manual_social_reply',
+        action_id: actionId || null
+      }
+    })
+  });
+
+  await supa(`conversations?id=eq.${encodeURIComponent(event.conversation_id)}&organization_id=eq.${encodeURIComponent(organizationId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ last_message_at: now, updated_at: now })
+  }).catch(() => null);
+
+  return Array.isArray(rows) ? rows[0] : null;
+}
+
+async function loadApprovedProposalAction(actionId, organizationId, event) {
+  if (!actionId) return null;
+  const rows = await supa(
+    `actions?id=eq.${encodeURIComponent(actionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&action_type=eq.proposal_review&status=eq.approved&select=id,organization_id,lead_id,conversation_id,status,action_type,payload&limit=1`
+  );
+  const action = Array.isArray(rows) ? rows[0] : null;
+  if (!action) return null;
+
+  const leadMatches = !action.lead_id || !event?.lead_id || String(action.lead_id) === String(event.lead_id);
+  const conversationMatches = !action.conversation_id || !event?.conversation_id || String(action.conversation_id) === String(event.conversation_id);
+  if (!leadMatches || !conversationMatches) return null;
+  return action;
+}
+
+async function handleYCloudReply(req, res, { admin, body, event, organizationId, message, deliveryAction = null }) {
   const forbidden = ['platform', 'to', 'recipient_id', 'account_external_id', 'phone_number_id', 'template', 'kind', 'parent_id', 'comment_id'];
   if (forbidden.some(key => body[key] != null)) {
     return send(res, 400, { error: 'Only event_id and message are accepted for a YCloud reply.', code: 'invalid_reply_fields' });
@@ -573,11 +669,19 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   const apiKey = process.env.YCLOUD_API_KEY;
   if (!apiKey) return send(res, 503, { error: 'YCloud sending key is not configured.', code: 'ycloud_key_missing' });
 
-  // The incoming event UUID is a single-use reservation. A retry cannot send a second message.
+  // Manual inbox replies use the inbound event UUID. Approved proposals use
+  // the proposal Action UUID, so each approved proposal can be sent once.
+  const reservationId = deliveryAction?.id || event.id;
   const action = {
-    id: event.id, organization_id: organizationId, event_id: event.id,
-    action_type: 'manual_reply', status: 'pending',
-    result: { provider: 'ycloud', from, to, message_preview: message.slice(0, 120) }
+    id: reservationId, organization_id: organizationId, event_id: event.id,
+    action_type: deliveryAction ? 'proposal_send' : 'manual_reply', status: 'pending',
+    result: {
+      provider: 'ycloud',
+      from,
+      to,
+      message_preview: message.slice(0, 120),
+      action_id: deliveryAction?.id || null
+    }
   };
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
@@ -588,7 +692,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   });
   if (!reserve.ok) {
     if (reserve.status === 409) {
-      const prior = await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&organization_id=eq.${encodeURIComponent(organizationId)}&event_id=eq.${encodeURIComponent(event.id)}&select=status,result&limit=1`);
+      const prior = await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&organization_id=eq.${encodeURIComponent(organizationId)}&event_id=eq.${encodeURIComponent(event.id)}&select=status,result&limit=1`);
       if (prior?.[0]?.status === 'completed') {
         return send(res, 200, { ok: true, already_sent: true, platform: 'whatsapp', kind: 'message', outbound_external_id: prior[0].result?.outbound_external_id || null });
       }
@@ -613,7 +717,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   const apiResult = await response.json().catch(() => ({}));
   if (!response.ok || apiResult?.error) {
     const errorCode = apiResult?.error?.code || apiResult?.code || `HTTP_${response.status}`;
-    await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&status=eq.pending`, {
+    await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&status=eq.pending`, {
       method: 'PATCH', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ status: response.status >= 500 ? 'pending' : 'failed', error_message: String(errorCode).slice(0, 120) })
     });
@@ -626,18 +730,42 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
   if (!outboundExternalId) {
     return send(res, 502, { error: 'YCloud accepted the request without a message ID. Check status before another reply.', code: 'ycloud_id_missing' });
   }
-  await supa('social_events?on_conflict=platform,external_event_id', {
-    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+  const outboundEvent = await supa('social_events?on_conflict=platform,external_event_id', {
+    method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
     body: JSON.stringify({
       organization_id: organizationId, connection_id: connection.id, platform: 'whatsapp',
       event_type: 'message.sent', external_event_id: outboundExternalId,
       external_parent_id: event.external_event_id || null,
       author_external_id: 'tiqnora', author_name: 'Tiqnora', content: message,
       occurred_at: new Date().toISOString(), processing_status: 'processed',
-      raw_payload: { adapter: 'tiqnora_outbound', provider: 'ycloud', status: apiResult.status || 'accepted', in_reply_to: event.id, ycloud_message_id: apiResult.id || null }
+      lead_id: event.lead_id || deliveryAction?.lead_id || null,
+      contact_id: event.contact_id || null,
+      conversation_id: event.conversation_id || deliveryAction?.conversation_id || null,
+      raw_payload: {
+        adapter: 'tiqnora_outbound',
+        provider: 'ycloud',
+        status: apiResult.status || 'accepted',
+        in_reply_to: event.id,
+        action_id: deliveryAction?.id || null,
+        ycloud_message_id: apiResult.id || null
+      }
     })
   });
-  await supa(`social_event_actions?id=eq.${encodeURIComponent(event.id)}&status=eq.pending`, {
+  await persistOutboundCrmMessage({
+    organizationId,
+    event: {
+      ...event,
+      conversation_id: event.conversation_id || deliveryAction?.conversation_id || null
+    },
+    outboundEvent,
+    platform: 'whatsapp',
+    outboundExternalId,
+    message,
+    provider: 'ycloud',
+    status: apiResult.status || 'accepted',
+    actionId: deliveryAction?.id || null
+  });
+  await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&status=eq.pending`, {
     method: 'PATCH', headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ status: 'completed', result: { ...action.result, outbound_external_id: outboundExternalId, accepted_status: apiResult.status || 'accepted' }, completed_at: new Date().toISOString() })
   });
@@ -645,7 +773,7 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
     method: 'PATCH', headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ processing_status: 'processed' })
   });
-  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId });
+  return send(res, 200, { ok: true, platform: 'whatsapp', kind: 'message', status: apiResult.status || 'accepted', outbound_external_id: outboundExternalId, event_id: Array.isArray(outboundEvent) ? outboundEvent[0]?.id : null });
 }
 
 async function handleSocialReply(req, res) {
@@ -677,10 +805,16 @@ async function handleSocialReply(req, res) {
       if (!event) return send(res, 404, { error: 'Event not found', code: 'event_not_found' });
     }
 
+    const actionId = body.action_id ? String(body.action_id) : null;
+    const deliveryAction = actionId ? await loadApprovedProposalAction(actionId, organizationId, event) : null;
+    if (actionId && !deliveryAction) {
+      return send(res, 409, { error: 'Proposal must be approved and linked to this CRM conversation before sending.', code: 'proposal_not_approved' });
+    }
+
     const effectivePlatform = platform || event?.platform;
     if (!effectivePlatform) return send(res, 400, { error: 'platform is required', code: 'platform_required' });
     if (event?.platform === 'whatsapp' && event?.raw_payload?.adapter === 'ycloud') {
-      return handleYCloudReply(req, res, { admin, body, event, organizationId, message });
+      return handleYCloudReply(req, res, { admin, body, event, organizationId, message, deliveryAction });
     }
     const eventType = String(event?.event_type || '');
     const kind = body.kind || (eventType.startsWith('comment.') ? 'comment' : (body.comment_id ? 'comment' : 'message'));
@@ -792,8 +926,26 @@ async function handleSocialReply(req, res) {
         content: message || (template ? `[template:${template.name}]` : null),
         occurred_at: new Date().toISOString(),
         processing_status: 'processed',
-        raw_payload: { adapter: 'tiqnora_outbound', in_reply_to: eventId }
+        lead_id: event?.lead_id || deliveryAction?.lead_id || null,
+        contact_id: event?.contact_id || null,
+        conversation_id: event?.conversation_id || deliveryAction?.conversation_id || null,
+        raw_payload: { adapter: 'tiqnora_outbound', in_reply_to: eventId, action_id: deliveryAction?.id || null }
       })
+    });
+
+    await persistOutboundCrmMessage({
+      organizationId,
+      event: {
+        ...(event || {}),
+        conversation_id: event?.conversation_id || deliveryAction?.conversation_id || null
+      },
+      outboundEvent,
+      platform: effectivePlatform,
+      outboundExternalId,
+      message: message || (template ? `[template:${template.name}]` : ''),
+      provider: usedConnection?.settings?.provider || 'meta',
+      status: 'sent',
+      actionId: deliveryAction?.id || null
     });
 
     if (eventId) {
@@ -810,7 +962,7 @@ async function handleSocialReply(req, res) {
           event_id: eventId,
           action_type: 'manual_reply',
           status: 'completed',
-          result: { outbound_external_id: outboundExternalId, platform: effectivePlatform, kind, message_preview: String(message || '').slice(0, 120) },
+          result: { outbound_external_id: outboundExternalId, platform: effectivePlatform, kind, message_preview: String(message || '').slice(0, 120), action_id: deliveryAction?.id || null },
           completed_at: new Date().toISOString()
         })
       });
@@ -840,28 +992,60 @@ export default async function handler(req, res) {
   if (provider === 'tiktok' && req.method === 'POST') return handleTikTokPosting(req, res);
   if (req.method === 'GET' && !req.query.code) {
     if (!secret()) return send(res, 503, { error: 'OAuth state secret is not configured' });
-    const state = sign(JSON.stringify({ provider, organization_id: String(req.query.organization_id || ''), nonce: randomBytes(12).toString('hex'), exp: Date.now() + 600000 }));
+
+    const authn = await authenticateAdmin(req.headers.authorization || '');
+    if (!authn.ok) return send(res, authn.status, { error: authn.error });
+
+    let organizationId;
+    try {
+      organizationId = await resolveOrganization(req.query.organization_id, authn.admin);
+    } catch (e) {
+      return send(res, e.status || 403, { error: e.message || 'Organization access denied' });
+    }
+
+    const state = sign(JSON.stringify({
+      provider,
+      organization_id: organizationId,
+      admin_user_id: authn.admin.id,
+      nonce: randomBytes(12).toString('hex'),
+      exp: Date.now() + 600000
+    }));
     const { clientId, redirect, missing } = credentials(provider);
     const initialMissing = missing.filter(name => !name.endsWith('_SECRET') && name !== 'META_APP_SECRET' && name !== 'LINKEDIN_CLIENT_SECRET');
     if (initialMissing.length) return send(res, 503, { error: 'OAuth credentials are not configured for this provider', provider, missing: initialMissing });
     const url = new URL(cfg.auth);
-    // TikTok's OAuth authorize endpoint requires client_key; other providers use client_id.
     url.searchParams.set(provider === 'tiktok' ? 'client_key' : 'client_id', clientId);
     url.searchParams.set('redirect_uri', redirect);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('state', state);
-    // Facebook Login for Business: use config_id (permissions live in Meta dashboard config).
-    // Do NOT send scope when config_id is present — avoids Invalid Scopes errors.
     const metaConfigId = String(process.env.META_LOGIN_CONFIG_ID || '').trim();
-    if (provider === 'meta' && metaConfigId) {
-      url.searchParams.set('config_id', metaConfigId);
-    } else {
-      url.searchParams.set('scope', scopes);
+    if (provider === 'meta' && metaConfigId) url.searchParams.set('config_id', metaConfigId);
+    else url.searchParams.set('scope', scopes);
+    if (provider === 'google_business_profile') {
+      url.searchParams.set('access_type', 'offline');
+      url.searchParams.set('prompt', 'consent');
+      url.searchParams.set('include_granted_scopes', 'true');
     }
-    return res.redirect(url.toString());
+
+    const authorizeUrl = url.toString();
+    const wantJson = String(req.query?.format || '').toLowerCase() === 'json'
+      || String(req.headers?.accept || '').includes('application/json');
+    return wantJson
+      ? send(res, 200, { ok: true, provider, organization_id: organizationId, authorize_url: authorizeUrl })
+      : res.redirect(authorizeUrl);
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
-  const state = verify(req.query.state); if (!state || state.exp < Date.now() || state.provider !== provider) return send(res, 400, { error: 'Invalid or expired OAuth state' });
+  const state = verify(req.query.state);
+  if (!state || state.exp < Date.now() || state.provider !== provider || !state.organization_id || !state.admin_user_id) {
+    return send(res, 400, { error: 'Invalid or expired OAuth state' });
+  }
+  const stateAdminRows = await supa(
+    `profiles?id=eq.${encodeURIComponent(state.admin_user_id)}&select=id,role,is_active&limit=1`
+  );
+  const stateAdmin = Array.isArray(stateAdminRows) ? stateAdminRows[0] : null;
+  if (!stateAdmin || stateAdmin.is_active === false || !['admin', 'super_admin'].includes(String(stateAdmin.role || ''))) {
+    return send(res, 403, { error: 'OAuth initiating admin is no longer authorized' });
+  }
   if (req.query.error) return send(res, 400, { error: String(req.query.error_description || req.query.error) });
   try {
     const { clientId, clientSecret, redirect, missing } = credentials(provider);
@@ -872,7 +1056,7 @@ export default async function handler(req, res) {
     const encrypted = encrypt(access);
     const refreshToken = token.refresh_token || token.data?.refresh_token || null;
     const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
-    const org = state.organization_id || (await supa('organizations?slug=eq.tiqnora&select=id&limit=1'))?.[0]?.id;
+    const org = state.organization_id;
     if (!org) throw new Error('Organization is missing');
     const grantedScopes = token.scope || token.data?.scope || scopes;
     const tokenRow = {
@@ -992,9 +1176,39 @@ export default async function handler(req, res) {
         waba_ids: [...new Set(accounts.map(x => x.waba_id))],
         webhook_subscribed: accounts.some(x => x.webhook_subscribed)
       };
+    } else if (provider === 'google_business_profile') {
+      let accounts = [];
+      let locationsFound = 0;
+      try {
+        accounts = await listGbpAccounts(access);
+        for (const account of accounts.slice(0, 20)) {
+          const accountName = String(account?.name || '');
+          if (!accountName) continue;
+          const locations = await listGbpLocations(access, accountName);
+          for (const location of locations.slice(0, 200)) {
+            const mapped = mapGbpLocationToRecord(location, accountName);
+            if (!mapped.external_location_id) continue;
+            await supa('reputation_locations?on_conflict=organization_id,provider,external_location_id', {
+              method: 'POST',
+              headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+              body: JSON.stringify({
+                organization_id: org,
+                ...mapped,
+                last_synced_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+            });
+            locationsFound += 1;
+          }
+        }
+        accountMetadata = { accounts_found: accounts.length, locations_found: locationsFound };
+      } catch (e) {
+        console.warn('Google Business Profile discovery failed after OAuth', { message: e.message });
+        accountMetadata = { accounts_found: accounts.length, locations_found: locationsFound, discovery_error: String(e.message || 'discovery_failed').slice(0, 160) };
+      }
     }
 
-    const displayNames = { meta: 'Meta / Facebook / Instagram', whatsapp: 'WhatsApp Cloud', tiktok: 'TikTok', linkedin: 'LinkedIn' };
+    const displayNames = { meta: 'Meta / Facebook / Instagram', whatsapp: 'WhatsApp Cloud', tiktok: 'TikTok', linkedin: 'LinkedIn', google_business_profile: 'Google Business Profile' };
     await supa('integration_connections?on_conflict=provider', {
       method: 'POST',
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -1009,7 +1223,8 @@ export default async function handler(req, res) {
         metadata: { scopes: grantedScopes, ...(accountMetadata || {}) }
       })
     });
-    return res.redirect(`/admin.html#social-inbox&oauth=${encodeURIComponent(provider)}&status=connected`);
+    const targetHash = provider === 'google_business_profile' ? 'reputation' : 'social-inbox';
+    return res.redirect(`/admin.html#${targetHash}&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
 

@@ -66,6 +66,19 @@ function setupAdminNotifications() {
 async function log(action, entity, entity_id, details = {}) {
   try { await db.from('activity_logs').insert({ user_id: me?.id, action, entity, entity_id: entity_id ? String(entity_id) : null, details }); } catch {}
 }
+async function commerceAi(url = '/api/commerce/ai', init = {}) {
+  if (!db) throw new Error('جلسة الإدارة غير جاهزة');
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+  return fetch(url, {
+    ...init,
+    headers: {
+      ...(init.headers || {}),
+      Authorization: `Bearer ${session.access_token}`
+    }
+  });
+}
+
 const openModal = html => { $('#modal').innerHTML = html; $('#modal-back').classList.add('show'); };
 const closeModal = () => $('#modal-back').classList.remove('show');
 $('#modal-back')?.addEventListener('click', e => { if (e.target.id === 'modal-back') closeModal(); });
@@ -168,6 +181,7 @@ const NAV = [
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
   { id: 'analytics', ic: '▦', label: 'التحليلات' },
   { id: 'growth', ic: '↗', label: 'النمو والسوق' },
+  { id: 'sales-v6', ic: '⌁', label: 'مركز المبيعات V6' },
   { id: 'blog', ic: '✎', label: 'المدونة SEO' },
   { id: 'notifications', ic: '◉', label: 'الإشعارات' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
@@ -291,6 +305,1416 @@ function dbBanner() {
    VIEWS
    ============================================================ */
 const VIEWS = {};
+
+async function v6Api(route, { method = 'GET', body = null, query = {} } = {}) {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+  const qs = new URLSearchParams({ route, ...query });
+  const res = await fetch('/api/v6?' + qs.toString(), {
+    method,
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: 'Bearer ' + session.access_token
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(payload.error || ('V6 API ' + res.status));
+    err.code = payload.code || '';
+    err.status = res.status;
+    throw err;
+  }
+  return payload;
+}
+
+const v6ActionStatusLabel = {
+  draft: 'مسودة',
+  pending_approval: 'بانتظار الموافقة',
+  approved: 'معتمد',
+  executing: 'قيد التنفيذ',
+  completed: 'مكتمل',
+  failed: 'فشل',
+  cancelled: 'ملغي'
+};
+
+const v6DeliveryStatusLabel = {
+  accepted: 'مقبول من المزود',
+  sent: 'تم الإرسال',
+  delivered: 'تم التسليم',
+  read: 'تمت القراءة',
+  failed: 'فشل التسليم'
+};
+
+function v6DeliveryPill(status) {
+  if (status === 'read' || status === 'delivered') return 'ok';
+  if (status === 'sent' || status === 'accepted') return 'warn';
+  if (status === 'failed') return 'danger';
+  return 'muted';
+}
+
+function v6ActionPill(status) {
+  if (status === 'completed' || status === 'approved') return 'ok';
+  if (status === 'pending_approval' || status === 'draft' || status === 'executing') return 'warn';
+  if (status === 'failed' || status === 'cancelled') return 'danger';
+  return 'muted';
+}
+
+VIEWS['sales-v6'] = async v => {
+  v.innerHTML = `
+    <div class="v6-hero card">
+      <div>
+        <div class="v6-eyebrow">TIQNORA V6 · SALES CONTROL CENTER</div>
+        <h2>مركز المبيعات الذكي</h2>
+        <p class="card-desc">Lead → AI Qualification → Draft → Approval → CRM. لا إرسال تلقائي بدون موافقتك.</p>
+      </div>
+      <div class="v6-hero-actions">
+        <button class="btn-primary" id="v6-new-draft">تجربة رد AI</button>
+        <button class="btn-ghost" id="v6-refresh">تحديث</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="v6-kpis">
+      <div class="kpi"><div class="k">إجمالي العملاء المحتملين</div><div class="v">—</div></div>
+      <div class="kpi"><div class="k">فرص قوية 70+</div><div class="v">—</div></div>
+      <div class="kpi"><div class="k">فرص CRM مفتوحة</div><div class="v">—</div></div>
+      <div class="kpi"><div class="k">بانتظار الموافقة</div><div class="v">—</div></div>
+    </div>
+
+    <div class="v6-grid">
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>الموافقات المعلقة</h2>
+            <p class="card-desc">أي رد أو إجراء خارجي يبدأ هنا كمسودة.</p>
+          </div>
+          <span class="pill warn" id="v6-pending-count">0</span>
+        </div>
+        <div id="v6-actions"><div class="loading-hint">جارٍ التحميل…</div></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>Pipeline المبيعات</h2>
+            <p class="card-desc">أحدث فرص CRM المفتوحة وقيمتها الحالية.</p>
+          </div>
+          <a class="btn-sm btn-ghost" href="#leads">العملاء المحتملون</a>
+        </div>
+        <div id="v6-pipeline"><div class="loading-hint">جارٍ التحميل…</div></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>AI Sales Draft</h2>
+          <p class="card-desc">اكتب رسالة عميل تجريبية. سيقوم Gemini بفهم النية والتأهيل وإنشاء Action بحالة pending_approval.</p>
+        </div>
+      </div>
+      <div class="v6-draft-grid">
+        <div>
+          <label>رسالة العميل</label>
+          <textarea id="v6-message" rows="5" placeholder="مثال: أبي موقع لعيادة أسنان في المدينة وأحتاج حجز ومتابعة واتساب"></textarea>
+        </div>
+        <div>
+          <label>القناة</label>
+          <select id="v6-platform">
+            <option value="whatsapp">WhatsApp</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+          </select>
+          <button class="btn-primary" id="v6-generate" style="width:100%;margin-top:12px">تحليل وتجهيز المسودة</button>
+          <p class="card-desc" style="margin-top:10px">لن يتم إرسال الرسالة للعميل. سيتم حفظها للموافقة فقط.</p>
+        </div>
+      </div>
+      <div id="v6-draft-result"></div>
+    </section>
+
+    <section class="card v6-proposal-card">
+      <div class="card-head">
+        <div>
+          <h2>Proposal Composer</h2>
+          <p class="card-desc">اختر Lead، عاين العرض، أدخل الأسعار المؤكدة يدويًا، ثم أنشئ مسودة للمراجعة. لا يتم الإرسال تلقائيًا.</p>
+        </div>
+        <span class="pill warn">Human Review Required</span>
+      </div>
+
+      <div class="v6-proposal-controls">
+        <label>العميل المحتمل
+          <select id="v6-proposal-lead">
+            <option value="">جارٍ تحميل العملاء…</option>
+          </select>
+        </label>
+        <label>لغة العرض
+          <select id="v6-proposal-language">
+            <option value="ar">العربية</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <button class="btn-primary" id="v6-proposal-preview">معاينة العرض</button>
+      </div>
+
+      <div id="v6-proposal-result">
+        <div class="empty">اختر Lead ثم اضغط «معاينة العرض».</div>
+      </div>
+    </section>
+
+    <section class="card v6-proposal-history-card">
+      <div class="card-head">
+        <div>
+          <h2>سجل العروض</h2>
+          <p class="card-desc">تتبّع Proposal من الإنشاء والموافقة حتى الإرسال والتسليم والقراءة.</p>
+        </div>
+        <div class="v6-history-tools">
+          <select id="v6-history-status" aria-label="تصفية حالة العرض">
+            <option value="all">كل الحالات</option>
+            <option value="pending_approval">بانتظار الموافقة</option>
+            <option value="approved">معتمد ولم يُرسل</option>
+            <option value="completed">تم الإرسال</option>
+            <option value="cancelled">مرفوض / ملغي</option>
+          </select>
+          <button class="btn-ghost btn-sm" id="v6-history-refresh">تحديث السجل</button>
+          <button class="btn-ghost btn-sm" id="v6-share-link" title="ينسخ رابط أول عرض في القائمة أو المحدد">نسخ رابط العرض</button>
+        </div>
+      </div>
+
+      <div class="v6-history-kpis" id="v6-history-kpis">
+        <div class="v6-history-kpi"><span>الإجمالي</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>بانتظار الموافقة</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>بانتظار الإرسال</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>تم التسليم</span><b>—</b></div>
+        <div class="v6-history-kpi"><span>تمت القراءة</span><b>—</b></div>
+      </div>
+
+      <div id="v6-proposal-history">
+        <div class="loading-hint">جارٍ تحميل سجل العروض…</div>
+      </div>
+    </section>
+
+
+    <section class="card v6-studio-card">
+      <div class="card-head">
+        <div>
+          <h2>استوديو المحتوى والتسويق</h2>
+          <p class="card-desc">Brand Brain → حملة → أفكار → مسودة → قنوات → موافقة. لا نشر تلقائي.</p>
+        </div>
+      </div>
+      <div class="v6-studio-controls">
+        <input id="v6-studio-campaign-name" placeholder="اسم الحملة" value="حملة أتمتة واتساب للعيادات" />
+        <input id="v6-studio-industry" placeholder="القطاع" value="dental_clinic" />
+        <input id="v6-studio-location" placeholder="المدينة" value="المدينة المنورة" />
+        <select id="v6-studio-objective">
+          <option value="lead_generation">lead_generation</option>
+          <option value="awareness">awareness</option>
+          <option value="engagement">engagement</option>
+          <option value="education">education</option>
+        </select>
+        <button class="btn-primary" id="v6-studio-run">توليد حملة + أفكار</button>
+        <button class="btn-ghost" id="v6-studio-brand">Brand Brain</button>
+      </div>
+      <div id="v6-studio-results"><div class="muted">ابدأ بتوليد حملة تجريبية (offline-safe).</div></div>
+    </section>
+
+    <section class="card v6-reputation-card">
+      <div class="card-head">
+        <div>
+          <h2>إدارة السمعة</h2>
+          <p class="card-desc">Google Business Profile · مراجعات · ردود بمسودة AI · موافقة بشرية. auto_reply=false</p>
+        </div>
+        <div class="v6-history-tools">
+          <button class="btn-ghost btn-sm" id="v6-rep-status">حالة الاتصال</button>
+          <button class="btn-primary btn-sm" id="v6-rep-demo">مزامنة تجريبية</button>
+        </div>
+      </div>
+      <div id="v6-rep-dashboard" class="v6-history-kpis"></div>
+      <div class="v6-research-filters">
+        <select id="v6-rep-filter">
+          <option value="all">كل المراجعات</option>
+          <option value="unanswered">بدون رد</option>
+          <option value="high">أولوية عالية</option>
+          <option value="pending_approval">بانتظار الموافقة</option>
+        </select>
+      </div>
+      <div id="v6-rep-results"><div class="muted">شغّل مزامنة تجريبية لمعاينة التدفق بدون Google Live.</div></div>
+    </section>
+
+    <section class="card v6-seo-card">
+      <div class="card-head">
+        <div>
+          <h2>SEO + AI Visibility</h2>
+          <p class="card-desc">تدقيق تقني · كيان Tiqnora AI · كلمات · فرص محتوى · جاهزية AI. بدون نشر تلقائي.</p>
+        </div>
+        <div class="v6-history-tools">
+          <button class="btn-ghost btn-sm" id="v6-seo-entity">الكيان</button>
+          <button class="btn-primary btn-sm" id="v6-seo-audit">تشغيل تدقيق</button>
+        </div>
+      </div>
+      <div id="v6-seo-overview" class="v6-history-kpis"></div>
+      <div id="v6-seo-results"><div class="muted">شغّل تدقيقًا لمعاينة المشاكل والفرص (offline fixtures).</div></div>
+    </section>
+
+    <section class="card v6-workforce-card">
+      <div class="card-head">
+        <div>
+          <h2>غرفة عمليات الذكاء الاصطناعي</h2>
+          <p class="card-desc">Workflows · Agents · موافقات · بدون إرسال خارجي تلقائي</p>
+        </div>
+        <div class="v6-history-tools">
+          <button class="btn-ghost btn-sm" id="v6-wf-status">الحالة</button>
+          <button class="btn-primary btn-sm" id="v6-wf-run">تشغيل Lead→Proposal</button>
+        </div>
+      </div>
+      <div class="v6-research-filters">
+        <select id="v6-wf-type">
+          <option value="lead_to_proposal">lead_to_proposal</option>
+          <option value="daily_marketing">daily_marketing</option>
+          <option value="reputation_response">reputation_response</option>
+          <option value="seo_opportunity">seo_opportunity</option>
+          <option value="morning_operations">morning_operations</option>
+        </select>
+      </div>
+      <div id="v6-wf-overview" class="v6-history-kpis"></div>
+      <div id="v6-wf-results"><div class="muted">شغّل workflow لمعاينة الخطوات (offline-safe).</div></div>
+    </section>
+
+
+
+
+    <section class="card v6-research-card">
+      <div class="card-head">
+        <div>
+          <h2>اكتشاف العملاء</h2>
+          <p class="card-desc">Research → Enrichment → Score → CRM. بدون إرسال تلقائي.</p>
+        </div>
+      </div>
+      <div class="v6-research-controls">
+        <input id="v6-research-query" placeholder="مثال: عيادة أسنان في المدينة المنورة" />
+        <input id="v6-research-city" placeholder="المدينة" />
+        <input id="v6-research-industry" placeholder="القطاع (dental_clinic)" />
+        <select id="v6-research-source" title="المصدر">
+          <option value="fixture">تجريبي (fixture)</option>
+          <option value="google_places">Google Places</option>
+          <option value="manual">يدوي</option>
+        </select>
+        <input id="v6-research-limit" type="number" min="1" max="40" value="10" title="العدد" />
+        <input id="v6-research-min-rating" type="number" min="0" max="5" step="0.1" placeholder="أدنى تقييم" title="أدنى تقييم" />
+        <input id="v6-research-min-reviews" type="number" min="0" placeholder="أدنى مراجعات" title="أدنى مراجعات" />
+        <button class="btn-primary" id="v6-research-run">بدء البحث</button>
+      </div>
+      <div id="v6-research-status" class="muted" style="margin:6px 0">الحالة: Idle</div>
+      <div class="v6-research-filters">
+        <select id="v6-research-filter-status">
+          <option value="all">كل الحالات</option>
+          <option value="qualified">مؤهل</option>
+          <option value="enriched">محلل</option>
+          <option value="duplicate">مكرر</option>
+          <option value="imported">مستورد</option>
+        </select>
+      </div>
+      <div id="v6-research-results"><div class="muted">ابدأ ببحث تجريبي (fixture آمن بدون scraping حي).</div></div>
+    </section>
+`;
+
+  let currentProposal = null;
+  let proposalHistoryRows = [];
+
+  const proposalPricingFromUi = () => {
+    const rows = $$('[data-proposal-price]');
+    const line_items = rows.map(el => ({
+      service: el.dataset.proposalPrice,
+      price: el.value === '' ? null : Number(el.value)
+    }));
+    const priced = line_items.filter(x => Number.isFinite(x.price));
+    const subtotal = priced.length ? priced.reduce((sum, x) => sum + x.price, 0) : null;
+    const vatEl = $('#v6-proposal-vat');
+    const vat = vatEl && vatEl.value !== '' ? Number(vatEl.value) : null;
+    const total = subtotal === null ? null : subtotal + (Number.isFinite(vat) ? vat : 0);
+    return {
+      currency: 'SAR',
+      subtotal,
+      vat: Number.isFinite(vat) ? vat : null,
+      total,
+      line_items
+    };
+  };
+
+  const renderProposal = proposal => {
+    currentProposal = proposal;
+    const host = $('#v6-proposal-result');
+    if (!proposal) {
+      host.innerHTML = '<div class="empty">لا توجد معاينة.</div>';
+      return;
+    }
+
+    const statusMap = {
+      not_ready: ['danger', 'غير جاهز'],
+      draft_incomplete: ['warn', 'مسودة ناقصة'],
+      draft_ready: ['ok', 'مسودة جاهزة'],
+      ready_for_human_review: ['ok', 'جاهز للمراجعة']
+    };
+    const [cls, label] = statusMap[proposal.status] || ['muted', proposal.status || '—'];
+    const questions = proposal.open_questions || [];
+    const solution = proposal.recommended_solution || [];
+    const pricingRows = proposal.pricing?.line_items || [];
+
+    host.innerHTML = `
+      <div class="v6-proposal-preview">
+        <div class="v6-result-head">
+          <div>
+            <span class="pill ${cls}">${esc(label)}</span>
+            <span class="pill">${esc(proposal.client?.vertical || 'general')}</span>
+          </div>
+          <div class="v6-proposal-score">جاهزية العرض <b>${esc(proposal.readiness?.score ?? 0)}%</b></div>
+        </div>
+
+        <h3>${esc(proposal.title || 'مسودة عرض')}</h3>
+        <p class="v6-proposal-summary">${esc(proposal.executive_summary || '')}</p>
+
+        <div class="v6-proposal-columns">
+          <div>
+            <h4>الحل المقترح</h4>
+            <div class="v6-chip-wrap">
+              ${solution.length ? solution.map(x => `<span class="v6-service-chip"><b>${esc(x.label || x.service)}</b><small>${esc(x.source || '')}</small></span>`).join('') : '<span class="muted">لا يوجد نطاق مؤكد بعد</span>'}
+            </div>
+          </div>
+          <div>
+            <h4>الأسئلة الناقصة</h4>
+            ${questions.length ? `<ol class="v6-question-list">${questions.map(q => `<li>${esc(q.question)}</li>`).join('')}</ol>` : '<div class="pill ok">لا توجد أسئلة أساسية ناقصة</div>'}
+          </div>
+        </div>
+
+        <div class="v6-proposal-columns">
+          <div>
+            <h4>المدة</h4>
+            <div class="v6-safe-box">
+              ${proposal.timeline?.requested_timeline
+                ? `طلب العميل: <b>${esc(proposal.timeline.requested_timeline)}</b>`
+                : 'تحتاج تأكيد — لم يتم افتراض مدة تنفيذ.'}
+            </div>
+          </div>
+          <div>
+            <h4>التسعير</h4>
+            <div class="v6-safe-box">${proposal.pricing?.status === 'confirmed_input' ? 'تم إدخال تسعير مؤكد.' : 'يتطلب تسعيرًا بشريًا — لا يتم توليد أي سعر تلقائيًا.'}</div>
+          </div>
+        </div>
+
+        <div class="v6-pricing-editor">
+          <h4>إدخال الأسعار المؤكدة يدويًا</h4>
+          <p class="card-desc">ضع سعر كل خدمة فقط إذا قررته أنت. ضريبة القيمة المضافة هنا «مبلغ» يدوي، ولا يتم افتراض أي نسبة.</p>
+          <div class="v6-price-grid">
+            ${pricingRows.length ? pricingRows.map(item => `
+              <label>
+                ${esc(item.service)}
+                <input type="number" min="0" step="0.01" data-proposal-price="${esc(item.service)}" value="${item.price ?? ''}" placeholder="السعر">
+              </label>`).join('') : `
+              <label>السعر المؤكد
+                <input type="number" min="0" step="0.01" data-proposal-price="proposal" placeholder="السعر">
+              </label>`}
+            <label>VAT — مبلغ يدوي
+              <input type="number" min="0" step="0.01" id="v6-proposal-vat" value="${proposal.pricing?.vat ?? ''}" placeholder="اختياري">
+            </label>
+          </div>
+          <div class="v6-proposal-actions">
+            <button class="btn-ghost" id="v6-proposal-repreview">تحديث المعاينة بالسعر</button>
+            <button class="btn-primary" id="v6-proposal-create-action" ${proposal.status === 'not_ready' ? 'disabled' : ''}>إنشاء مسودة للمراجعة</button>
+          </div>
+          <p class="card-desc">إنشاء المسودة يضيفها إلى Pending Approvals فقط. لا يرسل العرض للعميل.</p>
+        </div>
+      </div>`;
+
+    $('#v6-proposal-repreview').onclick = async () => {
+      const leadId = $('#v6-proposal-lead').value;
+      if (!leadId) return toast('اختر العميل أولًا', false);
+      const btn = $('#v6-proposal-repreview');
+      btn.disabled = true;
+      try {
+        const out = await v6Api('proposal', {
+          method: 'POST',
+          body: {
+            op: 'preview',
+            lead_id: leadId,
+            language: $('#v6-proposal-language').value,
+            confirmed_pricing: proposalPricingFromUi()
+          }
+        });
+        renderProposal(out.proposal);
+      } catch (e) {
+        toast('تعذر تحديث العرض: ' + e.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    const createBtn = $('#v6-proposal-create-action');
+    if (createBtn) createBtn.onclick = async () => {
+      const leadId = $('#v6-proposal-lead').value;
+      if (!leadId) return toast('اختر العميل أولًا', false);
+      createBtn.disabled = true;
+      try {
+        const out = await v6Api('proposal', {
+          method: 'POST',
+          body: {
+            op: 'create_action',
+            lead_id: leadId,
+            language: $('#v6-proposal-language').value,
+            confirmed_pricing: proposalPricingFromUi()
+          }
+        });
+        renderProposal(out.proposal);
+        toast('تم إنشاء Proposal كمهمة بانتظار الموافقة — لم يتم الإرسال');
+        await load();
+      } catch (e) {
+        toast('تعذر إنشاء مسودة العرض: ' + e.message, false);
+        createBtn.disabled = false;
+      }
+    };
+  };
+
+  const proposalAmount = row => {
+    const value = row?.total ?? row?.subtotal;
+    if (value === null || value === undefined || value === '') return '—';
+    try {
+      return new Intl.NumberFormat('ar-SA', {
+        style: 'currency',
+        currency: row.currency || 'SAR',
+        maximumFractionDigits: 2
+      }).format(Number(value));
+    } catch {
+      return `${Number(value).toLocaleString('ar-SA')} ${row.currency || 'SAR'}`;
+    }
+  };
+
+
+  const copyProposalShareLink = async (actionId) => {
+    if (!actionId) {
+      toast('اختر عرضًا أولًا', false);
+      return;
+    }
+    try {
+      const out = await v6Api('proposal_manage', {
+        method: 'POST',
+        body: { op: 'share_link', id: actionId }
+      });
+      const path = out.path || (out.share_token ? `/proposal/${out.share_token}` : null);
+      if (!path) throw new Error('لم يُرجع الخادم رابطًا');
+      const url = `${location.origin}${path}`;
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
+      toast('تم نسخ رابط العرض');
+      return url;
+    } catch (e) {
+      toast('تعذر إنشاء رابط العرض: ' + (e.message || e), false);
+    }
+  };
+
+  const renderProposalHistory = payload => {
+    const host = $('#v6-proposal-history');
+    const kpis = $('#v6-history-kpis');
+    if (!host || !kpis) return;
+
+    proposalHistoryRows = payload?.proposals || [];
+    const summary = payload?.summary || {};
+
+    kpis.innerHTML = `
+      <div class="v6-history-kpi"><span>الإجمالي</span><b>${summary.total ?? proposalHistoryRows.length}</b></div>
+      <div class="v6-history-kpi"><span>بانتظار الموافقة</span><b>${summary.pending_approval ?? 0}</b></div>
+      <div class="v6-history-kpi"><span>بانتظار الإرسال</span><b>${summary.approved ?? 0}</b></div>
+      <div class="v6-history-kpi"><span>تم التسليم</span><b>${summary.delivered ?? 0}</b></div>
+      <div class="v6-history-kpi"><span>تمت القراءة</span><b>${summary.read ?? 0}</b></div>
+    `;
+
+    if (!proposalHistoryRows.length) {
+      host.innerHTML = '<div class="empty">لا توجد عروض في هذا الفلتر.</div>';
+      return;
+    }
+
+    host.innerHTML = `
+      <div class="table-wrap v6-history-table-wrap">
+        <table class="v6-history-table">
+          <thead>
+            <tr>
+              <th>العميل</th>
+              <th>العرض</th>
+              <th>المبلغ</th>
+              <th>المراجعة</th>
+              <th>التسليم</th>
+              <th>القناة</th>
+              <th>آخر تحديث</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${proposalHistoryRows.map(row => {
+              const delivery = String(row.delivery_status || '').toLowerCase();
+              const statusLabel = v6ActionStatusLabel[row.status] || row.status || '—';
+              const deliveryLabel = delivery ? (v6DeliveryStatusLabel[delivery] || delivery) : (row.status === 'approved' ? 'لم يُرسل بعد' : '—');
+              return `
+                <tr>
+                  <td><b>${esc(row.client_name || 'عميل CRM')}</b><div class="muted">${esc(row.vertical || 'general')}</div></td>
+                  <td>${esc(row.title || 'Proposal')}<div class="muted">${esc(row.proposal_status || '—')}</div></td>
+                  <td><b>${esc(proposalAmount(row))}</b></td>
+                  <td><span class="pill ${v6ActionPill(row.status)}">${esc(statusLabel)}</span></td>
+                  <td><span class="pill ${v6DeliveryPill(delivery)}">${esc(deliveryLabel)}</span></td>
+                  <td>${esc(row.platform || '—')}</td>
+                  <td>${row.updated_at ? new Date(row.updated_at).toLocaleString('ar-SA') : '—'}</td>
+                  <td class="v6-history-row-actions">
+                    <button class="btn-sm btn-ghost" data-v6-history-view="${esc(row.id)}">تفاصيل</button>
+                    <button class="btn-sm btn-ghost" data-v6-history-share="${esc(row.id)}">رابط</button>
+                  </td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    $('[data-v6-history-view]').forEach(btn => {
+      btn.onclick = () => {
+        const row = proposalHistoryRows.find(x => x.id === btn.dataset.v6HistoryView);
+        if (!row) return;
+        const proposal = row.proposal || {};
+        const pricing = proposal.pricing || {};
+        const solution = Array.isArray(proposal.recommended_solution) ? proposal.recommended_solution : [];
+        const delivery = String(row.delivery_status || '').toLowerCase();
+        const timeline = [
+          ['تم إنشاء المسودة', row.created_at],
+          ['تمت الموافقة', row.approved_at],
+          ['تم الإرسال', row.sent_at],
+          ['آخر تحديث للتسليم', row.delivery_status_at]
+        ].filter(([, value]) => value);
+
+        openModal(`
+          <div class="v6-history-detail">
+            <div class="v6-result-head">
+              <div>
+                <span class="pill ${v6ActionPill(row.status)}">${esc(v6ActionStatusLabel[row.status] || row.status || '—')}</span>
+                <span class="pill ${v6DeliveryPill(delivery)}">${esc(delivery ? (v6DeliveryStatusLabel[delivery] || delivery) : 'غير مرسل')}</span>
+              </div>
+              <span class="muted">Proposal ID: ${esc(row.id)}</span>
+            </div>
+            <h3>${esc(row.title || 'Proposal')}</h3>
+            <p class="card-desc">العميل: <b>${esc(row.client_name || '—')}</b> · القطاع: <b>${esc(row.vertical || 'general')}</b></p>
+
+            <div class="v6-history-detail-grid">
+              <div><span>المبلغ</span><b>${esc(proposalAmount(row))}</b></div>
+              <div><span>حالة التسعير</span><b>${esc(row.pricing_status || '—')}</b></div>
+              <div><span>القناة</span><b>${esc(row.platform || '—')}</b></div>
+              <div><span>معرّف الرسالة</span><b class="ltr">${esc(row.outbound_external_id || '—')}</b></div>
+            </div>
+
+            <div class="v6-history-detail-section">
+              <h4>الحل المقترح</h4>
+              ${solution.length
+                ? `<div class="v6-chip-wrap">${solution.map(item => `<span class="v6-service-chip"><b>${esc(item.label || item.service)}</b></span>`).join('')}</div>`
+                : '<div class="muted">لا توجد خدمات مسجلة.</div>'}
+            </div>
+
+            <div class="v6-history-detail-section">
+              <h4>التسعير المؤكد</h4>
+              <div class="v6-history-pricing">
+                <span>قبل الضريبة: <b>${pricing.subtotal == null ? '—' : esc(proposalAmount({total: pricing.subtotal, currency: pricing.currency}))}</b></span>
+                <span>VAT: <b>${pricing.vat == null ? '—' : esc(proposalAmount({total: pricing.vat, currency: pricing.currency}))}</b></span>
+                <span>الإجمالي: <b>${pricing.total == null ? '—' : esc(proposalAmount({total: pricing.total, currency: pricing.currency}))}</b></span>
+              </div>
+            </div>
+
+            <div class="v6-history-detail-section">
+              <h4>الخط الزمني</h4>
+              <div class="v6-history-timeline">
+                ${timeline.map(([label, value]) => `<div><span></span><b>${esc(label)}</b><small>${new Date(value).toLocaleString('ar-SA')}</small></div>`).join('')}
+              </div>
+            </div>
+
+            ${row.error_message ? `<div class="v6-error">خطأ: ${esc(row.error_message)}</div>` : ''}
+            <div class="modal-foot"><button type="button" class="btn-primary" id="v6-history-close">إغلاق</button></div>
+          </div>
+        `);
+        $('#v6-history-close').onclick = closeModal;
+      };
+    });
+
+    $$('[data-v6-history-share]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.dataset.v6HistoryShare;
+        btn.disabled = true;
+        try { await copyProposalShareLink(id); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  const loadProposalHistory = async () => {
+    const host = $('#v6-proposal-history');
+    if (host) host.innerHTML = '<div class="loading-hint">جارٍ تحميل سجل العروض…</div>';
+    const status = $('#v6-history-status')?.value || 'all';
+    try {
+      const payload = await v6Api('proposal_history', {
+        query: { status, limit: '80' }
+      });
+      renderProposalHistory(payload);
+    } catch (e) {
+      if (host) host.innerHTML = `<div class="v6-error">تعذر تحميل سجل العروض: ${esc(e.message)}</div>`;
+    }
+  };
+
+  const load = async () => {
+    const actionsEl = $('#v6-actions');
+    const pipeEl = $('#v6-pipeline');
+    actionsEl.innerHTML = '<div class="loading-hint">جارٍ تحميل الموافقات…</div>';
+    pipeEl.innerHTML = '<div class="loading-hint">جارٍ تحميل Pipeline…</div>';
+
+    const nowIso = new Date().toISOString();
+    const settled = await Promise.allSettled([
+      db.from('leads').select('id', { count: 'exact', head: true }),
+      db.from('leads').select('id', { count: 'exact', head: true }).gte('opportunity_score', 70),
+      db.from('crm_opportunities').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+      db.from('crm_opportunities')
+        .select('id,title,value,currency,status,created_at,crm_pipeline_stages(name,slug,position),leads(company_name,contact_name)')
+        .eq('status', 'open').order('created_at', { ascending: false }).limit(12),
+      db.from('appointments').select('id', { count: 'exact', head: true }).in('status', ['scheduled','confirmed']).gte('starts_at', nowIso),
+      v6Api('actions', { query: { status: 'pending_approval', limit: '30' } }),
+      v6Api('actions', { query: { status: 'approved', limit: '50' } }),
+      db.from('leads')
+        .select('id,name,contact_name,company_name,industry,opportunity_score,status,pipeline_stage,created_at')
+        .order('opportunity_score', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(80)
+    ]);
+
+    const safe = (i, fallback = {}) => settled[i].status === 'fulfilled' ? settled[i].value : fallback;
+    const leadsCount = safe(0).count ?? 0;
+    const hotCount = safe(1).count ?? 0;
+    const oppCount = safe(2).count ?? 0;
+    const oppRows = safe(3).data || [];
+    const apptCount = safe(4).count ?? 0;
+    const pendingActions = safe(5, { actions: [] }).actions || [];
+    const approvedProposalActions = (safe(6, { actions: [] }).actions || []).filter(a => a.action_type === 'proposal_review');
+    const actionableItems = [...pendingActions, ...approvedProposalActions];
+    const proposalLeads = safe(7).data || [];
+
+    const leadSelect = $('#v6-proposal-lead');
+    if (leadSelect) {
+      const previous = leadSelect.value;
+      leadSelect.innerHTML = '<option value="">— اختر Lead —</option>' + proposalLeads.map(l => {
+        const name = l.company_name || l.contact_name || l.name || 'Lead';
+        const score = Number(l.opportunity_score || 0);
+        return `<option value="${esc(l.id)}">${esc(name)} — ${esc(l.industry || 'general')} — Score ${score}</option>`;
+      }).join('');
+      if (proposalLeads.some(l => l.id === previous)) leadSelect.value = previous;
+    }
+
+    $('#v6-kpis').innerHTML = `
+      <div class="kpi"><div class="k">إجمالي العملاء المحتملين</div><div class="v">${leadsCount}</div></div>
+      <div class="kpi"><div class="k">فرص قوية 70+</div><div class="v">${hotCount}</div></div>
+      <div class="kpi"><div class="k">فرص CRM مفتوحة</div><div class="v">${oppCount}</div></div>
+      <div class="kpi"><div class="k">مواعيد قادمة</div><div class="v">${apptCount}</div></div>
+    `;
+
+    $('#v6-pending-count').textContent = actionableItems.length;
+
+    if (!actionableItems.length) {
+      actionsEl.innerHTML = '<div class="empty">لا توجد إجراءات بانتظار المراجعة أو الإرسال حاليًا</div>';
+    } else {
+      actionsEl.innerHTML = actionableItems.map(a => {
+        const p = a.payload || {};
+        const isProposal = a.action_type === 'proposal_review' && p.proposal;
+        const draft = isProposal
+          ? (p.proposal?.executive_summary || p.proposal?.title || 'مسودة عرض')
+          : (p.reply_draft || p.draft_message || p.message || 'إجراء بدون نص');
+        const intent = isProposal ? (p.proposal?.client?.vertical || 'proposal') : (p.intent?.intent || '—');
+        const next = isProposal ? (p.proposal_status || p.proposal?.status || 'human_review') : (p.next_best_action || '—');
+        return `
+          <div class="v6-action-item" data-action-id="${esc(a.id)}">
+            <div class="v6-action-top">
+              <div>
+                <strong>${esc(a.action_type || 'action')}</strong>
+                <div class="muted">${new Date(a.created_at).toLocaleString('ar-SA')}</div>
+              </div>
+              <span class="pill ${v6ActionPill(a.status)}">${esc(v6ActionStatusLabel[a.status] || a.status)}</span>
+            </div>
+            <div class="v6-action-draft">${esc(draft)}</div>
+            <div class="v6-action-meta">
+              <span>النية: <b>${esc(intent)}</b></span>
+              <span>الخطوة التالية: <b>${esc(next)}</b></span>
+            </div>
+            <div class="v6-action-buttons">
+              ${isProposal && a.status === 'approved'
+                ? `<button class="btn-primary btn-sm" data-v6-send-proposal="${esc(a.id)}">معاينة وإرسال</button>`
+                : `
+                  <button class="btn-primary btn-sm" data-v6-approve="${esc(a.id)}">موافقة</button>
+                  <button class="btn-danger btn-sm" data-v6-reject="${esc(a.id)}">رفض</button>
+                `}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    if (!oppRows.length) {
+      pipeEl.innerHTML = '<div class="empty">لا توجد فرص CRM مفتوحة بعد</div>';
+    } else {
+      pipeEl.innerHTML = tbl(
+        ['الفرصة','المرحلة','القيمة','العميل'],
+        oppRows.map(o => `
+          <tr>
+            <td><b>${esc(o.title)}</b></td>
+            <td><span class="pill">${esc(o.crm_pipeline_stages?.name || '—')}</span></td>
+            <td>${money(o.value || 0)}</td>
+            <td>${esc(o.leads?.company_name || o.leads?.contact_name || '—')}</td>
+          </tr>`).join('')
+      );
+    }
+
+    $$('[data-v6-approve]').forEach(btn => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await v6Api('action', {
+            method: 'POST',
+            query: { id: btn.dataset.v6Approve },
+            body: { op: 'approve', autoExecute: false }
+          });
+          toast('تم اعتماد الإجراء — لم يتم الإرسال بعد');
+          await load();
+        } catch (e) {
+          toast('تعذر الاعتماد: ' + e.message, false);
+          btn.disabled = false;
+        }
+      };
+    });
+
+    $$('[data-v6-reject]').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('رفض هذه المسودة؟')) return;
+        btn.disabled = true;
+        try {
+          await v6Api('action', {
+            method: 'POST',
+            query: { id: btn.dataset.v6Reject },
+            body: { op: 'reject', reason: 'Rejected from V6 Sales Control Center' }
+          });
+          toast('تم رفض المسودة');
+          await load();
+        } catch (e) {
+          toast('تعذر الرفض: ' + e.message, false);
+          btn.disabled = false;
+        }
+      };
+    });
+
+    $$('[data-v6-send-proposal]').forEach(btn => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          const prepared = await v6Api('proposal_delivery', {
+            method: 'POST',
+            body: { op: 'prepare', action_id: btn.dataset.v6SendProposal }
+          });
+
+          openModal(`
+            <h3>مراجعة إرسال العرض</h3>
+            <p class="card-desc">القناة: <b>${esc(prepared.platform || '—')}</b> · العميل: <b>${esc(prepared.recipient || '—')}</b></p>
+            <label>النص الذي سيُرسل للعميل</label>
+            <textarea id="v6-delivery-message" rows="14" readonly>${esc(prepared.message || '')}</textarea>
+            <div class="v6-safe-box" style="margin-top:10px">هذا زر إرسال يدوي. الموافقة السابقة لا ترسل شيئًا تلقائيًا، والضغط على «إرسال الآن» هو خطوة الإرسال الفعلية.</div>
+            <div class="modal-foot">
+              <button type="button" class="btn-ghost" id="v6-delivery-cancel">إلغاء</button>
+              <button type="button" class="btn-primary" id="v6-delivery-send">إرسال الآن</button>
+            </div>
+          `);
+
+          $('#v6-delivery-cancel').onclick = closeModal;
+          $('#v6-delivery-send').onclick = async () => {
+            const sendBtn = $('#v6-delivery-send');
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'جارٍ الإرسال…';
+            try {
+              const { data: { session } } = await db.auth.getSession();
+              const token = session?.access_token;
+              if (!token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+
+              const replyRes = await fetch('/api/social/reply', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: 'Bearer ' + token
+                },
+                body: JSON.stringify({
+                  event_id: prepared.event_id,
+                  message: prepared.message,
+                  action_id: prepared.action_id
+                })
+              });
+              const reply = await replyRes.json().catch(() => ({}));
+              if (!replyRes.ok) throw new Error(reply.error || reply.code || ('HTTP ' + replyRes.status));
+              if (!reply.outbound_external_id) throw new Error('مزود القناة لم يرجع معرّف الرسالة الصادرة.');
+
+              await v6Api('proposal_delivery', {
+                method: 'POST',
+                body: {
+                  op: 'record_sent',
+                  action_id: prepared.action_id,
+                  source_event_id: prepared.event_id,
+                  outbound_external_id: reply.outbound_external_id,
+                  outbound_event_id: reply.event_id || null,
+                  provider_status: reply.status || 'sent',
+                  platform: reply.platform || prepared.platform
+                }
+              });
+
+              closeModal();
+              toast('تم إرسال العرض يدويًا وتسجيله في CRM');
+              await load();
+            } catch (e) {
+              toast('تعذر إرسال العرض: ' + e.message, false);
+              sendBtn.disabled = false;
+              sendBtn.textContent = 'إرسال الآن';
+            }
+          };
+        } catch (e) {
+          toast('تعذر تجهيز الإرسال: ' + e.message, false);
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    });
+
+    await loadProposalHistory();
+  };
+
+  $('#v6-refresh').onclick = load;
+  $('#v6-new-draft').onclick = () => $('#v6-message')?.focus();
+  $('#v6-history-refresh').onclick = loadProposalHistory;
+  $('#v6-history-status').onchange = loadProposalHistory;
+  const shareToolbar = $('#v6-share-link');
+  if (shareToolbar) {
+    shareToolbar.onclick = async () => {
+      const id = proposalHistoryRows?.[0]?.id;
+      if (!id) return toast('لا يوجد عرض في السجل', false);
+      shareToolbar.disabled = true;
+      try { await copyProposalShareLink(id); }
+      finally { shareToolbar.disabled = false; }
+    };
+  }
+
+  
+  let researchCandidates = [];
+  const renderResearchResults = (payload) => {
+    const host = $('#v6-research-results');
+    if (!host) return;
+    researchCandidates = payload?.candidates || [];
+    const filter = $('#v6-research-filter-status')?.value || 'all';
+    const rows = filter === 'all' ? researchCandidates : researchCandidates.filter(c => c.status === filter);
+    const summary = payload?.summary || {};
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty">لا نتائج.</div>';
+      return;
+    }
+    host.innerHTML = `
+      <div class="muted" style="margin-bottom:8px">اكتشف ${summary.discovered ?? researchCandidates.length} · مؤهل ${summary.qualified ?? 0} · مكرر ${summary.duplicates ?? 0}</div>
+      <div class="table-wrap">
+        <table class="v6-history-table">
+          <thead><tr>
+            <th>الشركة</th><th>القطاع</th><th>المدينة</th><th>المصدر</th>
+            <th>الهاتف</th><th>Score</th><th>Grade</th><th>خدمة مقترحة</th><th>الحالة</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${rows.map((c, idx) => {
+              const rec = c.record || c;
+              const services = (c.recommended_services || []).slice(0,2).join(', ');
+              return `<tr>
+                <td><b>${esc(rec.business_name || '—')}</b></td>
+                <td>${esc(c.vertical || rec.industry || '—')}</td>
+                <td>${esc(rec.city || '—')}</td>
+                <td>${esc(rec.source || '—')}</td>
+                <td class="ltr">${esc(rec.phone || '—')}</td>
+                <td><b>${c.opportunity_score ?? '—'}</b></td>
+                <td>${esc(c.grade || '—')}</td>
+                <td>${esc(services || '—')}</td>
+                <td><span class="pill">${esc(c.status || '—')}</span></td>
+                <td>
+                  <button class="btn-sm btn-ghost" data-research-import="${idx}">CRM</button>
+                  <button class="btn-sm btn-ghost" data-research-draft="${idx}">رسالة</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    $$('[data-research-import]').forEach(btn => {
+      btn.onclick = async () => {
+        const c = researchCandidates[Number(btn.dataset.researchImport)];
+        if (!c || c.status === 'duplicate') return toast('لا يمكن استيراد مكرر بهذه الطريقة', false);
+        btn.disabled = true;
+        try {
+          await v6Api('research', { method: 'POST', body: { op: 'import_crm', candidate: { ...c, crm_payload: c.crm_payload } } });
+          toast('تمت إضافة العميل للـ CRM (مراجعة بشرية)');
+          c.status = 'imported';
+          renderResearchResults({ candidates: researchCandidates, summary });
+        } catch (e) { toast(e.message || 'فشل الاستيراد', false); }
+        finally { btn.disabled = false; }
+      };
+    });
+    $$('[data-research-draft]').forEach(btn => {
+      btn.onclick = async () => {
+        const c = researchCandidates[Number(btn.dataset.researchDraft)];
+        if (!c) return;
+        btn.disabled = true;
+        try {
+          const out = await v6Api('research', { method: 'POST', body: { op: 'draft_outreach', candidate: c.record || c } });
+          openModal(`<div class="v6-history-detail"><h3>مسودة تواصل (تحتاج موافقة)</h3>
+            <pre style="white-space:pre-wrap">${esc(out.draft?.text || '')}</pre>
+            <p class="muted">requires_approval=true · auto_send=false</p>
+            <div class="modal-foot"><button type="button" class="btn-primary" id="v6-research-close">إغلاق</button></div></div>`);
+          $('#v6-research-close').onclick = closeModal;
+        } catch (e) { toast(e.message || 'فشل المسودة', false); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  const runResearch = async () => {
+    const host = $('#v6-research-results');
+    if (host) host.innerHTML = '<div class="loading-hint">جارٍ البحث والتحليل…</div>';
+    const btn = $('#v6-research-run');
+    if (btn) btn.disabled = true;
+    try {
+      const statusEl = $('#v6-research-status');
+      if (statusEl) statusEl.textContent = 'الحالة: Running…';
+      const out = await v6Api('research', {
+        method: 'POST',
+        body: {
+          op: 'run',
+          query: $('#v6-research-query')?.value || '',
+          city: $('#v6-research-city')?.value || '',
+          industry: $('#v6-research-industry')?.value || '',
+          target_count: Number($('#v6-research-limit')?.value || 10),
+          source: $('#v6-research-source')?.value || 'fixture',
+          min_rating: $('#v6-research-min-rating')?.value !== '' ? Number($('#v6-research-min-rating').value) : undefined,
+          min_reviews: $('#v6-research-min-reviews')?.value !== '' ? Number($('#v6-research-min-reviews').value) : undefined
+        }
+      });
+      if (statusEl) statusEl.textContent = `الحالة: Completed · ${out.summary?.discovered ?? 0} نتيجة`;
+      renderResearchResults(out);
+    } catch (e) {
+      if (host) host.innerHTML = `<div class="v6-error">${esc(e.message)}</div>`;
+      const statusEl = $('#v6-research-status');
+      if (statusEl) statusEl.textContent = 'الحالة: Failed';
+      toast('فشل البحث: ' + e.message, false);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  };
+
+  $('#v6-research-run') && ($('#v6-research-run').onclick = runResearch);
+  $('#v6-research-filter-status') && ($('#v6-research-filter-status').onchange = () => renderResearchResults({ candidates: researchCandidates }));
+
+  
+  let studioState = { campaign: null, ideas: [], draft: null, variants: [], brand: null };
+
+  const renderStudio = () => {
+    const host = $('#v6-studio-results');
+    if (!host) return;
+    const ideas = studioState.ideas || [];
+    host.innerHTML = `
+      <div class="muted" style="margin-bottom:8px">الحملة: <b>${esc(studioState.campaign?.name || '—')}</b> · ${ideas.length} فكرة · auto_publish=false</div>
+      <div class="table-wrap"><table class="v6-history-table">
+        <thead><tr><th>الفكرة</th><th>النوع</th><th>المنصة</th><th>المرحلة</th><th></th></tr></thead>
+        <tbody>
+          ${ideas.slice(0,10).map((idea, idx) => `<tr>
+            <td><b>${esc(idea.title)}</b><div class="muted">${esc(idea.reason || '')}</div></td>
+            <td>${esc(idea.content_type)}</td>
+            <td>${esc(idea.target_platform)}</td>
+            <td>${esc(idea.funnel_stage)}</td>
+            <td><button class="btn-sm btn-ghost" data-studio-draft="${idx}">مسودة</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div id="v6-studio-draft-view"></div>`;
+    $$('[data-studio-draft]').forEach(btn => {
+      btn.onclick = async () => {
+        const idea = studioState.ideas[Number(btn.dataset.studioDraft)];
+        btn.disabled = true;
+        try {
+          const out = await v6Api('social_studio', {
+            method: 'POST',
+            body: { op: 'content_generate', campaign: studioState.campaign, idea, brand: studioState.brand }
+          });
+          studioState.draft = out.draft;
+          studioState.variants = out.variants || [];
+          const v = $('#v6-studio-draft-view');
+          if (v) {
+            v.innerHTML = `<div class="v6-proposal-preview" style="margin-top:12px">
+              <h4>مسودة</h4>
+              <p>${esc(out.draft?.body || '')}</p>
+              <p class="muted">Validation: ${out.draft?.brand_validation?.ok ? 'OK' : 'تحذيرات'} · ${esc((out.draft?.brand_validation?.warnings||[]).join(' | '))}</p>
+              <div class="v6-chip-wrap">${(out.variants||[]).map(x => `<span class="v6-service-chip"><b>${esc(x.platform)}</b></span>`).join('')}</div>
+              <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn-sm btn-primary" id="v6-studio-approve">اعتماد المسودة</button>
+                <button class="btn-sm btn-ghost" id="v6-studio-mock-pub">نشر تجريبي (mock)</button>
+              </div>
+            </div>`;
+            $('#v6-studio-approve').onclick = async () => {
+              let c = submitLike(out.draft);
+              const a = await v6Api('social_studio', { method: 'POST', body: { op: 'content_approve', content: c } });
+              toast('تم الاعتماد — لا يزال النشر يدويًا');
+              studioState.draft = a.content;
+            };
+            $('#v6-studio-mock-pub').onclick = async () => {
+              try {
+                const content = studioState.draft?.status === 'approved' ? studioState.draft : (await v6Api('social_studio', { method: 'POST', body: { op: 'content_approve', content: submitLike(out.draft) } })).content;
+                const pub = await v6Api('social_studio', { method: 'POST', body: { op: 'content_publish_mock', content } });
+                toast(pub.publish?.ok ? 'Mock publish OK' : 'Publish blocked', !!pub.publish?.ok);
+              } catch (e) { toast(e.message, false); }
+            };
+          }
+        } catch (e) { toast(e.message, false); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  const submitLike = (draft) => ({ ...(draft || {}), status: 'review' });
+
+  $('#v6-studio-run') && ($('#v6-studio-run').onclick = async () => {
+    const btn = $('#v6-studio-run');
+    btn.disabled = true;
+    try {
+      const campaign = {
+        name: $('#v6-studio-campaign-name')?.value,
+        industry: $('#v6-studio-industry')?.value,
+        location: $('#v6-studio-location')?.value,
+        objective: $('#v6-studio-objective')?.value,
+        platforms: ['instagram', 'facebook', 'linkedin', 'tiktok']
+      };
+      const brandRes = await v6Api('social_studio', { query: { op: 'brand_get' } });
+      studioState.brand = brandRes.brand;
+      const created = await v6Api('social_studio', { method: 'POST', body: { op: 'campaign_create', campaign, brand: studioState.brand } });
+      studioState.campaign = created.campaign;
+      const ideas = await v6Api('social_studio', { method: 'POST', body: { op: 'content_ideas', campaign: studioState.campaign, brand: studioState.brand, count: 10 } });
+      studioState.ideas = ideas.ideas || [];
+      renderStudio();
+    } catch (e) {
+      const host = $('#v6-studio-results');
+      if (host) host.innerHTML = `<div class="v6-error">${esc(e.message)}</div>`;
+      toast(e.message, false);
+    } finally { btn.disabled = false; }
+  });
+
+  $('#v6-studio-brand') && ($('#v6-studio-brand').onclick = async () => {
+    try {
+      const out = await v6Api('social_studio', { query: { op: 'brand_get' } });
+      openModal(`<div class="v6-history-detail">
+        <h3>Brand Brain — ${esc(out.brand?.brand_name || 'Tiqnora')}</h3>
+        <p>${esc(out.brand?.brand_description || '')}</p>
+        <p class="muted">Colors: ${esc(JSON.stringify(out.brand?.visual_identity?.colors || {}))}</p>
+        <p class="muted">Cities: ${esc((out.brand?.target_cities||[]).join(', '))}</p>
+        <div class="modal-foot"><button type="button" class="btn-primary" id="v6-studio-brand-close">إغلاق</button></div>
+      </div>`);
+      $('#v6-studio-brand-close').onclick = closeModal;
+    } catch (e) { toast(e.message, false); }
+  });
+
+
+  
+  let repState = { reviews: [], locations: [], dashboard: null };
+
+  const renderRep = () => {
+    const dash = $('#v6-rep-dashboard');
+    const d = repState.dashboard || {};
+    if (dash) {
+      dash.innerHTML = `
+        <div class="v6-history-kpi"><span>المتوسط</span><b>${d.average_rating ?? '—'}</b></div>
+        <div class="v6-history-kpi"><span>المراجعات</span><b>${d.review_count ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>بدون رد</span><b>${d.unanswered_reviews ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>سلبي</span><b>${d.negative_reviews ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>نسبة الرد</span><b>${d.response_rate != null ? d.response_rate + '%' : '—'}</b></div>`;
+    }
+    const host = $('#v6-rep-results');
+    if (!host) return;
+    let rows = repState.reviews || [];
+    const f = $('#v6-rep-filter')?.value || 'all';
+    if (f === 'unanswered') rows = rows.filter(r => r.reply_status === 'unanswered' || !r.existing_reply);
+    if (f === 'high') rows = rows.filter(r => r.priority === 'high' || r.priority === 'critical');
+    if (f === 'pending_approval') rows = rows.filter(r => r.reply_status === 'pending_approval');
+    if (!rows.length) { host.innerHTML = '<div class="empty">لا مراجعات</div>'; return; }
+    host.innerHTML = `<div class="table-wrap"><table class="v6-history-table">
+      <thead><tr><th>التقييم</th><th>المراجع</th><th>النص</th><th>المشاعر</th><th>الأولوية</th><th>الرد</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((r, idx) => `<tr>
+          <td><b>${esc(r.rating ?? '—')}</b></td>
+          <td>${esc(r.reviewer_display_name || '—')}</td>
+          <td>${esc((r.comment || '').slice(0, 120))}</td>
+          <td>${esc(r.sentiment || '—')}</td>
+          <td><span class="pill">${esc(r.priority || '—')}</span></td>
+          <td>${esc(r.reply_status || '—')}</td>
+          <td><button class="btn-sm btn-ghost" data-rep-draft="${idx}">مسودة رد</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
+    $$('[data-rep-draft]').forEach(btn => {
+      btn.onclick = async () => {
+        const review = repState.reviews[Number(btn.dataset.repDraft)];
+        btn.disabled = true;
+        try {
+          const out = await v6Api('reputation', { method: 'POST', body: { op: 'draft_reply', review, location: repState.locations?.[0] } });
+          const draft = out.draft;
+          openModal(`<div class="v6-history-detail">
+            <h3>مسودة رد (تتطلب موافقة)</h3>
+            <p>${esc(draft.draft_reply || '')}</p>
+            <p class="muted">${esc(draft.reasoning_summary || '')}</p>
+            <p class="muted">تحذيرات: ${esc((draft.warnings || []).join(' | ') || 'لا يوجد')}</p>
+            <div class="modal-foot" style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn-primary" id="v6-rep-approve">اعتماد</button>
+              <button type="button" class="btn-ghost" id="v6-rep-publish">نشر تجريبي</button>
+              <button type="button" class="btn-ghost" id="v6-rep-close">إغلاق</button>
+            </div>
+          </div>`);
+          $('#v6-rep-close').onclick = closeModal;
+          let current = draft;
+          $('#v6-rep-approve').onclick = async () => {
+            const a = await v6Api('reputation', { method: 'POST', body: { op: 'approve_reply', draft: { ...current, status: 'pending_approval' } } });
+            current = a.draft;
+            toast('تم الاعتماد — auto_reply=false');
+          };
+          $('#v6-rep-publish').onclick = async () => {
+            if (current.status !== 'approved') {
+              const a = await v6Api('reputation', { method: 'POST', body: { op: 'approve_reply', draft: { ...current, status: 'pending_approval' } } });
+              current = a.draft;
+            }
+            const pub = await v6Api('reputation', { method: 'POST', body: { op: 'publish_reply', draft: current, review } });
+            toast(pub.publish?.ok ? 'Mock publish OK' : 'Blocked: ' + (pub.reasons || []).join(','), !!pub.publish?.ok);
+          };
+        } catch (e) { toast(e.message, false); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+
+  $('#v6-rep-status') && ($('#v6-rep-status').onclick = async () => {
+    try {
+      const s = await v6Api('reputation', { query: { op: 'status' } });
+      toast(`GBP: ${s.connection_status} · configured=${s.configured}`);
+    } catch (e) { toast(e.message, false); }
+  });
+
+  $('#v6-rep-demo') && ($('#v6-rep-demo').onclick = async () => {
+    const btn = $('#v6-rep-demo');
+    btn.disabled = true;
+    try {
+      const mockReviews = [
+        { reviewId: 'r1', starRating: 'FIVE', comment: 'خدمة ممتازة وسريعة', reviewer: { displayName: 'أحمد' }, createTime: new Date().toISOString() },
+        { reviewId: 'r2', starRating: 'ONE', comment: 'تأخير كبير في الموعد والتعامل سيء', reviewer: { displayName: 'سارة' }, createTime: new Date().toISOString() },
+        { reviewId: 'r3', starRating: 'TWO', comment: 'السعر غالي والجودة متوسطة', reviewer: { displayName: 'فهد' }, createTime: new Date(Date.now()-86400000).toISOString() },
+        { reviewId: 'r4', starRating: 'FOUR', comment: 'تجربة جيدة overall', reviewer: { displayName: 'Nora' }, createTime: new Date().toISOString() },
+        { reviewId: 'r5', starRating: 'THREE', comment: '', reviewer: { displayName: 'Anonymous' }, createTime: new Date().toISOString() }
+      ];
+      const out = await v6Api('reputation', {
+        method: 'POST',
+        body: {
+          op: 'sync_mock',
+          locations: [{ name: 'locations/mock1', title: 'عيادة تجريبية — المدينة المنورة' }],
+          reviews: mockReviews
+        }
+      });
+      repState.reviews = out.reviews || [];
+      repState.locations = out.locations || [];
+      repState.dashboard = out.dashboard;
+      renderRep();
+    } catch (e) { toast(e.message, false); }
+    finally { btn.disabled = false; }
+  });
+
+  $('#v6-rep-filter') && ($('#v6-rep-filter').onchange = renderRep);
+
+
+  
+  let seoState = { audit: null, opportunities: [] };
+
+  const renderSeo = () => {
+    const a = seoState.audit;
+    const ov = $('#v6-seo-overview');
+    if (ov && a) {
+      ov.innerHTML = `
+        <div class="v6-history-kpi"><span>صفحات</span><b>${a.pages_checked ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>مشاكل</span><b>${a.issues_found ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>قابلة للفهرسة</span><b>${a.indexable_pages ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>حرجة</span><b>${a.severity_count?.critical ?? 0}</b></div>`;
+    }
+    const host = $('#v6-seo-results');
+    if (!host || !a) return;
+    const issues = (a.issues || []).slice(0, 20);
+    host.innerHTML = `
+      <h4 style="margin:12px 0 6px">المشاكل</h4>
+      <div class="table-wrap"><table class="v6-history-table">
+        <thead><tr><th>الخطورة</th><th>المسار</th><th>المشكلة</th><th>الإصلاح المقترح</th></tr></thead>
+        <tbody>
+          ${issues.map(i => `<tr>
+            <td><span class="pill">${esc(i.severity)}</span></td>
+            <td class="ltr">${esc(i.page_path)}</td>
+            <td>${esc(i.problem)}</td>
+            <td>${esc(i.recommended_fix)}</td>
+          </tr>`).join('') || '<tr><td colspan="4">لا مشاكل في العينة</td></tr>'}
+        </tbody>
+      </table></div>
+      <h4 style="margin:16px 0 6px">فرص محتوى (تتطلب موافقة)</h4>
+      <ul>${(seoState.opportunities||[]).map(o => `<li><b>${esc(o.title)}</b> — ${esc(o.search_intent)} · approval required</li>`).join('')}</ul>`;
+  };
+
+  $('#v6-seo-audit') && ($('#v6-seo-audit').onclick = async () => {
+    const btn = $('#v6-seo-audit');
+    btn.disabled = true;
+    try {
+      const out = await v6Api('seo', { method: 'POST', body: { op: 'audit' } });
+      seoState.audit = out.audit;
+      const opp = await v6Api('seo', { method: 'POST', body: { op: 'opportunities' } });
+      seoState.opportunities = opp.opportunities || [];
+      renderSeo();
+    } catch (e) { toast(e.message, false); }
+    finally { btn.disabled = false; }
+  });
+
+  $('#v6-seo-entity') && ($('#v6-seo-entity').onclick = async () => {
+    try {
+      const out = await v6Api('seo', { query: { op: 'entity' } });
+      openModal(`<div class="v6-history-detail">
+        <h3>${esc(out.entity?.name || 'Tiqnora AI')}</h3>
+        <p>${esc(out.entity?.description || '')}</p>
+        <p class="muted">Domain: ${esc(out.entity?.domain || '')} · City: ${esc(out.entity?.city || '')}</p>
+        <p class="muted">Disambiguation: ${(out.clarity?.disambiguation_notes||[]).map(esc).join(' | ')}</p>
+        <div class="modal-foot"><button type="button" class="btn-primary" id="v6-seo-entity-close">إغلاق</button></div>
+      </div>`);
+      $('#v6-seo-entity-close').onclick = closeModal;
+    } catch (e) { toast(e.message, false); }
+  });
+
+
+  
+  let wfState = { last: null };
+
+  const renderWf = () => {
+    const r = wfState.last;
+    const ov = $('#v6-wf-overview');
+    if (ov && r?.run) {
+      ov.innerHTML = `
+        <div class="v6-history-kpi"><span>الحالة</span><b>${esc(r.run.status)}</b></div>
+        <div class="v6-history-kpi"><span>الخطوات</span><b>${r.steps?.length ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>External</span><b>${r.external_actions ?? 0}</b></div>
+        <div class="v6-history-kpi"><span>Approval</span><b>${r.run.status === 'waiting_approval' ? 'نعم' : '—'}</b></div>`;
+    }
+    const host = $('#v6-wf-results');
+    if (!host || !r) return;
+    host.innerHTML = `<div class="table-wrap"><table class="v6-history-table">
+      <thead><tr><th>Step</th><th>Agent</th><th>Status</th><th>Approval</th></tr></thead>
+      <tbody>
+        ${(r.steps||[]).map(s => `<tr>
+          <td class="ltr">${esc(s.step_key)}</td>
+          <td>${esc(s.agent_key || '—')}</td>
+          <td><span class="pill">${esc(s.status)}</span></td>
+          <td>${s.requires_approval ? 'yes' : 'no'}</td>
+        </tr>`).join('')}
+      </tbody></table></div>
+      <p class="muted">auto_send=false · auto_publish=false · external_actions=${r.external_actions ?? 0}</p>`;
+  };
+
+  $('#v6-wf-status') && ($('#v6-wf-status').onclick = async () => {
+    try {
+      const s = await v6Api('workforce', { query: { op: 'status' } });
+      toast(`Agents: ${(s.agents||[]).length} · Workflows: ${(s.workflows||[]).length}`);
+    } catch (e) { toast(e.message, false); }
+  });
+
+  $('#v6-wf-run') && ($('#v6-wf-run').onclick = async () => {
+    const btn = $('#v6-wf-run');
+    btn.disabled = true;
+    try {
+      const type = $('#v6-wf-type')?.value || 'lead_to_proposal';
+      const out = await v6Api('workforce', {
+        method: 'POST',
+        body: {
+          op: 'workflow_start',
+          workflow_type: type,
+          input: { query: 'عيادات أسنان', city: 'المدينة المنورة', industry: 'dental_clinic', review: { rating: 1, comment: 'تأخير' } },
+          trigger: 'manual'
+        }
+      });
+      wfState.last = out;
+      renderWf();
+    } catch (e) { toast(e.message, false); }
+    finally { btn.disabled = false; }
+  });
+
+
+  $('#v6-proposal-preview').onclick = async () => {
+    const leadId = $('#v6-proposal-lead').value;
+    const result = $('#v6-proposal-result');
+    if (!leadId) return toast('اختر Lead أولًا', false);
+    const btn = $('#v6-proposal-preview');
+    btn.disabled = true;
+    result.innerHTML = '<div class="loading-hint">جارٍ تجهيز Proposal من بيانات CRM…</div>';
+    try {
+      const out = await v6Api('proposal', {
+        method: 'POST',
+        body: {
+          op: 'preview',
+          lead_id: leadId,
+          language: $('#v6-proposal-language').value
+        }
+      });
+      renderProposal(out.proposal);
+    } catch (e) {
+      result.innerHTML = `<div class="v6-error">تعذر تجهيز العرض: ${esc(e.message)}</div>`;
+      toast('فشل Proposal Composer: ' + e.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('#v6-generate').onclick = async () => {
+    const btn = $('#v6-generate');
+    const msg = ($('#v6-message').value || '').trim();
+    const result = $('#v6-draft-result');
+    if (!msg) return toast('اكتب رسالة العميل أولًا', false);
+    btn.disabled = true;
+    result.innerHTML = '<div class="loading-hint">Gemini يحلل الرسالة ويجهز المسودة…</div>';
+    try {
+      const out = await v6Api('draft_reply', {
+        method: 'POST',
+        body: {
+          message: msg,
+          platform: $('#v6-platform').value,
+          language: 'ar'
+        }
+      });
+      const q = out.qualification || {};
+      result.innerHTML = `
+        <div class="v6-result">
+          <div class="v6-result-head">
+            <div>
+              <span class="pill ok">AI Draft جاهزة</span>
+              <span class="pill warn">بانتظار الموافقة</span>
+            </div>
+            <span class="muted">Model: ${esc(out.model || 'Gemini')}</span>
+          </div>
+          <h3>الرد المقترح</h3>
+          <div class="v6-action-draft">${esc(out.draft || '—')}</div>
+          <div class="v6-qual-grid">
+            <div><span>درجة الاهتمام</span><b>${esc(q.temperature || '—')}</b></div>
+            <div><span>الخدمة</span><b>${esc(q.service_interest || '—')}</b></div>
+            <div><span>الخطوة التالية</span><b>${esc(out.next_best_action || '—')}</b></div>
+            <div><span>النية</span><b>${esc(out.intent?.intent || '—')}</b></div>
+          </div>
+        </div>`;
+      toast('تم إنشاء المسودة وإضافتها للموافقات');
+      await load();
+    } catch (e) {
+      result.innerHTML = `<div class="v6-error">تعذر إنشاء المسودة: ${esc(e.message)}</div>`;
+      toast('فشل AI Draft: ' + e.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  await load();
+};
+
 
 VIEWS['social-inbox'] = async v => {
   v.innerHTML = dbBanner() + `
@@ -893,7 +2317,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'product_seo', name_ar: row.name_ar, name_en: row.name_en, sku: row.sku,
               description_ar: row.description_ar, price: row.price, category: row.categories?.name_ar, brand: row.brands?.name
             })});
@@ -928,7 +2352,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
             const j = await r.json();
             const overall = j.overall_score != null ? j.overall_score : j.score;
             if (overall == null) continue;
@@ -962,7 +2386,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'market_research', product_name: row.name_ar, category: row.categories?.name_ar,
               brand: row.brands?.name, supplier: row.supplier_name, cost: row.cost_price, shipping: 0
             })});
@@ -992,7 +2416,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'dynamic_pricing', product_id: id, product_name: row.name_ar, cost: row.cost_price,
               shipping: 0, current_price: row.price, category: row.categories?.name_ar
             })});
@@ -1017,7 +2441,7 @@ VIEWS.products = async v => {
           const row = rows.find(r => r.id === id);
           if (!row) continue;
           try {
-            const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+            const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
               mode: 'supplier_compare', product_id: id, product_name: row.name_ar, cost: row.cost_price || 200
             })});
             const j = await r.json();
@@ -1092,7 +2516,7 @@ VIEWS.products = async v => {
   $$('[data-edit]').forEach(b => b.onclick = () => { const row = rows.find(r => r.id === b.dataset.edit); crudModal({ title: 'تعديل منتج', fields: F, row: { ...row, images: (row.images || []).join('\\n') }, onSave: async d => { await db.from('products').update(fixImgs(d)).eq('id', row.id); log('product.update', 'products', row.id); toast('تم التحديث'); VIEWS.products(v); } }); });
   $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('حذف المنتج نهائيًا؟')) { await db.from('products').delete().eq('id', b.dataset.del); toast('تم الحذف'); VIEWS.products(v); } });
   const runReviewAndSave = async (row) => {
-    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
+    const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'product_verification', product: row })});
     const j = await r.json();
     if (j.score == null && j.overall_score == null) throw new Error(j.error || 'فشل التحقق');
     const overall = j.overall_score != null ? j.overall_score : j.score;
@@ -1306,7 +2730,7 @@ VIEWS.products = async v => {
     if (!confirm('توليد محتوى SEO بالذكاء الاصطناعي لهذا المنتج؟ (للمراجعة فقط)')) return;
     toast('جارٍ التوليد…');
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
         mode: 'product_seo', name_ar: row.name_ar, name_en: row.name_en, sku: row.sku,
         description_ar: row.description_ar, price: row.price, category: row.categories?.name_ar, brand: row.brands?.name
       })});
@@ -1325,7 +2749,7 @@ VIEWS.products = async v => {
         specifications: specs
       }).eq('id', row.id);
       // refresh quality
-      const qr = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: { ...row, ...j, specifications: specs } })});
+      const qr = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'quality_score', product: { ...row, ...j, specifications: specs } })});
       const qj = await qr.json();
       if (qj.score != null) await db.from('products').update({ quality_score: qj.score, quality_notes: { notes: qj.notes, ready: qj.ready_to_publish } }).eq('id', row.id);
       toast('تم توليد SEO — راجع قبل النشر');
@@ -1436,6 +2860,7 @@ VIEWS.commerce = async v => {
         <option value="dsers">DSers</option>
       </select>
       <button class="btn-sm" id="sc-test">اختبار الاتصال</button>
+      <button class="btn-sm" id="ae-oauth-connect">ربط / إعادة ربط AliExpress</button>
       <button class="btn-primary" id="sc-sync">مزامنة الآن</button>
       <button class="btn-sm" id="sc-inv">فحص المخزون/الأسعار</button>
       <button class="btn-primary" id="sc-import" style="background:var(--accent,#0d9488)">استيراد منتج تجريبي (CJ)</button>
@@ -1601,7 +3026,7 @@ VIEWS.commerce = async v => {
     $('#ae-product-stage').disabled = true;
     window.__lastAeProduct = null;
     try {
-      const r = await fetch('/api/commerce/ai?action=connector_product&provider=aliexpress&product_id=' + encodeURIComponent(id));
+      const r = await commerceAi('/api/commerce/ai?action=connector_product&provider=aliexpress&product_id=' + encodeURIComponent(id));
       const j = await r.json();
       if (!r.ok || !j.ok || !j.product) {
         $('#ae-product-out').textContent = j.error || j.message || 'تعذر جلب المنتج';
@@ -1688,7 +3113,7 @@ VIEWS.commerce = async v => {
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     $('#scout-out').textContent = 'جارٍ تحليل Scout…';
     try {
-      const r = await fetch('/api/commerce/ai', {
+      const r = await commerceAi('/api/commerce/ai', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
@@ -1752,7 +3177,7 @@ VIEWS.commerce = async v => {
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     $('#mi-out').textContent = 'جارٍ تحليل السوق…';
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) { $('#mi-out').textContent = j.error; return; }
       window.__lastMi = j;
@@ -1814,7 +3239,7 @@ VIEWS.commerce = async v => {
     };
     if (!payload.product_name) return toast('أدخل اسم المنتج');
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) return toast(j.error);
       window.__lastMi = j;
@@ -1850,7 +3275,7 @@ VIEWS.commerce = async v => {
     if (!payload.cost && !payload.current_price) return toast('أدخل التكلفة');
     $('#dp-out').textContent = 'جارٍ الحساب…';
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) { $('#dp-out').textContent = j.error; return; }
       window.__lastDp = j;
@@ -1907,7 +3332,7 @@ VIEWS.commerce = async v => {
     };
     $('#scmp-out').textContent = 'جارٍ المقارنة…';
     try {
-      const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await r.json();
       if (j.error) { $('#scmp-out').textContent = j.error; return; }
       window.__lastScmp = j;
@@ -1937,7 +3362,7 @@ VIEWS.commerce = async v => {
 
   // Supplier Center
   const scApi = async (payload) => {
-    const r = await fetch('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'supplier_center', ...payload }) });
+    const r = await commerceAi('/api/commerce/ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: 'supplier_center', ...payload }) });
     return r.json();
   };
   const refreshScStatus = async () => {
@@ -1949,6 +3374,32 @@ VIEWS.commerce = async v => {
     } catch(_) {}
   };
   refreshScStatus();
+
+  const aeOauthConnect = $('#ae-oauth-connect');
+  if (aeOauthConnect) aeOauthConnect.onclick = async () => {
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session?.access_token) return toast('انتهت جلسة الأدمن — سجّل الدخول من جديد', false);
+      aeOauthConnect.disabled = true;
+      const response = await fetch('/api/aliexpress/connect?format=json', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          Accept: 'application/json'
+        }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.authorize_url) {
+        toast(payload.message || payload.error || 'تعذر بدء ربط AliExpress', false);
+        return;
+      }
+      window.location.href = payload.authorize_url;
+    } catch (e) {
+      toast(e.message || 'تعذر بدء ربط AliExpress', false);
+    } finally {
+      aeOauthConnect.disabled = false;
+    }
+  };
+
   const scTest = $('#sc-test');
   if (scTest) scTest.onclick = async () => {
     const provider = $('#sc-provider')?.value;
@@ -2035,7 +3486,7 @@ VIEWS.commerce = async v => {
     if (!message) return toast('اكتب وصفاً للبحث');
     $('#ai-out').textContent = 'جارٍ التحليل…';
     try {
-      const r = await fetch('/api/commerce/ai', {
+      const r = await commerceAi('/api/commerce/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: $('#ai-mode').value, message })

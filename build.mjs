@@ -1,4 +1,5 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 
 const output = 'dist';
@@ -110,6 +111,22 @@ async function configureTelegramCommandCenter() {
     console.warn('Telegram Command Center setup failed:', error.message);
   }
 }
+
+
+function verifyBrowserScriptSyntax() {
+  for (const file of ['js/admin-app.js', 'js/social-inbox-admin.js']) {
+    if (!existsSync(file)) continue;
+    try {
+      new vm.Script(readFileSync(file, 'utf8'), { filename: file });
+      console.log(`Syntax OK → ${file}`);
+    } catch (error) {
+      console.error(`Syntax FAILED → ${file}: ${error.message}`);
+      throw error;
+    }
+  }
+}
+
+verifyBrowserScriptSyntax();
 
 await configureTelegramCommandCenter();
 console.log('Build complete → dist/');

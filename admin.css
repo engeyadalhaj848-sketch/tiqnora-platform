@@ -401,3 +401,258 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   .social-inbox-layout { grid-template-columns: 1fr; }
   .social-thread-list { max-height: 280px; }
 }
+
+
+/* ============================================================
+   Tiqnora V6 — Sales Control Center
+   ============================================================ */
+.v6-hero {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(0,210,255,.10), transparent 34%),
+    radial-gradient(circle at 90% 0%, rgba(10,92,255,.16), transparent 38%),
+    var(--surface);
+}
+.v6-hero h2 { margin:4px 0 4px; font-size:1.25rem; }
+.v6-eyebrow {
+  color:var(--accent);
+  font-size:.68rem;
+  letter-spacing:.12em;
+  font-weight:700;
+  direction:ltr;
+  text-align:right;
+}
+.v6-hero-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.v6-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+  gap:16px;
+}
+.v6-action-item {
+  border:1px solid var(--line);
+  background:var(--bg2);
+  border-radius:12px;
+  padding:14px;
+  margin-bottom:10px;
+}
+.v6-action-top,
+.v6-result-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+.v6-action-draft {
+  margin:12px 0;
+  padding:12px 14px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:rgba(10,92,255,.07);
+  white-space:pre-wrap;
+  line-height:1.75;
+}
+.v6-action-meta {
+  display:flex;
+  gap:14px;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:.78rem;
+}
+.v6-action-buttons {
+  display:flex;
+  gap:8px;
+  margin-top:12px;
+  flex-wrap:wrap;
+}
+.v6-draft-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.8fr) minmax(220px,.7fr);
+  gap:14px;
+  align-items:start;
+}
+.v6-result {
+  margin-top:16px;
+  border:1px solid var(--line-strong);
+  border-radius:12px;
+  padding:16px;
+  background:linear-gradient(180deg, rgba(10,92,255,.08), rgba(0,210,255,.03));
+}
+.v6-result h3 { margin:16px 0 8px; font-size:.92rem; }
+.v6-qual-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  margin-top:12px;
+}
+.v6-qual-grid > div {
+  border:1px solid var(--line);
+  border-radius:9px;
+  padding:10px;
+  background:var(--bg2);
+}
+.v6-qual-grid span {
+  display:block;
+  color:var(--muted);
+  font-size:.7rem;
+  margin-bottom:3px;
+}
+.v6-qual-grid b { font-size:.82rem; }
+.v6-error {
+  margin-top:14px;
+  color:var(--danger);
+  border:1px solid rgba(255,141,155,.25);
+  background:rgba(255,141,155,.06);
+  border-radius:10px;
+  padding:12px;
+}
+@media (max-width: 950px) {
+  .v6-grid { grid-template-columns:1fr; }
+  .v6-draft-grid { grid-template-columns:1fr; }
+  .v6-qual-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 560px) {
+  .v6-hero { align-items:flex-start; flex-direction:column; }
+  .v6-hero-actions { width:100%; }
+  .v6-hero-actions button { flex:1; }
+  .v6-qual-grid { grid-template-columns:1fr; }
+}
+
+
+/* Tiqnora V6 — Proposal Composer */
+.v6-proposal-card { overflow:hidden; }
+.v6-proposal-controls {
+  display:grid;
+  grid-template-columns:minmax(240px,1.4fr) minmax(140px,.6fr) auto;
+  gap:12px;
+  align-items:end;
+  margin-bottom:16px;
+}
+.v6-proposal-preview {
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:16px;
+  background:var(--bg2);
+}
+.v6-proposal-preview h3 { margin:14px 0 8px; font-size:1.05rem; }
+.v6-proposal-preview h4 { margin:0 0 8px; font-size:.86rem; }
+.v6-proposal-summary {
+  margin:0 0 16px;
+  color:var(--text);
+  line-height:1.85;
+}
+.v6-proposal-score {
+  color:var(--muted);
+  font-size:.78rem;
+  white-space:nowrap;
+}
+.v6-proposal-score b { color:var(--accent); font-size:1rem; }
+.v6-proposal-columns {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:12px;
+}
+.v6-chip-wrap { display:flex; flex-wrap:wrap; gap:8px; }
+.v6-service-chip {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:140px;
+  padding:9px 11px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface);
+}
+.v6-service-chip small { color:var(--muted); font-size:.65rem; direction:ltr; text-align:right; }
+.v6-question-list {
+  margin:0;
+  padding-inline-start:22px;
+  color:var(--text);
+  line-height:1.85;
+  font-size:.82rem;
+}
+.v6-safe-box {
+  min-height:48px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:11px 12px;
+  color:var(--muted);
+  background:var(--surface);
+  line-height:1.65;
+}
+.v6-pricing-editor {
+  margin-top:16px;
+  padding-top:16px;
+  border-top:1px solid var(--line);
+}
+.v6-price-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:10px;
+  margin-top:10px;
+}
+.v6-proposal-actions {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+@media (max-width: 760px) {
+  .v6-proposal-controls { grid-template-columns:1fr; }
+  .v6-proposal-controls button { width:100%; }
+  .v6-proposal-columns { grid-template-columns:1fr; }
+  .v6-proposal-score { white-space:normal; }
+}
+
+
+/* Tiqnora V6 — Proposal History */
+.v6-history-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.v6-history-tools select{min-width:180px}
+.v6-history-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0 18px}
+.v6-history-kpi{padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface2)}
+.v6-history-kpi span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.v6-history-kpi b{font-size:22px}
+.v6-history-table-wrap{overflow:auto}
+.v6-history-table{min-width:920px}
+.v6-history-table td{vertical-align:middle}
+.v6-history-detail .v6-result-head{margin-bottom:10px}
+.v6-history-detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}
+.v6-history-detail-grid>div{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
+.v6-history-detail-grid span{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+.v6-history-detail-section{margin-top:18px}
+.v6-history-pricing{display:flex;gap:14px;flex-wrap:wrap;padding:12px;border:1px solid var(--line);border-radius:12px}
+.v6-history-timeline{display:grid;gap:8px}
+.v6-history-timeline>div{display:grid;grid-template-columns:12px minmax(120px,.7fr) 1fr;gap:10px;align-items:center}
+.v6-history-timeline>div>span{width:9px;height:9px;border-radius:50%;background:currentColor;opacity:.65}
+.v6-history-timeline small{color:var(--muted)}
+
+@media (max-width:950px){
+  .v6-history-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .v6-history-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:560px){
+  .v6-history-kpis,.v6-history-detail-grid{grid-template-columns:1fr}
+  .v6-history-tools{width:100%}
+  .v6-history-tools select,.v6-history-tools button{width:100%}
+  .v6-history-timeline>div{grid-template-columns:12px 1fr}
+  .v6-history-timeline small{grid-column:2}
+}
+
+.pill.lifecycle-draft{background:rgba(148,163,184,.15);color:#cbd5e1}
+.pill.lifecycle-needs_review{background:rgba(251,191,36,.15);color:#fbbf24}
+.pill.lifecycle-approved,.pill.lifecycle-ready_to_send{background:rgba(45,212,191,.15);color:#2dd4bf}
+.pill.lifecycle-sent,.pill.lifecycle-viewed{background:rgba(96,165,250,.15);color:#60a5fa}
+.pill.lifecycle-negotiation{background:rgba(167,139,250,.15);color:#a78bfa}
+.pill.lifecycle-accepted{background:rgba(52,211,153,.18);color:#34d399}
+.pill.lifecycle-rejected,.pill.lifecycle-expired{background:rgba(248,113,113,.15);color:#f87171}
+
+.v6-research-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 90px 90px 110px auto;gap:8px;margin:12px 0}
+.v6-research-controls input,.v6-research-filters select{width:100%}
+.v6-research-filters{margin-bottom:10px}
+@media (max-width:800px){.v6-research-controls{grid-template-columns:1fr}}
+
+.v6-studio-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto auto;gap:8px;margin:12px 0}
+@media (max-width:900px){.v6-studio-controls{grid-template-columns:1fr}}
