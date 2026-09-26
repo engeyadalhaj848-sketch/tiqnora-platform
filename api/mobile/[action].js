@@ -29,10 +29,15 @@ export default async function handler(req, res) {
   const supabaseUrl = (process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/$/, '');
   const anon = process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
-  // GET health (merged to stay under Hobby 12-function limit)
   if (action === 'health') {
     if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method' });
-    const checks = { api: true, supabase: false, gemini: !!process.env.GEMINI_API_KEY, telegram: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) };
+    const checks = {
+      api: true,
+      supabase: false,
+      gemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
+      telegram: false
+    };
+    let telegramDetail = { configured: false, paired: false, chat_id_source: null };
     let latencyMs = null;
     try {
       const t0 = Date.now();
@@ -45,12 +50,36 @@ export default async function handler(req, res) {
     } catch {
       checks.supabase = false;
     }
+    try {
+      const { telegramConfigurationStatus } = await import('../../../lib/telegram-status.js');
+      const status = await telegramConfigurationStatus();
+      checks.telegram = Boolean(status.configured);
+      telegramDetail = {
+        configured: Boolean(status.configured),
+        paired: Boolean(status.paired || status.chat_id_configured),
+        chat_id_source: status.chat_id_source || null,
+        bot_token_configured: Boolean(status.bot_token_configured),
+        paired_in_database: Boolean(status.paired_in_database)
+      };
+    } catch {
+      const envChat = Boolean(String(process.env.TELEGRAM_CHAT_ID || '').trim());
+      const token = Boolean(String(process.env.TELEGRAM_BOT_TOKEN || '').trim());
+      checks.telegram = token && envChat;
+      telegramDetail = {
+        configured: checks.telegram,
+        paired: envChat,
+        chat_id_source: envChat ? 'env' : null,
+        bot_token_configured: token,
+        paired_in_database: false
+      };
+    }
     const ok = checks.api && checks.supabase;
     return json(res, ok ? 200 : 503, {
       ok,
       service: 'tiqnora-ai',
       time: new Date().toISOString(),
       checks,
+      telegram: telegramDetail,
       latencyMs,
       version: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown',
       deploy_probe: true,
@@ -58,7 +87,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // GET app-version
   if (action === 'app-version' || (req.method === 'GET' && !action)) {
     if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
     const platform = String(req.query?.platform || '').toLowerCase();
@@ -79,7 +107,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST register-device
   if (action === 'register-device' || req.method === 'POST') {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const token = bearer(req);

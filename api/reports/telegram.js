@@ -59,13 +59,27 @@ function isAuthorizedCron(req) {
   if (cronSecret) {
     return req.headers.authorization === `Bearer ${cronSecret}` || req.headers['x-cron-secret'] === cronSecret;
   }
-  // Fallback for existing deployments where CRON_SECRET has not been added yet.
-  // Vercel adds this header to scheduled invocations. Add CRON_SECRET in Vercel
-  // for strong protection against spoofed requests.
   return Boolean(req.headers['x-vercel-cron-schedule']);
 }
 
+function timedStep(step, startMs, extra = {}) {
+  const duration_ms = Math.max(0, Date.now() - startMs);
+  const payload = {
+    step,
+    duration_ms,
+    status: extra.status || 'ok',
+    provider: extra.provider || null,
+    fallback_used: Boolean(extra.fallback_used),
+    ...extra
+  };
+  console.info('cron_timing', JSON.stringify(payload));
+  return payload;
+}
+
 async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
+  const cronStarted = Date.now();
+  const timings = [];
+
   let workforce = { agents_enabled: [], tasks_created: 0, tasks_existing: 0, error: null };
   let growth = {
     degraded: true,
@@ -74,29 +88,59 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
     error: null
   };
 
-  try {
-    workforce = await ensureDailyWorkforceTasks();
-  } catch (error) {
-    console.error('ensureDailyWorkforceTasks failed', { message: error.message, stack: error.stack });
+  const tParallel = Date.now();
+  const settled = await Promise.allSettled([
+    ensureDailyWorkforceTasks(),
+    runAutonomousGrowth({ taskLimit: 3, skipProspectingIfRecent: true })
+  ]);
+
+  if (settled[0].status === 'fulfilled') {
+    workforce = settled[0].value || workforce;
+    timings.push(timedStep('ensureDailyWorkforceTasks', tParallel, {
+      status: 'ok',
+      tasks_created: workforce.tasks_created,
+      tasks_existing: workforce.tasks_existing
+    }));
+  } else {
+    const error = settled[0].reason;
+    console.error('ensureDailyWorkforceTasks failed', { message: error?.message, stack: error?.stack });
     workforce = {
       agents_enabled: [],
       tasks_created: 0,
       tasks_existing: 0,
-      error: String(error.message || error).slice(0, 500)
+      error: String(error?.message || error).slice(0, 500)
     };
+    timings.push(timedStep('ensureDailyWorkforceTasks', tParallel, { status: 'error' }));
   }
 
-  try {
-    growth = await runAutonomousGrowth();
-  } catch (error) {
-    console.error('runAutonomousGrowth failed', { message: error.message, stack: error.stack });
+  if (settled[1].status === 'fulfilled') {
+    growth = settled[1].value || growth;
+    timings.push(timedStep('runAutonomousGrowth', tParallel, {
+      status: growth?.degraded ? 'degraded' : 'ok',
+      provider: growth?.prospecting?.provider || growth?.tasks?.runs?.[0]?.provider || null,
+      fallback_used: Boolean(growth?.prospecting?.fallback_used || growth?.degraded),
+      candidates: growth?.prospecting?.candidates,
+      tasks_completed: growth?.tasks?.completed
+    }));
+  } else {
+    const error = settled[1].reason;
+    console.error('runAutonomousGrowth failed', { message: error?.message, stack: error?.stack });
     growth = {
       degraded: true,
-      prospecting: { candidates: 0, saved: 0, degraded: true, error_code: error.code || 'GROWTH_FAILED', error_message: String(error.message || error).slice(0, 500) },
+      prospecting: {
+        candidates: 0,
+        saved: 0,
+        degraded: true,
+        error_code: error?.code || 'GROWTH_FAILED',
+        error_message: String(error?.message || error).slice(0, 500)
+      },
       tasks: { completed: 0, failed: 1, due: 0 },
-      error: String(error.message || error).slice(0, 500)
+      error: String(error?.message || error).slice(0, 500)
     };
+    timings.push(timedStep('runAutonomousGrowth', tParallel, { status: 'error' }));
   }
+
+  if (Array.isArray(growth?.timings)) timings.push(...growth.timings);
 
   const saved = growth?.prospecting?.saved || 0;
   const completed = growth?.tasks?.completed || 0;
@@ -104,6 +148,7 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
   const provider = growth?.prospecting?.provider || growth?.tasks?.runs?.[0]?.provider || 'unknown';
   const fallback = Boolean(growth?.degraded || growth?.prospecting?.fallback_used || growth?.prospecting?.degraded);
 
+  const tTelegram = Date.now();
   await telegramIfConfigured([
     '<b>Tiqnora Daily Workforce</b>',
     '',
@@ -119,15 +164,25 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
     `Scheduled social jobs processed: <b>${publishing.processed || 0}</b>`,
     workforce?.error ? `Workforce note: ${String(workforce.error).slice(0, 200)}` : null,
     growth?.prospecting?.error_message ? `Prospecting note: ${String(growth.prospecting.error_message).slice(0, 200)}` : null,
+    growth?.prospecting?.skipped_reason ? `Prospecting: ${String(growth.prospecting.skipped_reason).slice(0, 120)}` : null,
     '',
     'Drafts stay under review. No automatic publishing or customer outreach before approval.'
   ].filter(Boolean).join('\n')).catch(error => console.warn('Growth Telegram notification failed', { message: error.message }));
+  timings.push(timedStep('telegram_notify', tTelegram, { status: 'ok' }));
+  timings.push(timedStep('growth_cron_total', cronStarted, { status: 'ok' }));
 
-  return json(res, 200, { ok: true, mode: 'growth', workforce, growth, publishing });
+  return json(res, 200, {
+    ok: true,
+    mode: 'growth',
+    workforce,
+    growth,
+    publishing,
+    timings
+  });
 }
 
 async function runDailyReport(res, publishing = { processed: 0, results: [] }) {
-  const taskRun = await runQueuedTasks().catch(error => ({
+  const taskRun = await runQueuedTasks({ limit: 3 }).catch(error => ({
     due: 0,
     completed: 0,
     failed: 1,
@@ -222,14 +277,25 @@ export default async function handler(req, res) {
       configured: false,
       bot_token_configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
       chat_id_configured: false,
-      paired_in_database: false
+      paired_in_database: false,
+      paired: false,
+      chat_id_source: null,
+      reachable: null,
+      last_success: null,
+      last_error: null
     }));
     return json(res, 200, {
       ok: true,
       telegram_configured: status.configured,
+      configured: status.configured,
+      paired: Boolean(status.paired || status.chat_id_configured),
       bot_token_configured: status.bot_token_configured,
       chat_id_configured: status.chat_id_configured,
+      chat_id_source: status.chat_id_source || null,
       paired_in_database: status.paired_in_database,
+      reachable: status.reachable,
+      last_success: status.last_success,
+      last_error: status.last_error,
       webhook_url: 'https://tiqnora.com/api/telegram/webhook'
     });
   }
@@ -243,7 +309,6 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, result });
     } catch (error) {
       console.error('Telegram command center failed', { message: error.message, stack: error.stack });
-      // Return 200 after logging to avoid Telegram retry storms for application errors.
       return json(res, 200, { ok: false, error: error.message });
     }
   }
@@ -251,13 +316,20 @@ export default async function handler(req, res) {
   if (!isAuthorizedCron(req)) return json(res, 401, { error: 'Unauthorized' });
 
   try {
-    const publishing = await processPublishingQueue({ limit: 10 }).catch(error => ({
+    const schedule = String(req.headers['x-vercel-cron-schedule'] || '');
+    const tPub = Date.now();
+    const publishing = await processPublishingQueue({ limit: 5 }).catch(error => ({
       ok: false,
       processed: 0,
       results: [],
       error: error.message
     }));
-    const schedule = String(req.headers['x-vercel-cron-schedule'] || '');
+    console.info('cron_timing', JSON.stringify({
+      step: 'processPublishingQueue',
+      duration_ms: Date.now() - tPub,
+      status: publishing?.error ? 'error' : 'ok',
+      processed: publishing?.processed || 0
+    }));
     if (schedule === '0 5 * * *') return await runGrowthCron(res, publishing);
     return await runDailyReport(res, publishing);
   } catch (error) {

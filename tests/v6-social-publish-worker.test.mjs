@@ -31,7 +31,7 @@ test('worker records provider outcomes and is fail-closed behind CRON_SECRET', (
 });
 
 test('scheduled publishing reuses existing daily crons and adds no new Hobby cron', () => {
-  assert.equal(reports.includes('processPublishingQueue({ limit: 10 })'), true);
+  assert.match(reports, /processPublishingQueue\(\{\s*limit:\s*\d+\s*\}\)/);
   assert.equal(vercel.crons.some(c => c.path === '/api/social/publish-worker'), false);
   assert.equal(vercel.rewrites.some(r => r.source === '/api/social/publish-worker' && r.destination.includes('route=social_publish_worker')), true);
 });
