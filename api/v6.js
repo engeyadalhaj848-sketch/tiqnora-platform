@@ -108,6 +108,11 @@ import {
   listReviews as listGbpReviews,
   refreshGbpToken
 } from '../lib/v6/reputation/providers/google-business-profile.js';
+import {
+  MCP_SOCIAL_TOOL_DEFS,
+  executeMcpSocialTool,
+  processPublishingQueue
+} from '../lib/v6/social-runtime.js';
 
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
@@ -2186,6 +2191,76 @@ async function handleWorkforce(req, res, auth) {
 }
 
 
+async function handleMcpSocial(req, res) {
+  if (req.method === 'GET') {
+    return json(res, 200, {
+      name: 'tiqnora-social-mcp',
+      version: '0.2.0',
+      transport: 'http-jsonrpc',
+      primary_provider: 'mcp',
+      fallback_provider: 'gemini_optional',
+      approval_required: true
+    });
+  }
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+
+  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  const id = body.id ?? null;
+  const rpc = (status, payload) => json(res, status, { jsonrpc: '2.0', id, ...payload });
+
+  if (body.jsonrpc !== '2.0') {
+    return rpc(400, { error: { code: -32600, message: 'Invalid Request' } });
+  }
+  if (body.method === 'initialize') {
+    return rpc(200, {
+      result: {
+        protocolVersion: '2025-06-18',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'tiqnora-social-mcp', version: '0.2.0' }
+      }
+    });
+  }
+  if (body.method === 'tools/list') {
+    return rpc(200, { result: { tools: MCP_SOCIAL_TOOL_DEFS } });
+  }
+  if (body.method !== 'tools/call') {
+    return rpc(404, { error: { code: -32601, message: 'Method not found' } });
+  }
+
+  const auth = await requireAdmin(req);
+  if (!auth) return rpc(401, { error: { code: -32001, message: 'admin_auth_required' } });
+
+  try {
+    const result = await executeMcpSocialTool(body.params?.name, body.params?.arguments || {}, auth);
+    return rpc(200, {
+      result: {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result
+      }
+    });
+  } catch (error) {
+    return rpc(error.status || 400, {
+      error: { code: -32602, message: error.message || 'tool_error' }
+    });
+  }
+}
+
+async function handleSocialPublishWorker(req, res) {
+  if (!['GET', 'POST'].includes(req.method)) return json(res, 405, { error: 'Method not allowed' });
+  const secret = String(process.env.CRON_SECRET || '').trim();
+  const auth = String(req.headers.authorization || '');
+  const headerSecret = String(req.headers['x-cron-secret'] || '');
+  if (!secret || (auth !== `Bearer ${secret}` && headerSecret !== secret)) {
+    return json(res, 401, { error: 'Unauthorized' });
+  }
+  try {
+    const result = await processPublishingQueue({ limit: 10 });
+    return json(res, 200, result);
+  } catch (error) {
+    return json(res, error.status || 500, { error: error.message || 'worker_error' });
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -2202,6 +2277,14 @@ export default async function handler(req, res) {
 
   if (route === 'proposal_public') {
     return handleProposalPublic(req, res);
+  }
+
+  if (route === 'mcp_social') {
+    return handleMcpSocial(req, res);
+  }
+
+  if (route === 'social_publish_worker') {
+    return handleSocialPublishWorker(req, res);
   }
 
   const auth = await requireAdmin(req);
