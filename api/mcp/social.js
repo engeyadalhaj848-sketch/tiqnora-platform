@@ -59,10 +59,10 @@ function executeTool(name,args={}){
     return generateContentDraft(idea,campaign,args.brand_profile||{});
   }
   if(name==='social.create_variants') return adaptToChannels(args.draft||{},args.platforms||[],args.brand_profile||{});
-  if(name==='social.create_creative_brief') return generateCreativeBrief(args.draft||{},args.platform||args.draft?.platform||'instagram',args.brand_profile||{});
+  if(name==='social.create_creative_brief') return generateCreativeBrief({...(args.draft||{}), platform:args.platform||args.draft?.platform||'instagram'},args.brand_profile||{});
   if(name==='social.publish'){
     const gate=canPublish(args.content||{});
-    return {ok:Boolean(gate?.allowed),gate,queued:false,message:gate?.allowed?'Approved content may proceed to provider delivery; provider dispatch is intentionally separate.':'Publishing blocked until approval requirements are satisfied.'};
+    return {ok:Boolean(gate?.ok),gate,queued:false,message:gate?.ok?'Approved content may proceed to provider delivery; provider dispatch is intentionally separate.':'Publishing blocked until approval requirements are satisfied.'};
   }
   throw Object.assign(new Error('unknown_tool'),{status:404});
 }
