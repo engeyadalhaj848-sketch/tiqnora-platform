@@ -28,3 +28,13 @@ test('Vercel Hobby serverless API count remains exactly 11', () => {
   const functions = walk(root).filter(path => /\.(?:js|mjs|ts)$/.test(path));
   assert.equal(functions.length, 11, functions.join('\n'));
 });
+
+
+test('core serverless modules load without syntax or export errors', async () => {
+  const [v6, billing] = await Promise.all([
+    import('../api/v6.js'),
+    import('../api/billing/providers.js')
+  ]);
+  assert.equal(typeof v6.default, 'function');
+  assert.equal(typeof billing.default, 'function');
+});
