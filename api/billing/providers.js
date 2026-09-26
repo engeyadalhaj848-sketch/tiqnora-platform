@@ -1258,7 +1258,9 @@ export default async function handler(req, res) {
         { slug: 'mada', name: 'Mada', enabled: false, envRequired: ['MADA_VIA_PROVIDER'], note: 'Typically via HyperPay or Tap' },
       ],
       aliexpress: { credentials_configured: ae.configured, missing: ae.missing },
-      message: whop.configured\n        ? `Payments ready — Whop ${whop.sandbox ? 'sandbox' : 'live'} + AliExpress OAuth through the consolidated hub.`\n        : 'Payments require Whop configuration; manual orders remain available.',
+      message: whop.configured
+        ? `Payments ready — Whop ${whop.sandbox ? 'sandbox' : 'live'} + AliExpress OAuth through the consolidated hub.`
+        : 'Payments require Whop configuration; manual orders remain available.',
     }));
   } catch (e) {
     return json(res, 500, { ok: false, error: 'internal_error', message: e.message || 'error' });
