@@ -9,7 +9,6 @@ function json(res, status, payload) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Access-Control-Allow-Origin', '*');
   return res.end(JSON.stringify(payload));
 }
 
@@ -137,6 +136,35 @@ async function sbRest(path, { method = 'GET', body, prefer } = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!r.ok) return { error: data?.message || data || r.statusText, status: r.status };
   return { data };
+}
+
+async function requireAdmin(authHeader) {
+  if (!SERVICE) return { ok: false, status: 503, error: 'server_not_configured' };
+  const match = String(authHeader || '').match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1] || '';
+  if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
+
+  try {
+    const ur = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: ANON || SERVICE, Accept: 'application/json' },
+    });
+    const user = await ur.json().catch(() => null);
+    if (!ur.ok || !user?.id) return { ok: false, status: 401, error: 'invalid_admin_session' };
+
+    const pr = await fetch(
+      `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`,
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, Accept: 'application/json' } }
+    );
+    if (!pr.ok) return { ok: false, status: 503, error: 'admin_profile_unavailable' };
+    const rows = await pr.json().catch(() => []);
+    const profile = Array.isArray(rows) ? rows[0] : null;
+    if (!profile || profile.is_active === false || !['admin', 'super_admin'].includes(String(profile.role || ''))) {
+      return { ok: false, status: 403, error: 'admin_permission_required' };
+    }
+    return { ok: true, user, role: profile.role };
+  } catch {
+    return { ok: false, status: 503, error: 'admin_auth_unavailable' };
+  }
 }
 
 async function handleScout(body) {
@@ -1562,11 +1590,13 @@ async function handleSupplierCenter(body = {}) {
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(204).end();
   }
+
+  const admin = await requireAdmin(req.headers?.authorization || '');
+  if (!admin.ok) return json(res, admin.status, { error: admin.error });
 
   // GET: suppliers status / scout history (merged endpoints for Hobby plan)
   if (req.method === 'GET') {

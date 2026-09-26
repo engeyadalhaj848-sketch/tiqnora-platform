@@ -100,7 +100,7 @@
     return card;
   }
 
-  function addConnectionCard(view) {
+  function addConnectionCard(view, db) {
     const card = addCard(view, 'ربط المنصات', 'اربط الحساب الرسمي عبر OAuth الآمن. لا يتم عرض أو حفظ أي Access Token داخل المتصفح.');
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:14px';
@@ -120,12 +120,29 @@
       button.textContent = 'ربط الحساب';
       button.type = 'button';
       button.dataset.connectPlatform = key;
-      button.onclick = () => {
+      button.onclick = async () => {
         button.disabled = true;
         button.textContent = 'جارٍ فتح OAuth…';
-        const organizationId = window.TiqnoraDB?.organizationId || '';
-        const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : '';
-        window.location.href = `/api/social/oauth/${key}${query}`;
+        try {
+          const { data: { session } } = await db.auth.getSession();
+          if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+          const organizationId = window.TiqnoraDB?.organizationId || '';
+          const params = new URLSearchParams({ format: 'json' });
+          if (organizationId) params.set('organization_id', organizationId);
+          const response = await fetch(`/api/social/oauth/${key}?${params.toString()}`, {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              Accept: 'application/json'
+            }
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.authorize_url) throw new Error(payload.error || 'تعذر بدء OAuth');
+          window.location.href = payload.authorize_url;
+        } catch (e) {
+          button.disabled = false;
+          button.textContent = 'ربط الحساب';
+          window.alert(e.message || 'تعذر بدء OAuth');
+        }
       };
       item.appendChild(button);
       grid.appendChild(item);
@@ -861,7 +878,7 @@
     root.id = 'social-admin-extra';
     view.appendChild(root);
 
-    addConnectionCard(root);
+    addConnectionCard(root, db);
     addTikTokUploadCard(root, db);
     addTikTokDirectPostCard(root, db);
     const webhookCard = addCard(root, 'إعداد Webhook', 'نقطة دخول واحدة لكل المنصات، ويحدد Adapter طريقة تطبيع الحدث.');
