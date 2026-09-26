@@ -7,10 +7,6 @@
     {
       "path": "/api/reports/telegram",
       "schedule": "0 17 * * *"
-    },
-    {
-      "path": "/api/social/publish-worker",
-      "schedule": "*/15 * * * *"
     }
   ],
   "cleanUrls": true,
@@ -155,6 +151,22 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/social/publish-worker/",
+      "destination": "/api/v6?route=social_publish_worker"
+    },
+    {
+      "source": "/api/social/publish-worker",
+      "destination": "/api/v6?route=social_publish_worker"
+    },
+    {
+      "source": "/api/mcp/social/",
+      "destination": "/api/v6?route=mcp_social"
+    },
+    {
+      "source": "/api/mcp/social",
+      "destination": "/api/v6?route=mcp_social"
+    },
     {
       "source": "/proposal/:token/",
       "destination": "/proposal.html"
