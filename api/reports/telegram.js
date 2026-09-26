@@ -1,4 +1,5 @@
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
+import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import {
   handleTelegramUpdate,
   telegramConfigurationStatus,
@@ -64,7 +65,7 @@ function isAuthorizedCron(req) {
   return Boolean(req.headers['x-vercel-cron-schedule']);
 }
 
-async function runGrowthCron(res) {
+async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
   const workforce = await ensureDailyWorkforceTasks();
   const growth = await runAutonomousGrowth();
   const saved = growth?.prospecting?.saved || 0;
@@ -81,14 +82,15 @@ async function runGrowthCron(res) {
     `AI mode: <b>${growth?.degraded ? 'degraded' : 'normal'}</b>`,
     `Completed agent tasks: <b>${completed}</b>`,
     `Failed tasks: <b>${failed}</b>`,
+    `Scheduled social jobs processed: <b>${publishing.processed || 0}</b>`,
     '',
     'Drafts stay under review. No automatic publishing or customer outreach before approval.'
   ].join('\n')).catch(error => console.warn('Growth Telegram notification failed', { message: error.message }));
 
-  return json(res, 200, { ok: true, mode: 'growth', workforce, growth });
+  return json(res, 200, { ok: true, mode: 'growth', workforce, growth, publishing });
 }
 
-async function runDailyReport(res) {
+async function runDailyReport(res, publishing = { processed: 0, results: [] }) {
   const taskRun = await runQueuedTasks().catch(error => ({
     due: 0,
     completed: 0,
@@ -133,6 +135,7 @@ async function runDailyReport(res) {
     `✉️ الاستفسارات: <b>${leads?.length || 0}</b>`,
     `👥 العملاء النشطون: <b>${customers?.length || 0}</b>`,
     `📣 أحداث التواصل: <b>${events?.length || 0}</b>`,
+    `📤 منشورات مجدولة تمت معالجتها: <b>${publishing.processed || 0}</b>`,
     '',
     `<b>Growth Engine</b>`,
     `🎯 فرص CRM: <b>${prospects?.length || 0}</b>`,
@@ -167,7 +170,8 @@ async function runDailyReport(res) {
       ai_completed_24h: aiOk,
       ai_failed_24h: aiFailed?.length || 0,
       active_agents: activeAgents,
-      providers: providersConfigured
+      providers: providersConfigured,
+      publishing
     }
   });
 }
@@ -211,9 +215,15 @@ export default async function handler(req, res) {
   if (!isAuthorizedCron(req)) return json(res, 401, { error: 'Unauthorized' });
 
   try {
+    const publishing = await processPublishingQueue({ limit: 10 }).catch(error => ({
+      ok: false,
+      processed: 0,
+      results: [],
+      error: error.message
+    }));
     const schedule = String(req.headers['x-vercel-cron-schedule'] || '');
-    if (schedule === '0 5 * * *') return await runGrowthCron(res);
-    return await runDailyReport(res);
+    if (schedule === '0 5 * * *') return await runGrowthCron(res, publishing);
+    return await runDailyReport(res, publishing);
   } catch (error) {
     console.error('Scheduled Tiqnora job failed', { message: error.message, stack: error.stack });
     return json(res, 503, { sent: false, error: error.message });
