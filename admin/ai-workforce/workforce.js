@@ -7,9 +7,17 @@
   let db, me, org, agents = [], selectedAgent = null;
   const state = { counts: {}, conversations: [], tasks: [], memory: [] };
   const labels = {
-    marketing: ['تسويق', 'MA', '#6de8dc'], content: ['محتوى', 'CO', '#efc875'],
-    'social-media': ['تواصل اجتماعي', 'SM', '#b399ff'], developer: ['تقنية', 'CT', '#76e6a1'],
-    commerce: ['تجارة', 'CM', '#7aa7ff']
+    assistant: ['مساعد تنفيذي', 'AI', '#6de8dc'],
+    marketing: ['تسويق ونمو', 'MA', '#6de8dc'],
+    sales: ['مبيعات', 'SA', '#efc875'],
+    ads: ['إعلانات', 'AD', '#ff9d76'],
+    channel: ['تحليل القنوات', 'CH', '#8bc6ff'],
+    content: ['محتوى وSEO', 'CO', '#efc875'],
+    'social-media': ['تواصل اجتماعي', 'SM', '#b399ff'],
+    'image-designer': ['تصميم صور', 'ID', '#ff9bc2'],
+    'video-designer': ['تصميم فيديو', 'VD', '#ffb676'],
+    developer: ['تقنية وهندسة', 'CT', '#76e6a1'],
+    commerce: ['تجارة ومنتجات', 'CM', '#7aa7ff']
   };
   const statusAr = { todo:'جديدة', in_progress:'قيد التنفيذ', blocked:'متوقفة', done:'مكتملة', cancelled:'ملغاة' };
   const priorityAr = { low:'منخفضة', medium:'متوسطة', high:'عالية', urgent:'عاجلة' };
@@ -40,7 +48,7 @@
     await loadData(); renderShell(); renderOverview();
   }
   async function loadData() {
-    const { data, error } = await db.from('ai_agents').select('*').eq('organization_id', org.id).in('slug', ['marketing','content','social-media','developer','commerce']).order('created_at');
+    const { data, error } = await db.from('ai_agents').select('*').eq('organization_id', org.id).eq('is_enabled', true).order('created_at');
     if (error) throw error;
     agents = data || []; selectedAgent = selectedAgent || agents[0] || null;
     const [tasks, memory, conversations] = await Promise.all([
@@ -86,7 +94,7 @@
   function renderChat() {
     if (!selectedAgent) return $('#view').innerHTML = '<div class="panel empty">لا يوجد موظفون. نفّذ migration قاعدة البيانات.</div>';
     const history = state.conversations.filter(x => x.agent_id === selectedAgent.id).sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
-    $('#view').innerHTML = `<div class="chat-layout"><aside class="panel agent-picker">${pickerHtml()}</aside><section class="panel chat-panel"><div class="panel-head"><div><h2>${esc(selectedAgent.name_ar || selectedAgent.name)}</h2><span class="hint">${esc(selectedAgent.provider)} · ${esc(selectedAgent.model)}</span></div><span class="status">جاهز</span></div><div class="messages" id="messages">${history.length ? history.map(messagePair).join('') : '<div class="empty">ابدأ بإرسال أول توجيه لهذا الموظف.</div>'}</div><form class="chat-form" id="chat-form"><textarea id="chat-input" maxlength="20000" required placeholder="اكتب توجيهًا واضحًا… (Enter للإرسال، Shift+Enter لسطر جديد)"></textarea><button class="btn btn-primary" id="send" type="submit">إرسال</button></form></section></div>`;
+    $('#view').innerHTML = `<div class="chat-layout"><aside class="panel agent-picker">${pickerHtml()}</aside><section class="panel chat-panel"><div class="panel-head"><div><h2>${esc(selectedAgent.name_ar || selectedAgent.name)}</h2><span class="hint">${esc(window.__TIQNORA_AI_PRIMARY__ || 'OpenAI')} · ${esc(selectedAgent.model || 'chat-latest')}</span></div><span class="status">جاهز</span></div><div class="messages" id="messages">${history.length ? history.map(messagePair).join('') : '<div class="empty">ابدأ بإرسال أول توجيه لهذا الموظف.</div>'}</div><form class="chat-form" id="chat-form"><textarea id="chat-input" maxlength="20000" required placeholder="اكتب توجيهًا واضحًا… (Enter للإرسال، Shift+Enter لسطر جديد)"></textarea><button class="btn btn-primary" id="send" type="submit">إرسال</button></form></section></div>`;
     $$('[data-pick]').forEach(b => b.onclick = () => { selectedAgent = agents.find(a => a.id === b.dataset.pick); renderChat(); });
     $('#chat-form').onsubmit = sendMessage;
     $('#chat-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#chat-form').requestSubmit(); } };
