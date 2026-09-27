@@ -594,6 +594,7 @@ VIEWS['sales-v6'] = async v => {
         <input id="v6-research-industry" placeholder="القطاع (dental_clinic)" />
         <select id="v6-research-source" title="المصدر">
           <option value="fixture">تجريبي (fixture)</option>
+          <option value="apify_maps">Apify · Google Maps</option>
           <option value="google_places">Google Places</option>
           <option value="manual">يدوي</option>
         </select>
@@ -1279,19 +1280,35 @@ VIEWS['sales-v6'] = async v => {
     try {
       const statusEl = $('#v6-research-status');
       if (statusEl) statusEl.textContent = 'الحالة: Running…';
-      const out = await v6Api('research', {
-        method: 'POST',
-        body: {
-          op: 'run',
-          query: $('#v6-research-query')?.value || '',
-          city: $('#v6-research-city')?.value || '',
-          industry: $('#v6-research-industry')?.value || '',
-          target_count: Number($('#v6-research-limit')?.value || 10),
-          source: $('#v6-research-source')?.value || 'fixture',
-          min_rating: $('#v6-research-min-rating')?.value !== '' ? Number($('#v6-research-min-rating').value) : undefined,
-          min_reviews: $('#v6-research-min-reviews')?.value !== '' ? Number($('#v6-research-min-reviews').value) : undefined
-        }
-      });
+      const source = $('#v6-research-source')?.value || 'fixture';
+      const query = $('#v6-research-query')?.value || '';
+      const city = $('#v6-research-city')?.value || '';
+      const industry = $('#v6-research-industry')?.value || '';
+      const requestedCount = Number($('#v6-research-limit')?.value || 10);
+      const out = source === 'apify_maps'
+        ? await v6Api('apify', {
+            method: 'POST',
+            query: { op: 'maps-leads' },
+            body: {
+              keyword: query || industry || 'مطاعم',
+              city: city || 'المدينة المنورة',
+              industry: industry || undefined,
+              maxResults: Math.min(requestedCount || 3, 50)
+            }
+          })
+        : await v6Api('research', {
+            method: 'POST',
+            body: {
+              op: 'run',
+              query,
+              city,
+              industry,
+              target_count: requestedCount,
+              source,
+              min_rating: $('#v6-research-min-rating')?.value !== '' ? Number($('#v6-research-min-rating').value) : undefined,
+              min_reviews: $('#v6-research-min-reviews')?.value !== '' ? Number($('#v6-research-min-reviews').value) : undefined
+            }
+          });
       if (statusEl) statusEl.textContent = `الحالة: Completed · ${out.summary?.discovered ?? 0} نتيجة`;
       renderResearchResults(out);
     } catch (e) {
