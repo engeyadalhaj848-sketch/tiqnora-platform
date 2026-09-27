@@ -193,11 +193,11 @@
     },
     {
       "source": "/proposal/:token/",
-      "destination": "/proposal.html"
+      "destination": "/proposal"
     },
     {
       "source": "/proposal/:token",
-      "destination": "/proposal.html"
+      "destination": "/proposal"
     },
     {
       "source": "/api/ai-sales/draft-reply",
