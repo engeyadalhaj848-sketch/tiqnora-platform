@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const callback = readFileSync(new URL('../api/social/oauth/tiktok-business.js', import.meta.url), 'utf8');
+const callback = readFileSync(new URL('../api/social/oauth/[provider].js', import.meta.url), 'utf8');
 
 test('TikTok for Business callback is public-ready without exposing auth codes', () => {
   assert.equal(callback.includes("status: 'callback_ready'"), true);
