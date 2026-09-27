@@ -677,6 +677,32 @@ function isWhatsappEmotionalMessage(value) {
   return /(زعلان|زعلت|متضايق|مضايق|منزعج|متوتر|قلقان|خايف|محبط|مقهور|مستفز|مزعج|سيء|سيئ|مو عاجبني|مش عاجبني|انت تعبان|ياخي انت تعبان|ما ?تفهم|ماتفهم|ما ?تفهمني|ماتفهمني|ردك غلط|نفس الرد|تكرر|تردد|بصراحه انت|شكرا|مشكور|يعطيك العافيه|الله يسعدك|ممتاز|رائع|احبكم|كفو|بيض الله وجهك)/.test(input);
 }
 
+function looksLikeBusinessWorkRequest(value) {
+  const input = normalizeText(value);
+  return /(موقع|متجر|واتساب|whatsapp|crm|ذكاء اصطناعي|وكيل|سوشيال|seo|تسويق|اعلان|اعلانات|حمله|حملة|تصميم|تطوير|برمجه|برمجة|ربط|تكامل|نظام|اشتراك|فاتوره|فاتورة|دفع|سعر|عرض|عرض سعر|مشروع|طلب|خدمه|خدمة|صيانه|صيانة|شبكه|شبكة|كاميرات|سنترال|سيرفر|استضافه|استضافة|دومين|تطبيق|متجر الكتروني|متجر إلكتروني)/.test(input);
+}
+
+function conversationRecoveryFallback(event, history, fallback) {
+  const input = normalizeText(event.content);
+  const lastAssistant = [...(history || [])].reverse().find(x => x?.role === 'assistant');
+  const lastText = normalizeText(lastAssistant?.text || '');
+
+  if (/(عن ايش تعتذر|ليش تعتذر|ليش تعتذر مني|وش تعتذر عليه|على ايش تعتذر)/.test(input)
+      && /(اعتذر|اسف|آسف)/.test(lastText)) {
+    return 'كنت أعتذر لأن ردي السابق ما فهم مقصدك بالشكل الصحيح، مو لأنك سويت شيء غلط. كمل معي وأنا بأفهم كلامك من سياقه وأرد عليك مباشرة.';
+  }
+
+  if (/(وش تقصد|ايش تقصد|ماذا تقصد|وضح كلامك|وضح لي قصدك)/.test(input) && lastAssistant?.text) {
+    return 'قصدي إني بأعتمد على سياق كلامك السابق وأجاوبك على المقصود مباشرة، بدون تكرار أسئلة أو تحويل غير لازم.';
+  }
+
+  if (/(ليش|ليه|كيف|متى|وين|منو|مين|وش|ايش|ماذا)/.test(input) && lastAssistant?.text) {
+    return 'أفهم إن سؤالك متعلق بالرد السابق. خلني أوضحها من سياق المحادثة بدل ما أفترض شيء من عندي.';
+  }
+
+  return fallback;
+}
+
 function whatsappContextFallback(event, rule, { followUp = false } = {}) {
   const input = normalizeText(event.content);
   const templated = String(rule?.reply_template || 'شكرًا لتواصلك معنا. كيف نقدر نخدمك؟')
@@ -792,20 +818,48 @@ async function generateAgentReply(event, rule, options = {}) {
     const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
     const latinChars = (text.match(/[A-Za-z]/g) || []).length;
     const wrongLanguage = arabicCustomer && latinChars > Math.max(18, arabicChars * 0.7);
-    if (!text || tooShort || greetingOnly || repeatedWelcome || wrongLanguage) {
-      console.warn('Social AI reply unsuitable; using contextual fallback', {
+    const unjustifiedHandoff = /القسم المختص/.test(text) && !looksLikeBusinessWorkRequest(event.content);
+
+    if (wrongLanguage || unjustifiedHandoff) {
+      try {
+        const retryPrompt = [
+          prompt,
+          '',
+          'محاولة تصحيح إلزامية:',
+          'أجب بالعربية فقط.',
+          'لا تحول للقسم المختص إذا كانت الرسالة مجرد متابعة للحديث السابق أو سؤالًا عن ردك السابق أو تعبيرًا عاطفيًا.',
+          'استخدم السياق السابق لفهم المقصود وأجب مباشرة.',
+          `الرد السابق المرفوض: ${text}`
+        ].join('\n');
+        const retry = await callSocialAI(retryPrompt, { temperature: 0.25, maxTokens: 320 });
+        const retryText = String(retry?.text || '').replace(/\s+/g, ' ').trim();
+        const retryArabic = (retryText.match(/[\u0600-\u06FF]/g) || []).length;
+        const retryLatin = (retryText.match(/[A-Za-z]/g) || []).length;
+        const retryWrongLanguage = arabicCustomer && retryLatin > Math.max(18, retryArabic * 0.7);
+        const retryBadHandoff = /القسم المختص/.test(retryText) && !looksLikeBusinessWorkRequest(event.content);
+        if (retryText.length >= 18 && !retryWrongLanguage && !retryBadHandoff) {
+          return retryText.slice(0, 700);
+        }
+      } catch (retryError) {
+        console.warn('Social AI retry failed', { message: retryError.message });
+      }
+    }
+
+    if (!text || tooShort || greetingOnly || repeatedWelcome || wrongLanguage || unjustifiedHandoff) {
+      console.warn('Social AI reply unsuitable; using conversation recovery fallback', {
         provider: result?.provider || null,
         length: text.length,
         words: words.length,
         follow_up: followUp,
-        wrong_language: wrongLanguage
+        wrong_language: wrongLanguage,
+        unjustified_handoff: unjustifiedHandoff
       });
-      return fallback.slice(0, 700);
+      return conversationRecoveryFallback(event, history, fallback).slice(0, 700);
     }
     return text.slice(0, 700);
   } catch (error) {
-    console.warn('Social AI reply generation failed; using contextual fallback', { message: error.message });
-    return fallback.slice(0, 700);
+    console.warn('Social AI reply generation failed; using conversation recovery fallback', { message: error.message });
+    return conversationRecoveryFallback(event, history, fallback).slice(0, 700);
   }
 }
 
