@@ -594,10 +594,11 @@ VIEWS['sales-v6'] = async v => {
         <input id="v6-research-industry" placeholder="القطاع (dental_clinic)" />
         <select id="v6-research-source" title="المصدر">
           <option value="fixture">تجريبي (fixture)</option>
+          <option value="apify_maps">Apify · Google Maps</option>
           <option value="google_places">Google Places</option>
           <option value="manual">يدوي</option>
         </select>
-        <input id="v6-research-limit" type="number" min="1" max="40" value="10" title="العدد" />
+        <input id="v6-research-limit" type="number" min="1" max="40" value="10" title="عدد النتائج" placeholder="عدد النتائج" />
         <input id="v6-research-min-rating" type="number" min="0" max="5" step="0.1" placeholder="أدنى تقييم" title="أدنى تقييم" />
         <input id="v6-research-min-reviews" type="number" min="0" placeholder="أدنى مراجعات" title="أدنى مراجعات" />
         <button class="btn-primary" id="v6-research-run">بدء البحث</button>
@@ -813,7 +814,11 @@ VIEWS['sales-v6'] = async v => {
     if (!host || !kpis) return;
 
     proposalHistoryRows = payload?.proposals || [];
-    const summary = payload?.summary || {};
+    const summary = payload?.summary || {
+      discovered: payload?.items_collected ?? researchCandidates.length,
+      qualified: payload?.qualified_count ?? researchCandidates.filter(c => c.status === 'qualified').length,
+      duplicates: payload?.duplicate_count ?? researchCandidates.filter(c => c.status === 'duplicate').length
+    };
 
     kpis.innerHTML = `
       <div class="v6-history-kpi"><span>الإجمالي</span><b>${summary.total ?? proposalHistoryRows.length}</b></div>
@@ -1209,7 +1214,7 @@ VIEWS['sales-v6'] = async v => {
       return;
     }
     host.innerHTML = `
-      <div class="muted" style="margin-bottom:8px">اكتشف ${summary.discovered ?? researchCandidates.length} · مؤهل ${summary.qualified ?? 0} · مكرر ${summary.duplicates ?? 0}</div>
+      <div class="muted" style="margin-bottom:8px">اكتشف ${summary.discovered ?? researchCandidates.length} · مؤهل ${summary.qualified ?? 0} · مكرر ${summary.duplicates ?? 0}${payload?.run_id ? ` · Apify Run: ${esc(payload.run_id)}` : ''}</div>
       <div class="table-wrap">
         <table class="v6-history-table">
           <thead><tr>
@@ -1221,7 +1226,7 @@ VIEWS['sales-v6'] = async v => {
               const rec = c.record || c;
               const services = (c.recommended_services || []).slice(0,2).join(', ');
               return `<tr>
-                <td><b>${esc(rec.business_name || '—')}</b></td>
+                <td><b>${esc(rec.business_name || '—')}</b>${rec.rating ? `<div class="muted">★ ${esc(rec.rating)} · ${esc(rec.review_count ?? 0)} مراجعة</div>` : ''}${rec.website ? `<div><a href="${esc(rec.website)}" target="_blank" rel="noopener">الموقع</a></div>` : ''}</td>
                 <td>${esc(c.vertical || rec.industry || '—')}</td>
                 <td>${esc(rec.city || '—')}</td>
                 <td>${esc(rec.source || '—')}</td>
@@ -1279,20 +1284,36 @@ VIEWS['sales-v6'] = async v => {
     try {
       const statusEl = $('#v6-research-status');
       if (statusEl) statusEl.textContent = 'الحالة: Running…';
-      const out = await v6Api('research', {
-        method: 'POST',
-        body: {
-          op: 'run',
-          query: $('#v6-research-query')?.value || '',
-          city: $('#v6-research-city')?.value || '',
-          industry: $('#v6-research-industry')?.value || '',
-          target_count: Number($('#v6-research-limit')?.value || 10),
-          source: $('#v6-research-source')?.value || 'fixture',
-          min_rating: $('#v6-research-min-rating')?.value !== '' ? Number($('#v6-research-min-rating').value) : undefined,
-          min_reviews: $('#v6-research-min-reviews')?.value !== '' ? Number($('#v6-research-min-reviews').value) : undefined
-        }
-      });
-      if (statusEl) statusEl.textContent = `الحالة: Completed · ${out.summary?.discovered ?? 0} نتيجة`;
+      const source = $('#v6-research-source')?.value || 'fixture';
+      const query = $('#v6-research-query')?.value || '';
+      const city = $('#v6-research-city')?.value || '';
+      const industry = $('#v6-research-industry')?.value || '';
+      const requestedCount = Number($('#v6-research-limit')?.value || 10);
+      const out = source === 'apify_maps'
+        ? await v6Api('apify', {
+            method: 'POST',
+            query: { op: 'maps-leads' },
+            body: {
+              keyword: query || industry || 'مطاعم',
+              city: city || 'المدينة المنورة',
+              industry: industry || undefined,
+              maxResults: Math.min(Math.max(requestedCount || 3, 1), 40)
+            }
+          })
+        : await v6Api('research', {
+            method: 'POST',
+            body: {
+              op: 'run',
+              query,
+              city,
+              industry,
+              target_count: requestedCount,
+              source,
+              min_rating: $('#v6-research-min-rating')?.value !== '' ? Number($('#v6-research-min-rating').value) : undefined,
+              min_reviews: $('#v6-research-min-reviews')?.value !== '' ? Number($('#v6-research-min-reviews').value) : undefined
+            }
+          });
+      if (statusEl) statusEl.textContent = `الحالة: Completed · ${out.summary?.discovered ?? out.items_collected ?? out.candidates?.length ?? 0} نتيجة`;
       renderResearchResults(out);
     } catch (e) {
       if (host) host.innerHTML = `<div class="v6-error">${esc(e.message)}</div>`;

@@ -152,6 +152,30 @@
   ],
   "rewrites": [
     {
+      "source": "/api/integrations/apify/status",
+      "destination": "/api/v6?route=apify&op=status"
+    },
+    {
+      "source": "/api/integrations/apify/test",
+      "destination": "/api/v6?route=apify&op=test"
+    },
+    {
+      "source": "/api/integrations/apify/actors/run",
+      "destination": "/api/v6?route=apify&op=actors-run"
+    },
+    {
+      "source": "/api/integrations/apify/runs/:id",
+      "destination": "/api/v6?route=apify&op=run-status&id=:id"
+    },
+    {
+      "source": "/api/integrations/apify/datasets/:id",
+      "destination": "/api/v6?route=apify&op=dataset&id=:id"
+    },
+    {
+      "source": "/api/integrations/apify/maps-leads",
+      "destination": "/api/v6?route=apify&op=maps-leads"
+    },
+    {
       "source": "/api/social/publish-worker/",
       "destination": "/api/v6?route=social_publish_worker"
     },

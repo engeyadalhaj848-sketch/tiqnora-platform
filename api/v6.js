@@ -113,6 +113,17 @@ import {
   executeMcpSocialTool,
   processPublishingQueue
 } from '../lib/v6/social-runtime.js';
+import {
+  isApifyConfigured,
+  testConnection as testApifyConnection,
+  runActor as runApifyActor,
+  getRun as getApifyRun,
+  getDatasetItems as getApifyDatasetItems,
+  clampMaxResults,
+  DEFAULT_MAX_RESULTS as APIFY_DEFAULT_MAX_RESULTS,
+  HARD_CAP_RESULTS as APIFY_HARD_CAP_RESULTS
+} from '../lib/integrations/apify.js';
+import { runApifyGoogleMapsLeadWorkflow } from '../lib/v6/apify-lead-workflow.js';
 
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
@@ -2245,6 +2256,82 @@ async function handleMcpSocial(req, res) {
   }
 }
 
+
+async function handleApify(req, res) {
+  const op = String(req.query?.op || req.body?.op || 'status').toLowerCase().replace(/_/g, '-');
+
+  if (op === 'status' && req.method === 'GET') {
+    const configured = isApifyConfigured();
+    const connection = configured ? await testApifyConnection({ timeoutMs: 10000 }) : null;
+    return json(res, 200, {
+      ok: true,
+      provider: 'apify',
+      configured,
+      status: configured ? connection?.status || 'connected' : 'not_configured',
+      mcp_status: 'available_not_enabled',
+      cost_safeguards: { default_max_results: APIFY_DEFAULT_MAX_RESULTS, hard_cap: APIFY_HARD_CAP_RESULTS },
+      username: connection?.username || null,
+      last_checked_at: new Date().toISOString()
+    });
+  }
+
+  if ((op === 'test' || op === 'test-connection') && req.method === 'POST') {
+    const result = await testApifyConnection({ timeoutMs: 12000 });
+    return json(res, result.ok ? 200 : result.status === 'not_configured' ? 503 : 502, result);
+  }
+
+  if ((op === 'actors-run' || op === 'run') && req.method === 'POST') {
+    const actorId = req.body?.actorId || req.body?.actor_id || req.body?.actor;
+    if (!actorId) return json(res, 400, { ok: false, error: 'actorId required' });
+    const input = { ...(req.body?.input || req.body || {}) };
+    delete input.actorId; delete input.actor_id; delete input.actor; delete input.op;
+    if (input.maxCrawledPlaces != null) input.maxCrawledPlaces = clampMaxResults(input.maxCrawledPlaces);
+    if (input.maxResults != null) input.maxResults = clampMaxResults(input.maxResults);
+    const started = await runApifyActor(String(actorId), input, {
+      hardCap: APIFY_HARD_CAP_RESULTS,
+      defaultMax: APIFY_DEFAULT_MAX_RESULTS
+    });
+    return json(res, 200, { ok: true, ...started, note: 'Run started. No auto CRM import.' });
+  }
+
+  if (op === 'run-status' && req.method === 'GET') {
+    const runId = String(req.query?.id || '').trim();
+    if (!runId) return json(res, 400, { ok: false, error: 'run id required' });
+    return json(res, 200, await getApifyRun(runId));
+  }
+
+  if (op === 'dataset' && req.method === 'GET') {
+    const datasetId = String(req.query?.id || '').trim();
+    if (!datasetId) return json(res, 400, { ok: false, error: 'dataset id required' });
+    const limit = clampMaxResults(req.query?.limit || APIFY_DEFAULT_MAX_RESULTS);
+    return json(res, 200, await getApifyDatasetItems(datasetId, { limit }));
+  }
+
+  if ((op === 'maps-leads' || op === 'google-maps-leads') && req.method === 'POST') {
+    const maxResults = clampMaxResults(req.body?.maxResults ?? req.body?.limit ?? 3);
+    const workflow = await runApifyGoogleMapsLeadWorkflow({
+      keyword: req.body?.keyword || req.body?.query || 'مطاعم',
+      city: req.body?.city || 'المدينة المنورة',
+      maxResults,
+      industry: req.body?.industry,
+      actorId: req.body?.actorId || req.body?.actor_id
+    }, {
+      commitCandidates: false,
+      existingLeads: Array.isArray(req.body?.existingLeads) ? req.body.existingLeads : []
+    });
+    const failureStatus = workflow.status === 'not_configured' ? 503 : 502;
+    return json(res, workflow.ok ? 200 : failureStatus, {
+      ...workflow,
+      error: workflow.ok ? undefined : (workflow.message || workflow.status || 'Apify workflow failed'),
+      preview_only: true,
+      crm_written: false,
+      outreach_sent: false
+    });
+  }
+
+  return json(res, 404, { ok: false, error: 'Unknown Apify operation' });
+}
+
 async function handleSocialPublishWorker(req, res) {
   if (!['GET', 'POST'].includes(req.method)) return json(res, 405, { error: 'Method not allowed' });
   const secret = String(process.env.CRON_SECRET || '').trim();
@@ -2301,6 +2388,7 @@ export default async function handler(req, res) {
     if (route === 'reputation') return await handleReputation(req, res, auth);
     if (route === 'seo') return await handleSeo(req, res, auth);
     if (route === 'workforce') return await handleWorkforce(req, res, auth);
+    if (route === 'apify') return await handleApify(req, res);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
