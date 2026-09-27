@@ -57,6 +57,18 @@ test('WhatsApp support escalation stays queued for staff follow-up', () => {
 test('WhatsApp emotion-only frustration is not escalated as an unknown work request', () => {
   assert.equal(webhook.includes('isWhatsappEmotionalMessage'), true);
   assert.equal(webhook.includes('ماتفهم'), true);
-  assert.equal(webhook.includes('المشاعر وحدها ليست سببًا لتحويل المحادثة'), true);
+  assert.equal(webhook.includes('المشاعر أو المزاح أو عدم الفهم ليست سببًا للتحويل'), true);
   assert.equal(webhook.includes('أفهم إن الرد السابق ضايقك'), true);
+});
+
+
+test('WhatsApp agent is AI-first with deeper conversation context', () => {
+  const openaiPos = webhook.indexOf('if (process.env.OPENAI_API_KEY)');
+  const geminiPos = webhook.indexOf('const geminiKey =');
+  assert.equal(openaiPos >= 0 && geminiPos > openaiPos, true);
+  assert.equal(webhook.includes("process.env.OPENAI_MODEL || 'chat-latest'"), true);
+  assert.equal(webhook.includes('limit = 16'), true);
+  assert.equal(webhook.includes('Math.min(20'), true);
+  assert.equal(webhook.includes('تصرف كمساعد محادثة ذكي جدًا، وليس كبوت ردود جاهزة'), true);
+  assert.equal(webhook.includes("event.platform === 'whatsapp' && isWhatsappEmotionalMessage(event.content)"), false);
 });
