@@ -40,12 +40,13 @@ function memoryContext(rows) {
 
 async function callOpenAI(agent, messages) {
   if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('لم يتم إعداد OPENAI_API_KEY في Vercel بعد.'), { status: 503 });
+  const model = process.env.OPENAI_MODEL || 'chat-latest';
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: agent.model || process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: Number(agent.temperature ?? 0.7),
+      model,
+      max_completion_tokens: 2048,
       messages
     })
   });
@@ -112,6 +113,7 @@ async function callGrok(agent, messages) {
 }
 
 function resolveProvider(agent) {
+  if (process.env.OPENAI_API_KEY) return 'openai';
   const configured = String(agent.provider || '').toLowerCase();
   if (['google_ai', 'gemini', 'google'].includes(configured)) return 'google_ai';
   if (configured === 'anthropic') return 'anthropic';
@@ -146,7 +148,7 @@ function providerStatusPayload() {
       id: 'openai',
       name: 'OpenAI',
       configured: Boolean(process.env.OPENAI_API_KEY),
-      defaultModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      defaultModel: process.env.OPENAI_MODEL || 'chat-latest',
       envVars: ['OPENAI_API_KEY', 'OPENAI_MODEL']
     },
     {
