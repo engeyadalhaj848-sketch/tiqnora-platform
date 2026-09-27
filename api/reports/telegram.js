@@ -89,10 +89,17 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
   };
 
   const tParallel = Date.now();
-  const settled = await Promise.allSettled([
-    ensureDailyWorkforceTasks(),
-    runAutonomousGrowth({ taskLimit: 3, skipProspectingIfRecent: true })
-  ]);
+  const settled = [];
+  try {
+    settled[0] = { status: 'fulfilled', value: await ensureDailyWorkforceTasks() };
+  } catch (reason) {
+    settled[0] = { status: 'rejected', reason };
+  }
+  try {
+    settled[1] = { status: 'fulfilled', value: await runAutonomousGrowth({ taskLimit: 5, skipProspectingIfRecent: true }) };
+  } catch (reason) {
+    settled[1] = { status: 'rejected', reason };
+  }
 
   if (settled[0].status === 'fulfilled') {
     workforce = settled[0].value || workforce;
@@ -182,7 +189,7 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
 }
 
 async function runDailyReport(res, publishing = { processed: 0, results: [] }) {
-  const taskRun = await runQueuedTasks({ limit: 3 }).catch(error => ({
+  const taskRun = await runQueuedTasks({ limit: 6 }).catch(error => ({
     due: 0,
     completed: 0,
     failed: 1,
