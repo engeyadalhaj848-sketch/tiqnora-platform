@@ -1,5 +1,6 @@
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
+import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
 import {
   handleTelegramUpdate,
   telegramConfigurationStatus,
@@ -169,11 +170,12 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
     `Completed agent tasks: <b>${completed}</b>`,
     `Failed tasks: <b>${failed}</b>`,
     `Scheduled social jobs processed: <b>${publishing.processed || 0}</b>`,
+    publishing?.autopilot?.created ? `Daily social autopilot: <b>prepared</b> (${(publishing.autopilot.platforms || []).join(', ')})` : null,
     workforce?.error ? `Workforce note: ${String(workforce.error).slice(0, 200)}` : null,
     growth?.prospecting?.error_message ? `Prospecting note: ${String(growth.prospecting.error_message).slice(0, 200)}` : null,
     growth?.prospecting?.skipped_reason ? `Prospecting: ${String(growth.prospecting.skipped_reason).slice(0, 120)}` : null,
     '',
-    'Drafts stay under review. No automatic publishing or customer outreach before approval.'
+    'Customer outreach remains approval-gated. Daily social publishing runs only on the explicitly enabled Tiqnora channels.'
   ].filter(Boolean).join('\n')).catch(error => console.warn('Growth Telegram notification failed', { message: error.message }));
   timings.push(timedStep('telegram_notify', tTelegram, { status: 'ok' }));
   timings.push(timedStep('growth_cron_total', cronStarted, { status: 'ok' }));
@@ -324,6 +326,17 @@ export default async function handler(req, res) {
 
   try {
     const schedule = String(req.headers['x-vercel-cron-schedule'] || '');
+    let autopilot = { ok: true, enabled: false, created: false, reason: 'not_morning_schedule' };
+    if (schedule === '0 5 * * *') {
+      autopilot = await ensureDailySocialAutopilot().catch(error => ({
+        ok: false,
+        enabled: true,
+        created: false,
+        reason: 'autopilot_error',
+        error: String(error.message || error).slice(0, 500)
+      }));
+    }
+
     const tPub = Date.now();
     const publishing = await processPublishingQueue({ limit: 5 }).catch(error => ({
       ok: false,
@@ -331,6 +344,7 @@ export default async function handler(req, res) {
       results: [],
       error: error.message
     }));
+    publishing.autopilot = autopilot;
     console.info('cron_timing', JSON.stringify({
       step: 'processPublishingQueue',
       duration_ms: Date.now() - tPub,
