@@ -52,3 +52,11 @@ test('WhatsApp support escalation stays queued for staff follow-up', () => {
   assert.equal(webhook.includes("actionType: 'specialist_handoff'"), true);
   assert.equal(webhook.includes("processing_status: specialistHandoff ? 'new' : 'processed'"), true);
 });
+
+
+test('WhatsApp emotion-only frustration is not escalated as an unknown work request', () => {
+  assert.equal(webhook.includes('isWhatsappEmotionalMessage'), true);
+  assert.equal(webhook.includes('ماتفهم'), true);
+  assert.equal(webhook.includes('المشاعر وحدها ليست سببًا لتحويل المحادثة'), true);
+  assert.equal(webhook.includes('أفهم إن الرد السابق ضايقك'), true);
+});
