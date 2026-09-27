@@ -25,7 +25,7 @@ test('morning report is scheduled for 06:00 Riyadh and growth remains 08:00 Riya
 });
 
 test('TikTok Accounts API readiness is explicitly tracked for comments and replies',()=>{
-  assert.equal(migration.includes("'tiktok_business'"),true);
+  assert.equal(migration.includes("where provider='tiktok'"),true);
   assert.equal(migration.includes("'accounts_api_required', true"),true);
   assert.equal(migration.includes("jsonb_build_array('publish','comments','replies','insights')"),true);
   assert.equal(migration.includes("'needs_authorization'"),true);
