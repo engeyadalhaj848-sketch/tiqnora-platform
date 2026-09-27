@@ -72,3 +72,12 @@ test('WhatsApp agent is AI-first with deeper conversation context', () => {
   assert.equal(webhook.includes('تصرف كمساعد محادثة ذكي جدًا، وليس كبوت ردود جاهزة'), true);
   assert.equal(webhook.includes("event.platform === 'whatsapp' && isWhatsappEmotionalMessage(event.content)"), false);
 });
+
+
+test('WhatsApp follow-up questions recover from bad AI handoffs', () => {
+  assert.equal(webhook.includes('conversationRecoveryFallback'), true);
+  assert.equal(webhook.includes('looksLikeBusinessWorkRequest'), true);
+  assert.equal(webhook.includes('عن ايش تعتذر'), true);
+  assert.equal(webhook.includes('unjustifiedHandoff'), true);
+  assert.equal(webhook.includes('محاولة تصحيح إلزامية'), true);
+});
