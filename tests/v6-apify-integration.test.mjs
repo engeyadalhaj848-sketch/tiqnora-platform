@@ -53,6 +53,26 @@ describe('Apify missing token', () => {
   });
 });
 
+describe('Apify scoped integration token', () => {
+  it('treats users/me permission denial as connected-scoped, not invalid token', async () => {
+    const prev = process.env.APIFY_TOKEN;
+    process.env.APIFY_TOKEN = 'apify_api_scoped_test';
+    const fetchImpl = async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      json: async () => ({ error: { message: 'Insufficient permissions. Make sure you have the required permissions.' } })
+    });
+    const r = await testConnection({ fetchImpl });
+    assert.equal(r.ok, true);
+    assert.equal(r.status, 'connected');
+    assert.equal(r.scoped_token, true);
+    assert.equal(r.actor_validation_required, true);
+    if (prev) process.env.APIFY_TOKEN = prev;
+    else delete process.env.APIFY_TOKEN;
+  });
+});
+
 describe('Apify error classification', () => {
   it('classifies auth, rate limit, timeout', () => {
     assert.equal(classifyApifyError({}, 401).code, 'auth_error');
