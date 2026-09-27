@@ -81,3 +81,10 @@ test('WhatsApp follow-up questions recover from bad AI handoffs', () => {
   assert.equal(webhook.includes('unjustifiedHandoff'), true);
   assert.equal(webhook.includes('محاولة تصحيح إلزامية'), true);
 });
+
+
+test('OpenAI chat-latest uses max_completion_tokens and logs provider success', () => {
+  assert.equal(webhook.includes('max_completion_tokens: maxTokens'), true);
+  assert.equal(webhook.includes("provider: 'openai'"), true);
+  assert.equal(webhook.includes("Social AI provider success"), true);
+});
