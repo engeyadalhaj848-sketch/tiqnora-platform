@@ -674,6 +674,19 @@ function whatsappContextFallback(event, rule, { followUp = false } = {}) {
     .replaceAll('{{author_name}}', event.author_name || '');
 
   const greetingOnly = /^(السلام عليكم|سلام عليكم|وعليكم السلام|مرحبا|مرحبا بك|هلا|هلا والله|حياك الله|اهلا|اهلين)$/i.test(input);
+
+  if (/(كيف حالك|كيفك|اخبارك|وش اخبارك|شلونك)/.test(input)) {
+    return 'بخير الله يسلمك 🌟 وأنت؟ تفضل، وش حاب تعرف عن Tiqnora؟';
+  }
+
+  if (/(ما ?فهمت|ماني فاهم|مش فاهم|وضح|وضح لي|ايش قصدك|وش قصدك)/.test(input)) {
+    return 'أكيد، أوضحها ببساطة: Tiqnora تساعدك في المواقع والمتاجر، واتساب وCRM، وكلاء الذكاء الاصطناعي، السوشيال وSEO. قل لي الخدمة اللي تهمك وأنا أشرحها مباشرة.';
+  }
+
+  if (/(انت تعبان|ياخي انت تعبان|ما تفهم|مافهمت علي|تكرر|تردد|نفس الرد|ردك غلط)/.test(input)) {
+    return 'معك حق، الرد السابق ما كان مناسب. اكتب سؤالك مباشرة وأنا أجاوبك عليه بدون تكرار أو لف ودوران.';
+  }
+
   if (greetingOnly) {
     return followUp
       ? 'الله يحييك ويسعدك 🌟 تفضل، وش حاب تعرف أو وش الخدمة اللي تحتاجها؟'
@@ -728,6 +741,8 @@ async function generateAgentReply(event, rule, options = {}) {
   const prompt = [
     'أنت وكيل خدمة عملاء لمنصة Tiqnora AI في السعودية.',
     'اكتب ردًا عربيًا طبيعيًا ومختصرًا على رسالة العميل، وبأسلوب مهني وودود.',
+    'إذا كانت رسالة العميل بالعربية فأجب بالعربية فقط. لا تستخدم ترجمة إنجليزية أو تعليقات إنجليزية بين أقواس.',
+    'لا تقتبس رسالة العميل ولا تكرر نصها في الرد. أجب على المعنى مباشرة.',
     followUp
       ? 'هذه محادثة مستمرة. لا تعيد رسالة الترحيب ولا تسأل كيف نقدر نخدمك إذا العميل أوضح سؤاله بالفعل.'
       : 'هذه بداية المحادثة. يمكن الترحيب باختصار ثم الإجابة مباشرة على سؤال العميل.',
@@ -751,12 +766,17 @@ async function generateAgentReply(event, rule, options = {}) {
     const tooShort = text.length < 18 || words.length < 4;
     const greetingOnly = /^(اهلا|أهلا|أهلاً|مرحبا|مرحباً|هلا|حياك)[!،,.\s]*$/i.test(text);
     const repeatedWelcome = followUp && /شكر[اأً]* لتواصلك.*كيف نقدر نخدمك/i.test(text);
-    if (!text || tooShort || greetingOnly || repeatedWelcome) {
+    const arabicCustomer = /[\u0600-\u06FF]/.test(String(event.content || ''));
+    const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
+    const latinChars = (text.match(/[A-Za-z]/g) || []).length;
+    const wrongLanguage = arabicCustomer && latinChars > Math.max(18, arabicChars * 0.7);
+    if (!text || tooShort || greetingOnly || repeatedWelcome || wrongLanguage) {
       console.warn('Social AI reply unsuitable; using contextual fallback', {
         provider: result?.provider || null,
         length: text.length,
         words: words.length,
-        follow_up: followUp
+        follow_up: followUp,
+        wrong_language: wrongLanguage
       });
       return fallback.slice(0, 320);
     }
@@ -805,8 +825,8 @@ async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
   if (!apiKey) throw new Error('YCLOUD_API_KEY is missing');
 
   const payload = { from, to, type: 'text', text: { body: String(text || '').slice(0, 4096) } };
-  if (/^wamid\./.test(String(rawMessage.wamid || ''))) payload.context = { message_id: rawMessage.wamid };
-
+  // Send automatic replies as normal conversation messages. Adding a reply context here
+  // makes WhatsApp quote the customer's previous message on every bot response.
   const response = await fetch('https://api.ycloud.com/v2/whatsapp/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
