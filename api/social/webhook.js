@@ -572,7 +572,6 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          temperature,
           max_completion_tokens: maxTokens,
           ...(json ? { response_format: { type: 'json_object' } } : {}),
           messages: [{ role: 'user', content: prompt }]

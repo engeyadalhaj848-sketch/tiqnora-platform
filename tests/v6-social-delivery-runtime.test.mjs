@@ -88,3 +88,12 @@ test('OpenAI chat-latest uses max_completion_tokens and logs provider success', 
   assert.equal(webhook.includes("provider: 'openai'"), true);
   assert.equal(webhook.includes("Social AI provider success"), true);
 });
+
+
+test('OpenAI chat-latest omits unsupported temperature', () => {
+  const start = webhook.indexOf("if (process.env.OPENAI_API_KEY)");
+  const end = webhook.indexOf("const geminiKey =", start);
+  const openaiBlock = webhook.slice(start, end);
+  assert.equal(openaiBlock.includes('max_completion_tokens: maxTokens'), true);
+  assert.equal(openaiBlock.includes('\n          temperature,'), false);
+});
