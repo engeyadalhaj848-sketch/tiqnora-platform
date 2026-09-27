@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 /**
  * Tiqnora V6 consolidated router.
  * Keeps Hobby deployments under the Serverless Function limit.
@@ -2358,70 +2358,6 @@ async function persistApifyRun(workflow = {}, auth = {}) {
   }
 }
 
-async function handleApifySmokeOnce(req, res) {
-  if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'Method not allowed' });
-  const supplied = String(req.query?.key || '');
-  const digest = createHash('sha256').update(supplied).digest('hex');
-  if (digest !== '42c8fc0e3e4a0625dd530555d24a629c9c8b5a413a24c75007a678dbec92b571') {
-    return json(res, 404, { ok: false, error: 'Not found' });
-  }
-
-  const connection = await testApifyConnection({ timeoutMs: 12000 });
-  await syncApifyIntegration({ ...connection, configured: isApifyConfigured() });
-  if (!connection.ok) {
-    return json(res, connection.status === 'not_configured' ? 503 : 502, {
-      ok: false,
-      connection
-    });
-  }
-
-  const workflow = await runApifyGoogleMapsLeadWorkflow({
-    keyword: 'مواد بناء',
-    city: 'المدينة المنورة',
-    industry: 'مواد بناء',
-    maxResults: 1
-  }, {
-    commitCandidates: false,
-    existingLeads: []
-  });
-  const stored = await persistApifyRun(workflow, {});
-  return json(res, workflow.ok ? 200 : 502, {
-    ok: workflow.ok,
-    connection: {
-      ok: connection.ok,
-      status: connection.status,
-      provider: connection.provider,
-      username: connection.username || null,
-      live_api: connection.live_api
-    },
-    workflow: {
-      ok: workflow.ok,
-      status: workflow.status,
-      run_id: workflow.run_id || null,
-      actor_id: workflow.actor_id || null,
-      dataset_id: workflow.dataset_id || null,
-      items_collected: workflow.items_collected || 0,
-      qualified_count: workflow.qualified_count || 0,
-      duplicate_count: workflow.duplicate_count || 0,
-      started_at: workflow.started_at || null,
-      completed_at: workflow.completed_at || null,
-      candidate_sample: workflow.candidates?.[0]?.record
-        ? {
-            business_name: workflow.candidates[0].record.business_name || null,
-            city: workflow.candidates[0].record.city || null,
-            phone: workflow.candidates[0].record.phone || null,
-            website: workflow.candidates[0].record.website || null,
-            source: workflow.candidates[0].record.source || null
-          }
-        : null
-    },
-    persisted: Boolean(stored),
-    preview_only: true,
-    crm_written: false,
-    outreach_sent: false
-  });
-}
-
 async function handleApify(req, res, auth) {
   const op = String(req.query?.op || req.body?.op || 'status').toLowerCase().replace(/_/g, '-');
 
@@ -2551,10 +2487,6 @@ export default async function handler(req, res) {
 
   if (route === 'social_publish_worker') {
     return handleSocialPublishWorker(req, res);
-  }
-
-  if (route === 'apify_smoke_once') {
-    return handleApifySmokeOnce(req, res);
   }
 
   const auth = await requireAdmin(req);
