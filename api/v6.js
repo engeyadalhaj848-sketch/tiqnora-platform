@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 /**
  * Tiqnora V6 consolidated router.
  * Keeps Hobby deployments under the Serverless Function limit.
@@ -2257,12 +2257,181 @@ async function handleMcpSocial(req, res) {
 }
 
 
-async function handleApify(req, res) {
+
+async function syncApifyIntegration(connection = {}, token = '') {
+  try {
+    const rows = await sbGet('integration_connections?provider=eq.apify&select=*&limit=1', token);
+    const current = Array.isArray(rows) ? rows[0] : null;
+    const connected = connection.ok === true || String(connection.status || '').toLowerCase() === 'connected';
+    const configured = connection.configured !== undefined
+      ? Boolean(connection.configured)
+      : String(connection.status || '').toLowerCase() !== 'not_configured';
+    const nextStatus = connected
+      ? 'connected'
+      : configured
+        ? (String(connection.status || 'error').toLowerCase() === 'connected' ? 'connected' : 'error')
+        : 'not_configured';
+    const now = new Date().toISOString();
+    const body = {
+      provider: 'apify',
+      display_name: current?.display_name || 'Apify',
+      enabled: connected,
+      mode: 'production',
+      status: nextStatus,
+      metadata: {
+        ...(current?.metadata || {}),
+        purpose: 'lead_research_and_public_web_actors',
+        mcp_url: 'https://mcp.apify.com',
+        mcp_status: connection.mcp_status || current?.metadata?.mcp_status || 'available_not_enabled',
+        default_max_results: APIFY_DEFAULT_MAX_RESULTS,
+        hard_cap_results: APIFY_HARD_CAP_RESULTS,
+        live_api: connection.live_api !== false,
+        username: connection.username || current?.metadata?.username || null,
+        last_message: connection.message || null
+      },
+      last_checked_at: now,
+      updated_at: now
+    };
+    if (current?.id) {
+      await sbWrite(`integration_connections?id=eq.${encodeURIComponent(current.id)}`, {
+        method: 'PATCH',
+        body
+      }, token);
+    } else {
+      await sbWrite('integration_connections', { method: 'POST', body }, token);
+    }
+  } catch (error) {
+    console.warn('Apify integration state sync failed', error?.message || String(error));
+  }
+}
+
+async function persistApifyRun(workflow = {}, auth = {}) {
+  if (!workflow?.run_id) return null;
+  try {
+    const organizationId = workflow.organization_id || await tiqnoraOrgId(auth.token || '');
+    if (!organizationId) return null;
+    const existing = await sbGet(
+      `apify_runs?organization_id=eq.${encodeURIComponent(organizationId)}&apify_run_id=eq.${encodeURIComponent(workflow.run_id)}&select=id&limit=1`,
+      auth.token || ''
+    );
+    const current = Array.isArray(existing) ? existing[0] : null;
+    const startedAt = workflow.started_at || null;
+    const completedAt = workflow.completed_at || null;
+    const durationMs = startedAt && completedAt
+      ? Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime())
+      : null;
+    const row = {
+      organization_id: organizationId,
+      apify_run_id: workflow.run_id,
+      actor_id: workflow.actor_id || process.env.APIFY_GOOGLE_MAPS_ACTOR || 'compass/crawler-google-places',
+      status: String(workflow.status || (workflow.ok ? 'SUCCEEDED' : 'FAILED')).toUpperCase(),
+      dataset_id: workflow.dataset_id || null,
+      items_count: Number(workflow.items_collected ?? workflow.items_count ?? 0) || 0,
+      started_at: startedAt,
+      completed_at: completedAt,
+      duration_ms: Number.isFinite(durationMs) ? durationMs : null,
+      error_code: workflow.ok ? null : (workflow.code || null),
+      error_message: workflow.ok ? null : (workflow.message || workflow.error || null),
+      usage: workflow.usage || {},
+      meta: {
+        source: 'v6_apify',
+        query: workflow.job?.query || null,
+        city: workflow.job?.city || null,
+        industry: workflow.job?.industry || null,
+        preview_only: true,
+        crm_written: false,
+        outreach_sent: false
+      },
+      created_by: auth.profile?.id || null
+    };
+    if (current?.id) {
+      const updated = await sbWrite(`apify_runs?id=eq.${encodeURIComponent(current.id)}`, {
+        method: 'PATCH', body: row
+      }, auth.token || '');
+      return Array.isArray(updated) ? updated[0] : updated;
+    }
+    const inserted = await sbWrite('apify_runs', { method: 'POST', body: row }, auth.token || '');
+    return Array.isArray(inserted) ? inserted[0] : inserted;
+  } catch (error) {
+    console.warn('Apify run persistence failed', error?.message || String(error));
+    return null;
+  }
+}
+
+async function handleApifySmokeOnce(req, res) {
+  if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'Method not allowed' });
+  const supplied = String(req.query?.key || '');
+  const digest = createHash('sha256').update(supplied).digest('hex');
+  if (digest !== '42c8fc0e3e4a0625dd530555d24a629c9c8b5a413a24c75007a678dbec92b571') {
+    return json(res, 404, { ok: false, error: 'Not found' });
+  }
+
+  const connection = await testApifyConnection({ timeoutMs: 12000 });
+  await syncApifyIntegration({ ...connection, configured: isApifyConfigured() });
+  if (!connection.ok) {
+    return json(res, connection.status === 'not_configured' ? 503 : 502, {
+      ok: false,
+      connection
+    });
+  }
+
+  const workflow = await runApifyGoogleMapsLeadWorkflow({
+    keyword: 'مواد بناء',
+    city: 'المدينة المنورة',
+    industry: 'مواد بناء',
+    maxResults: 1
+  }, {
+    commitCandidates: false,
+    existingLeads: []
+  });
+  const stored = await persistApifyRun(workflow, {});
+  return json(res, workflow.ok ? 200 : 502, {
+    ok: workflow.ok,
+    connection: {
+      ok: connection.ok,
+      status: connection.status,
+      provider: connection.provider,
+      username: connection.username || null,
+      live_api: connection.live_api
+    },
+    workflow: {
+      ok: workflow.ok,
+      status: workflow.status,
+      run_id: workflow.run_id || null,
+      actor_id: workflow.actor_id || null,
+      dataset_id: workflow.dataset_id || null,
+      items_collected: workflow.items_collected || 0,
+      qualified_count: workflow.qualified_count || 0,
+      duplicate_count: workflow.duplicate_count || 0,
+      started_at: workflow.started_at || null,
+      completed_at: workflow.completed_at || null,
+      candidate_sample: workflow.candidates?.[0]?.record
+        ? {
+            business_name: workflow.candidates[0].record.business_name || null,
+            city: workflow.candidates[0].record.city || null,
+            phone: workflow.candidates[0].record.phone || null,
+            website: workflow.candidates[0].record.website || null,
+            source: workflow.candidates[0].record.source || null
+          }
+        : null
+    },
+    persisted: Boolean(stored),
+    preview_only: true,
+    crm_written: false,
+    outreach_sent: false
+  });
+}
+
+async function handleApify(req, res, auth) {
   const op = String(req.query?.op || req.body?.op || 'status').toLowerCase().replace(/_/g, '-');
 
   if (op === 'status' && req.method === 'GET') {
     const configured = isApifyConfigured();
     const connection = configured ? await testApifyConnection({ timeoutMs: 10000 }) : null;
+    await syncApifyIntegration({
+      ...(connection || { ok: false, status: 'not_configured', provider: 'apify', live_api: false }),
+      configured
+    }, auth?.token || '');
     return json(res, 200, {
       ok: true,
       provider: 'apify',
@@ -2277,6 +2446,7 @@ async function handleApify(req, res) {
 
   if ((op === 'test' || op === 'test-connection') && req.method === 'POST') {
     const result = await testApifyConnection({ timeoutMs: 12000 });
+    await syncApifyIntegration({ ...result, configured: isApifyConfigured() }, auth?.token || '');
     return json(res, result.ok ? 200 : result.status === 'not_configured' ? 503 : 502, result);
   }
 
@@ -2319,6 +2489,15 @@ async function handleApify(req, res) {
       commitCandidates: false,
       existingLeads: Array.isArray(req.body?.existingLeads) ? req.body.existingLeads : []
     });
+    await syncApifyIntegration({
+      ok: workflow.ok,
+      status: workflow.ok ? 'connected' : workflow.status,
+      configured: isApifyConfigured(),
+      provider: 'apify',
+      live_api: true,
+      message: workflow.ok ? 'Apify workflow completed' : (workflow.message || workflow.status)
+    }, auth?.token || '');
+    await persistApifyRun(workflow, auth || {});
     const failureStatus = workflow.status === 'not_configured' ? 503 : 502;
     return json(res, workflow.ok ? 200 : failureStatus, {
       ...workflow,
@@ -2374,6 +2553,10 @@ export default async function handler(req, res) {
     return handleSocialPublishWorker(req, res);
   }
 
+  if (route === 'apify_smoke_once') {
+    return handleApifySmokeOnce(req, res);
+  }
+
   const auth = await requireAdmin(req);
   if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
@@ -2388,7 +2571,7 @@ export default async function handler(req, res) {
     if (route === 'reputation') return await handleReputation(req, res, auth);
     if (route === 'seo') return await handleSeo(req, res, auth);
     if (route === 'workforce') return await handleWorkforce(req, res, auth);
-    if (route === 'apify') return await handleApify(req, res);
+    if (route === 'apify') return await handleApify(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);
     return json(res, 404, { error: 'Unknown V6 route' });
