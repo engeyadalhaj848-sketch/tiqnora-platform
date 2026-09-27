@@ -7,7 +7,9 @@ import {
 import {
   TIQNORA_YCLOUD_TEMPLATE_PRESETS,
   listYCloudTemplates,
-  ensureYCloudTemplatePresets
+  ensureYCloudTemplatePresets,
+  retrieveYCloudTemplate,
+  sendYCloudTemplateMessage
 } from '../../../lib/integrations/ycloud-templates.js';
 
 const providers = {
@@ -651,6 +653,268 @@ async function handleWhatsappTemplates(req, res) {
   }
 }
 
+
+function normalizeE164(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const cleaned = raw.replace(/[^+\d]/g, '');
+  if (/^\+[1-9]\d{6,14}$/.test(cleaned)) return cleaned;
+  if (/^966\d{9}$/.test(cleaned)) return '+' + cleaned;
+  if (/^05\d{8}$/.test(cleaned)) return '+966' + cleaned.slice(1);
+  return '';
+}
+
+async function ensureWhatsappLeadConversation({ organizationId, leadId, recipient }) {
+  const rows = await supa(
+    'conversations?organization_id=eq.' + encodeURIComponent(organizationId)
+    + '&platform=eq.whatsapp&lead_id=eq.' + encodeURIComponent(leadId)
+    + '&select=*&order=updated_at.desc&limit=1'
+  );
+  if (Array.isArray(rows) && rows[0]) return rows[0];
+
+  const inserted = await supa('conversations', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      organization_id: organizationId,
+      platform: 'whatsapp',
+      external_thread_id: 'whatsapp:' + recipient,
+      lead_id: leadId,
+      assigned_agent: 'sales',
+      intent: 'sales',
+      priority: 'high',
+      status: 'open',
+      last_message_at: new Date().toISOString(),
+      unread_count: 0,
+      metadata: {
+        provider: 'ycloud',
+        source: 'approved_template_outreach'
+      }
+    })
+  });
+  return Array.isArray(inserted) ? inserted[0] : null;
+}
+
+async function handleWhatsappTemplateSend(req, res) {
+  if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
+
+  const authn = await authenticateAdmin(req.headers.authorization || req.headers.Authorization);
+  if (!authn.ok) {
+    return send(res, authn.status || 401, {
+      error: 'Admin authentication required.',
+      code: authn.error || 'unauthorized'
+    });
+  }
+
+  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  if (body.confirm_send !== true) {
+    return send(res, 409, {
+      error: 'Explicit send confirmation is required.',
+      code: 'send_confirmation_required'
+    });
+  }
+
+  const leadId = String(body.lead_id || '').trim();
+  const templateName = String(body.template_name || '').trim();
+  if (!leadId || !templateName) {
+    return send(res, 400, {
+      error: 'lead_id and template_name are required.',
+      code: 'template_send_fields_required'
+    });
+  }
+
+  const preset = TIQNORA_YCLOUD_TEMPLATE_PRESETS.find(t => t.name === templateName);
+  if (!preset) {
+    return send(res, 400, {
+      error: 'Template is not in the Tiqnora approved preset list.',
+      code: 'template_not_allowed'
+    });
+  }
+
+  const orgs = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
+  const organizationId = orgs?.[0]?.id;
+  if (!organizationId) return send(res, 500, { error: 'Organization missing' });
+
+  try {
+    const leadRows = await supa(
+      'leads?id=eq.' + encodeURIComponent(leadId)
+      + '&organization_id=eq.' + encodeURIComponent(organizationId)
+      + '&select=id,company_name,name,contact_name,phone,whatsapp,contact_id,custom_fields&limit=1'
+    );
+    const lead = Array.isArray(leadRows) ? leadRows[0] : null;
+    if (!lead) return send(res, 404, { error: 'Lead not found', code: 'lead_not_found' });
+
+    const optedIn = lead.custom_fields?.whatsapp_opt_in === true
+      || String(lead.custom_fields?.whatsapp_opt_in || '').toLowerCase() === 'true';
+    if (!optedIn) {
+      return send(res, 409, {
+        error: 'This lead has no recorded WhatsApp opt-in for proactive marketing messages.',
+        code: 'whatsapp_opt_in_required'
+      });
+    }
+
+    const recipient = normalizeE164(lead.whatsapp || lead.phone);
+    if (!recipient) {
+      return send(res, 409, {
+        error: 'Lead does not have a valid WhatsApp/phone number.',
+        code: 'recipient_invalid'
+      });
+    }
+
+    const connection = await getActiveYCloudConnection(organizationId);
+    const from = normalizeE164(connection.external_account_id);
+    if (!from) {
+      return send(res, 409, {
+        error: 'Connected YCloud sender number is invalid.',
+        code: 'sender_invalid'
+      });
+    }
+
+    const liveTemplate = await retrieveYCloudTemplate(
+      connection.settings.waba_id,
+      preset.name,
+      preset.language
+    );
+    const templateStatus = String(liveTemplate?.status || '').toUpperCase();
+    if (templateStatus !== 'APPROVED') {
+      return send(res, 409, {
+        error: 'WhatsApp template is not approved yet.',
+        code: 'template_not_approved',
+        template_status: templateStatus || null
+      });
+    }
+
+    const companyName = String(lead.company_name || lead.contact_name || lead.name || 'المنشأة').slice(0, 120);
+    const components = [{
+      type: 'body',
+      parameters: [{ type: 'text', text: companyName }]
+    }];
+
+    const apiResult = await sendYCloudTemplateMessage({
+      from,
+      to: recipient,
+      name: preset.name,
+      language: preset.language,
+      components
+    });
+    const outboundExternalId = String(apiResult?.wamid || apiResult?.id || '').trim();
+    if (!outboundExternalId) {
+      return send(res, 502, {
+        error: 'YCloud accepted the request without a message ID.',
+        code: 'ycloud_id_missing'
+      });
+    }
+
+    const conversation = await ensureWhatsappLeadConversation({
+      organizationId,
+      leadId: lead.id,
+      recipient
+    });
+    const now = new Date().toISOString();
+    const outboundEvent = await supa('social_events?on_conflict=platform,external_event_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        connection_id: connection.id,
+        platform: 'whatsapp',
+        event_type: 'message.sent',
+        external_event_id: outboundExternalId,
+        external_parent_id: null,
+        author_external_id: 'tiqnora',
+        author_name: 'Tiqnora',
+        content: '[template:' + preset.name + ']',
+        occurred_at: now,
+        processing_status: 'processed',
+        lead_id: lead.id,
+        contact_id: lead.contact_id || null,
+        conversation_id: conversation?.id || null,
+        raw_payload: {
+          adapter: 'tiqnora_outbound',
+          provider: 'ycloud',
+          mode: 'template',
+          status: apiResult.status || 'accepted',
+          template_name: preset.name,
+          template_language: preset.language,
+          ycloud_message_id: apiResult.id || null
+        }
+      })
+    });
+
+    await persistOutboundCrmMessage({
+      organizationId,
+      event: { conversation_id: conversation?.id || null },
+      outboundEvent,
+      platform: 'whatsapp',
+      outboundExternalId,
+      message: '[template:' + preset.name + ']',
+      provider: 'ycloud',
+      status: apiResult.status || 'accepted',
+      actionId: null
+    });
+
+    const outboundRow = Array.isArray(outboundEvent) ? outboundEvent[0] : null;
+    if (outboundRow?.id) {
+      await supa('social_event_actions', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          event_id: outboundRow.id,
+          action_type: 'template_send',
+          status: 'completed',
+          result: {
+            provider: 'ycloud',
+            template_name: preset.name,
+            template_language: preset.language,
+            to: recipient,
+            outbound_external_id: outboundExternalId,
+            explicit_admin_confirmation: true
+          },
+          completed_at: now
+        })
+      }).catch(() => null);
+    }
+
+    await supa('crm_activities', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        organization_id: organizationId,
+        lead_id: lead.id,
+        activity_type: 'system',
+        title: 'تم إرسال قالب WhatsApp معتمد',
+        body: preset.label,
+        metadata: {
+          kind: 'whatsapp_template_sent',
+          provider: 'ycloud',
+          template_name: preset.name,
+          template_language: preset.language,
+          outbound_external_id: outboundExternalId
+        },
+        created_by: authn.admin.id
+      })
+    }).catch(() => null);
+
+    return send(res, 200, {
+      ok: true,
+      platform: 'whatsapp',
+      provider: 'ycloud',
+      template_name: preset.name,
+      template_status: 'APPROVED',
+      status: apiResult.status || 'accepted',
+      outbound_external_id: outboundExternalId,
+      event_id: outboundRow?.id || null,
+      customer_messages_sent: 1
+    });
+  } catch (error) {
+    return send(res, error.status || 502, {
+      error: error.message || 'WhatsApp template send failed',
+      code: error.code || 'whatsapp_template_send_failed'
+    });
+  }
+}
+
 async function persistOutboundCrmMessage({
   organizationId,
   event,
@@ -1110,6 +1374,7 @@ export default async function handler(req, res) {
   const action = String(req.query?.action || '').toLowerCase();
   if (req.method === 'POST' && (action === 'reply' || provider === 'reply')) return handleSocialReply(req, res);
   if (provider === 'whatsapp-templates') return handleWhatsappTemplates(req, res);
+  if (provider === 'whatsapp-template-send') return handleWhatsappTemplateSend(req, res);
   const cfg = providers[provider];
   if (!cfg) return send(res, 404, { error: 'Unsupported provider' });
   const scopes = provider === 'tiktok' ? (process.env.TIKTOK_SCOPES || cfg.scopes) : cfg.scopes;
