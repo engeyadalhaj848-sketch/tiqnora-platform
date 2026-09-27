@@ -6,6 +6,8 @@ const workforceChat = readFileSync(new URL('../api/ai-workforce/chat.js', import
 const commerceAi = readFileSync(new URL('../api/commerce/ai.js', import.meta.url), 'utf8');
 const provider = readFileSync(new URL('../lib/ai/provider.js', import.meta.url), 'utf8');
 const workforceAdmin = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+const socialWebhook = readFileSync(new URL('../api/social/webhook.js', import.meta.url), 'utf8');
+const eliteMigration = readFileSync(new URL('../supabase/migrations/059_ai_workforce_elite_openai.sql', import.meta.url), 'utf8');
 
 test('elite workforce has specialist operating standards for every internal agent', () => {
   assert.equal(workforceChat.includes('ELITE_OPERATING_STANDARD'), true);
@@ -47,4 +49,16 @@ test('admin workforce shows every enabled specialist instead of a five-agent all
   for (const slug of ['sales','ads','channel','image-designer','video-designer']) {
     assert.equal(workforceAdmin.includes(slug), true, slug);
   }
+});
+
+
+test('customer chat protects Tiqnora ownership privacy', () => {
+  assert.equal(socialWebhook.includes('تفاصيل الملكية والإدارة ليست متاحة عبر خدمة العملاء'), true);
+  assert.equal(socialWebhook.includes('خصوصية الإدارة: لا تكشف ولا تستنتج ولا تؤكد هوية مالك Tiqnora'), true);
+});
+
+test('elite migration marks all enabled Tiqnora agents OpenAI-primary', () => {
+  assert.equal(eliteMigration.includes("provider = 'openai'"), true);
+  assert.equal(eliteMigration.includes("model = 'chat-latest'"), true);
+  assert.equal(eliteMigration.includes("'elite_profile', 'v1'"), true);
 });
