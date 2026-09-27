@@ -10,7 +10,8 @@ const workforceAdmin = readFileSync(new URL('../admin/ai-workforce/workforce.js'
 test('elite workforce has specialist operating standards for every internal agent', () => {
   assert.equal(workforceChat.includes('ELITE_OPERATING_STANDARD'), true);
   for (const slug of ['assistant','marketing','sales','ads','channel','content','social-media','image-designer','video-designer','developer','commerce']) {
-    assert.equal(workforceChat.includes(slug === 'social-media' || slug.includes('-') ? `'${slug}': \\`` : `${slug}: \\``), true, slug);
+    const needle = slug.includes('-') ? "'" + slug + "': `" : slug + ": `";
+    assert.equal(workforceChat.includes(needle), true, slug);
   }
   assert.equal(workforceChat.includes('silently quality-check for correctness, specificity, usefulness, risk, and consistency'), true);
 });
