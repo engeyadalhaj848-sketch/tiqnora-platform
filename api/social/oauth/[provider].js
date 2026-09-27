@@ -233,8 +233,12 @@ async function authenticateAdmin(authHeader) {
   if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
 
   const base = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
-  const apikey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!apikey) return { ok: false, status: 503, error: 'auth_not_configured' };
+  // Match the V6 admin API auth path: validate user JWTs with the public
+  // Supabase key. Do not depend on the service-role key for /auth/v1/user.
+  const apikey =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
 
   try {
     const r = await fetch(`${base}/auth/v1/user`, {
@@ -784,8 +788,18 @@ async function handleSocialReply(req, res) {
   }
   if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
   try {
-    const admin = await verifyAdmin(req.headers.authorization || req.headers.Authorization);
-    if (!admin) return send(res, 401, { error: 'Admin authentication required', code: 'unauthorized' });
+    const authn = await authenticateAdmin(req.headers.authorization || req.headers.Authorization);
+    if (!authn.ok) {
+      return send(res, authn.status || 401, {
+        error: authn.error === 'invalid_admin_session'
+          ? 'Admin session is invalid or expired. Sign in again.'
+          : authn.error === 'admin_permission_required'
+            ? 'Admin permission required.'
+            : 'Admin authentication required.',
+        code: authn.error || 'unauthorized'
+      });
+    }
+    const admin = authn.admin;
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const message = String(body.message || body.text || '').trim();
