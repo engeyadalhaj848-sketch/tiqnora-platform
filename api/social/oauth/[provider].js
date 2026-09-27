@@ -585,29 +585,47 @@ async function persistOutboundCrmMessage({
   const outboundRow = Array.isArray(outboundEvent) ? outboundEvent[0] : null;
   const now = new Date().toISOString();
   const normalizedStatus = String(status || 'sent').toLowerCase() === 'accepted' ? 'sent' : String(status || 'sent').toLowerCase();
-  const rows = await supa('messages?on_conflict=organization_id,external_message_id', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify({
-      organization_id: organizationId,
-      conversation_id: event.conversation_id,
-      direction: 'outbound',
-      body: message || null,
-      external_message_id: `${platform}:${outboundExternalId}`,
-      sender_name: 'Tiqnora',
-      social_event_id: outboundRow?.id || null,
-      created_at: now,
-      ai_meta: {
-        delivery_status: normalizedStatus,
-        delivery_status_at: now,
-        sent_at: now,
-        provider: provider || null,
-        provider_message_id: outboundExternalId,
-        source: actionId ? 'approved_proposal' : 'manual_social_reply',
-        action_id: actionId || null
-      }
-    })
-  });
+  const externalMessageId = `${platform}:${outboundExternalId}`;
+  const messageRow = {
+    organization_id: organizationId,
+    conversation_id: event.conversation_id,
+    direction: 'outbound',
+    body: message || null,
+    external_message_id: externalMessageId,
+    sender_name: 'Tiqnora',
+    social_event_id: outboundRow?.id || null,
+    created_at: now,
+    ai_meta: {
+      delivery_status: normalizedStatus,
+      delivery_status_at: now,
+      sent_at: now,
+      provider: provider || null,
+      provider_message_id: outboundExternalId,
+      source: actionId ? 'approved_proposal' : 'manual_social_reply',
+      action_id: actionId || null
+    }
+  };
+
+  // The table uses a partial unique index for external_message_id.
+  // PostgREST cannot target that partial index through on_conflict here,
+  // so use an idempotent read/update-or-insert flow instead.
+  const existing = await supa(
+    `messages?organization_id=eq.${encodeURIComponent(organizationId)}&external_message_id=eq.${encodeURIComponent(externalMessageId)}&select=id&limit=1`
+  );
+  let rows;
+  if (Array.isArray(existing) && existing[0]?.id) {
+    rows = await supa(`messages?id=eq.${encodeURIComponent(existing[0].id)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(messageRow)
+    });
+  } else {
+    rows = await supa('messages', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(messageRow)
+    });
+  }
 
   await supa(`conversations?id=eq.${encodeURIComponent(event.conversation_id)}&organization_id=eq.${encodeURIComponent(organizationId)}`, {
     method: 'PATCH',
@@ -755,20 +773,30 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
       }
     })
   });
-  await persistOutboundCrmMessage({
-    organizationId,
-    event: {
-      ...event,
-      conversation_id: event.conversation_id || deliveryAction?.conversation_id || null
-    },
-    outboundEvent,
-    platform: 'whatsapp',
-    outboundExternalId,
-    message,
-    provider: 'ycloud',
-    status: apiResult.status || 'accepted',
-    actionId: deliveryAction?.id || null
-  });
+  try {
+    await persistOutboundCrmMessage({
+      organizationId,
+      event: {
+        ...event,
+        conversation_id: event.conversation_id || deliveryAction?.conversation_id || null
+      },
+      outboundEvent,
+      platform: 'whatsapp',
+      outboundExternalId,
+      message,
+      provider: 'ycloud',
+      status: apiResult.status || 'accepted',
+      actionId: deliveryAction?.id || null
+    });
+  } catch (error) {
+    // YCloud acceptance is the irreversible external side effect. A later
+    // CRM projection failure must not be reported as a send failure.
+    console.warn('Outbound CRM message persistence failed after YCloud accepted send', {
+      action_id: deliveryAction?.id || null,
+      outbound_external_id: outboundExternalId,
+      message: error?.message || String(error)
+    });
+  }
   await supa(`social_event_actions?id=eq.${encodeURIComponent(reservationId)}&status=eq.pending`, {
     method: 'PATCH', headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ status: 'completed', result: { ...action.result, outbound_external_id: outboundExternalId, accepted_status: apiResult.status || 'accepted' }, completed_at: new Date().toISOString() })
