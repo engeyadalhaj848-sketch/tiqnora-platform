@@ -7,6 +7,7 @@
   let db, me, org, agents = [], selectedAgent = null;
   const state = { counts: {}, conversations: [], tasks: [], memory: [] };
   const labels = {
+    manager: ['إدارة الوكلاء', 'MG', '#8bc6ff'],
     assistant: ['مساعد تنفيذي', 'AI', '#6de8dc'],
     marketing: ['تسويق ونمو', 'MA', '#6de8dc'],
     sales: ['مبيعات', 'SA', '#efc875'],
