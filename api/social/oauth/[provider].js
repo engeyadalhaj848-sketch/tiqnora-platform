@@ -1,9 +1,14 @@
-import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { createHmac, randomBytes, createCipheriv, createDecipheriv, createHash } from 'node:crypto';
 import {
   listAccounts as listGbpAccounts,
   listLocations as listGbpLocations,
   mapLocationToRecord as mapGbpLocationToRecord
 } from '../../../lib/v6/reputation/providers/google-business-profile.js';
+import {
+  TIQNORA_YCLOUD_TEMPLATE_PRESETS,
+  listYCloudTemplates,
+  ensureYCloudTemplatePresets
+} from '../../../lib/integrations/ycloud-templates.js';
 
 const providers = {
   meta: { auth: 'https://www.facebook.com/v22.0/dialog/oauth', token: 'https://graph.facebook.com/v22.0/oauth/access_token', scopes: 'business_management,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_comments' },
@@ -570,6 +575,112 @@ async function handleTikTokPosting(req, res) {
   }
 }
 
+
+async function getActiveYCloudConnection(organizationId) {
+  const rows = await supa(
+    'social_connections?organization_id=eq.' + encodeURIComponent(organizationId)
+    + '&platform=eq.whatsapp&status=eq.active&select=*&order=updated_at.desc&limit=10'
+  );
+  const connection = (rows || []).find(row =>
+    row?.settings?.provider === 'ycloud'
+    && row?.settings?.ycloud_verified === true
+    && row?.settings?.webhook_subscribed === true
+    && row?.capabilities?.messaging === true
+    && row?.settings?.waba_id
+  );
+  if (!connection) {
+    const error = new Error('Active verified YCloud WhatsApp connection not found.');
+    error.status = 409;
+    error.code = 'ycloud_not_connected';
+    throw error;
+  }
+  return connection;
+}
+
+function publicTemplatePresetStatus(liveTemplates) {
+  return TIQNORA_YCLOUD_TEMPLATE_PRESETS.map(preset => {
+    const row = (liveTemplates || []).find(t => t.name === preset.name && t.language === preset.language);
+    return {
+      name: preset.name,
+      language: preset.language,
+      category: preset.category,
+      label: preset.label,
+      status: row?.status || 'NOT_CREATED',
+      official_template_id: row?.official_template_id || null,
+      quality_score: row?.quality_score || null,
+      rejected_reason: row?.rejected_reason || null
+    };
+  });
+}
+
+async function handleWhatsappTemplates(req, res) {
+  if (!['GET', 'POST'].includes(req.method)) return send(res, 405, { error: 'Method not allowed' });
+  const authn = await authenticateAdmin(req.headers.authorization || req.headers.Authorization);
+  if (!authn.ok) {
+    return send(res, authn.status || 401, {
+      error: 'Admin authentication required.',
+      code: authn.error || 'unauthorized'
+    });
+  }
+
+  const orgs = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
+  const organizationId = orgs?.[0]?.id;
+  if (!organizationId) return send(res, 500, { error: 'Organization missing' });
+
+  try {
+    const connection = await getActiveYCloudConnection(organizationId);
+    if (req.method === 'POST') {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+      if (String(body.op || '') !== 'ensure_presets') {
+        return send(res, 400, { error: 'Unknown template operation', code: 'unknown_template_op' });
+      }
+      await ensureYCloudTemplatePresets(connection.settings.waba_id);
+    }
+    const liveTemplates = await listYCloudTemplates(connection.settings.waba_id);
+    return send(res, 200, {
+      ok: true,
+      provider: 'ycloud',
+      templates: publicTemplatePresetStatus(liveTemplates),
+      customer_messages_sent: 0
+    });
+  } catch (error) {
+    return send(res, error.status || 502, {
+      error: error.message || 'YCloud templates failed',
+      code: error.code || 'ycloud_templates_failed'
+    });
+  }
+}
+
+async function handleYCloudTemplateBootstrapOnce(req, res) {
+  if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+  const supplied = String(req.query?.key || '');
+  const digest = createHash('sha256').update(supplied).digest('hex');
+  if (digest !== 'c36ef4f4f2b3db9c13fadc545d920aba589db43ba405895a73e85c665efcfdc9') {
+    return send(res, 404, { error: 'Not found' });
+  }
+  try {
+    const templates = await ensureYCloudTemplatePresets('1341612578140328');
+    return send(res, 200, {
+      ok: true,
+      provider: 'ycloud',
+      templates: templates.map(t => ({
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        status: t.status,
+        created: t.created === true,
+        rejected_reason: t.rejected_reason || null
+      })),
+      customer_messages_sent: 0
+    });
+  } catch (error) {
+    return send(res, error.status || 502, {
+      error: error.message || 'Bootstrap failed',
+      code: error.code || 'bootstrap_failed'
+    });
+  }
+}
+
 async function persistOutboundCrmMessage({
   organizationId,
   event,
@@ -1028,6 +1139,8 @@ export default async function handler(req, res) {
   const provider = String(req.query?.provider || '').toLowerCase();
   const action = String(req.query?.action || '').toLowerCase();
   if (req.method === 'POST' && (action === 'reply' || provider === 'reply')) return handleSocialReply(req, res);
+  if (provider === 'whatsapp-templates') return handleWhatsappTemplates(req, res);
+  if (provider === 'whatsapp-template-bootstrap-once') return handleYCloudTemplateBootstrapOnce(req, res);
   const cfg = providers[provider];
   if (!cfg) return send(res, 404, { error: 'Unsupported provider' });
   const scopes = provider === 'tiktok' ? (process.env.TIKTOK_SCOPES || cfg.scopes) : cfg.scopes;
