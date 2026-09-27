@@ -28,3 +28,13 @@ test('Pre-production webhook preserves guarded WhatsApp AI auto reply and V6 CRM
   assert.equal(webhook.includes("source: 'auto_reply'"), true);
   assert.equal(webhook.includes('GOOGLE_GEMINI_API_KEY'), true);
 });
+
+
+test('WhatsApp auto reply keeps conversation context instead of repeating the welcome template', () => {
+  assert.equal(webhook.includes('whatsappContextFallback'), true);
+  assert.equal(webhook.includes('recentConversationHistory'), true);
+  assert.equal(webhook.includes('followUp: whatsappFollowUp'), true);
+  assert.equal(webhook.includes('هذه محادثة مستمرة. لا تعيد رسالة الترحيب'), true);
+  assert.equal(webhook.includes("reason: 'welcome_already_sent_within_24h'"), false);
+  assert.equal(webhook.includes('نقدم تصميم وتطوير المواقع والمتاجر، أتمتة واتساب وCRM'), true);
+});
