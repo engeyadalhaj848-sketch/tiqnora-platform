@@ -670,6 +670,11 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
 
 const SPECIALIST_HANDOFF_TEXT = 'هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.';
 
+function isWhatsappEmotionalMessage(value) {
+  const input = normalizeText(value);
+  return /(زعلان|زعلت|متضايق|مضايق|منزعج|متوتر|قلقان|خايف|محبط|مقهور|مستفز|مزعج|سيء|سيئ|مو عاجبني|مش عاجبني|انت تعبان|ياخي انت تعبان|ما ?تفهم|ماتفهم|ما ?تفهمني|ماتفهمني|ردك غلط|نفس الرد|تكرر|تردد|بصراحه انت|شكرا|مشكور|يعطيك العافيه|الله يسعدك|ممتاز|رائع|احبكم|كفو|بيض الله وجهك)/.test(input);
+}
+
 function whatsappContextFallback(event, rule, { followUp = false } = {}) {
   const input = normalizeText(event.content);
   const templated = String(rule?.reply_template || 'شكرًا لتواصلك معنا. كيف نقدر نخدمك؟')
@@ -685,8 +690,8 @@ function whatsappContextFallback(event, rule, { followUp = false } = {}) {
     return 'أكيد، أوضحها ببساطة: Tiqnora تساعدك في المواقع والمتاجر، واتساب وCRM، وكلاء الذكاء الاصطناعي، السوشيال وSEO. قل لي الخدمة اللي تهمك وأنا أشرحها مباشرة.';
   }
 
-  if (/(انت تعبان|ياخي انت تعبان|ما تفهم|مافهمت علي|تكرر|تردد|نفس الرد|ردك غلط)/.test(input)) {
-    return 'معك حق، الرد السابق ما كان مناسب. اكتب سؤالك مباشرة وأنا أجاوبك عليه بدون تكرار أو لف ودوران.';
+  if (/(انت تعبان|ياخي انت تعبان|ما ?تفهم|ماتفهم|ما ?تفهمني|ماتفهمني|مافهمت علي|تكرر|تردد|نفس الرد|ردك غلط|مستفز|مزعج|سيء|سيئ|مو عاجبني|مش عاجبني|بصراحه انت)/.test(input)) {
+    return 'أفهم إن الرد السابق ضايقك، ومعك حق إذا ما كان واضح. اكتب لي طلبك بكلماتك وأنا برد عليك مباشرة وباختصار.';
   }
 
   if (/(زعلان|زعلت|متضايق|مضايق|منزعج|متوتر|قلقان|خايف|محبط|تعبان نفسيا|مقهور|مشكله مزعجه)/.test(input)) {
@@ -743,6 +748,13 @@ async function generateAgentReply(event, rule, options = {}) {
   const history = Array.isArray(options.history) ? options.history : [];
   const fallback = whatsappContextFallback(event, rule, { followUp });
 
+  // Emotional reactions should never be mistaken for an unknown business request.
+  // Handle them deterministically so frustration/thanks/small-talk are answered naturally,
+  // while specialist handoff remains reserved for genuinely unknown work questions.
+  if (event.platform === 'whatsapp' && isWhatsappEmotionalMessage(event.content)) {
+    return fallback.slice(0, 320);
+  }
+
   // Deterministic facts such as the official website should not be rewritten by AI.
   if (rule?.intent === 'platform_link') return fallback.slice(0, 320);
 
@@ -752,7 +764,8 @@ async function generateAgentReply(event, rule, options = {}) {
     'إذا كانت رسالة العميل بالعربية فأجب بالعربية فقط. لا تستخدم ترجمة إنجليزية أو تعليقات إنجليزية بين أقواس.',
     'لا تقتبس رسالة العميل ولا تكرر نصها في الرد. أجب على المعنى مباشرة.',
     'تعامل مع المشاعر بذكاء: إذا العميل غاضب أو متضايق أو قلق أو ممتن أو متحمس، اعترف بمشاعره باختصار وبأسلوب إنساني ثم أكمل المساعدة بدون مبالغة أو تصنع.',
-    'إذا كان السؤال خارج نطاق خدمات Tiqnora، أو لا تملك معلومة موثوقة تكفي للإجابة، أو كنت غير متأكد من الإجابة: لا تخمن ولا تخترع. استخدم هذه الجملة حرفيًا: هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.',
+    'المشاعر وحدها ليست سببًا لتحويل المحادثة للقسم المختص. إذا العميل فقط يعبّر عن انزعاجه أو امتنانه أو عدم فهمه، رد عليه إنسانيًا واسأله عن طلبه عند الحاجة.',
+    'إذا كان السؤال العملي خارج نطاق خدمات Tiqnora، أو لا تملك معلومة موثوقة تكفي للإجابة، أو كنت غير متأكد من الإجابة: لا تخمن ولا تخترع. استخدم هذه الجملة حرفيًا: هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.',
     followUp
       ? 'هذه محادثة مستمرة. لا تعيد رسالة الترحيب ولا تسأل كيف نقدر نخدمك إذا العميل أوضح سؤاله بالفعل.'
       : 'هذه بداية المحادثة. يمكن الترحيب باختصار ثم الإجابة مباشرة على سؤال العميل.',
