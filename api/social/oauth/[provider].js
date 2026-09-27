@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, createCipheriv, createDecipheriv, createHash } from 'node:crypto';
+import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import {
   listAccounts as listGbpAccounts,
   listLocations as listGbpLocations,
@@ -651,36 +651,6 @@ async function handleWhatsappTemplates(req, res) {
   }
 }
 
-async function handleYCloudTemplateBootstrapOnce(req, res) {
-  if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
-  const supplied = String(req.query?.key || '');
-  const digest = createHash('sha256').update(supplied).digest('hex');
-  if (digest !== 'c36ef4f4f2b3db9c13fadc545d920aba589db43ba405895a73e85c665efcfdc9') {
-    return send(res, 404, { error: 'Not found' });
-  }
-  try {
-    const templates = await ensureYCloudTemplatePresets('1341612578140328');
-    return send(res, 200, {
-      ok: true,
-      provider: 'ycloud',
-      templates: templates.map(t => ({
-        name: t.name,
-        language: t.language,
-        category: t.category,
-        status: t.status,
-        created: t.created === true,
-        rejected_reason: t.rejected_reason || null
-      })),
-      customer_messages_sent: 0
-    });
-  } catch (error) {
-    return send(res, error.status || 502, {
-      error: error.message || 'Bootstrap failed',
-      code: error.code || 'bootstrap_failed'
-    });
-  }
-}
-
 async function persistOutboundCrmMessage({
   organizationId,
   event,
@@ -1140,7 +1110,6 @@ export default async function handler(req, res) {
   const action = String(req.query?.action || '').toLowerCase();
   if (req.method === 'POST' && (action === 'reply' || provider === 'reply')) return handleSocialReply(req, res);
   if (provider === 'whatsapp-templates') return handleWhatsappTemplates(req, res);
-  if (provider === 'whatsapp-template-bootstrap-once') return handleYCloudTemplateBootstrapOnce(req, res);
   const cfg = providers[provider];
   if (!cfg) return send(res, 404, { error: 'Unsupported provider' });
   const scopes = provider === 'tiktok' ? (process.env.TIKTOK_SCOPES || cfg.scopes) : cfg.scopes;
