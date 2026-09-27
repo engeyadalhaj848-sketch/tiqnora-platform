@@ -51,7 +51,7 @@ export default async function handler(req, res) {
       checks.supabase = false;
     }
     try {
-      const { telegramConfigurationStatus } = await import('../../../lib/telegram-status.js');
+      const { telegramConfigurationStatus } = await import('../../lib/telegram-status.js');
       const status = await telegramConfigurationStatus();
       checks.telegram = Boolean(status.configured);
       telegramDetail = {
