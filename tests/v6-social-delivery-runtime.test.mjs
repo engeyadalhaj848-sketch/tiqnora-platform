@@ -38,3 +38,10 @@ test('WhatsApp auto reply keeps conversation context instead of repeating the we
   assert.equal(webhook.includes("reason: 'welcome_already_sent_within_24h'"), false);
   assert.equal(webhook.includes('نقدم تصميم وتطوير المواقع والمتاجر، أتمتة واتساب وCRM'), true);
 });
+
+
+test('WhatsApp auto reply stays Arabic and avoids quoted-message UI', () => {
+  assert.equal(webhook.includes('const wrongLanguage ='), true);
+  assert.equal(webhook.includes('بدون تكرار أو لف ودوران'), true);
+  assert.equal(webhook.includes("payload.context = { message_id: rawMessage.wamid }"), false);
+});
