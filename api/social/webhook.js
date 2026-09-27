@@ -1093,16 +1093,37 @@ async function createActionOnce({ organizationId, eventId, ruleId = null, action
 }
 
 async function hasRecentWhatsappAutoReply(storedEvent, organizationId, windowMs = 24 * 60 * 60 * 1000) {
-  if (!storedEvent?.conversation_id) return false;
-  const rows = await rest(
-    `messages?organization_id=eq.${encodeURIComponent(organizationId)}&conversation_id=eq.${encodeURIComponent(storedEvent.conversation_id)}&direction=eq.outbound&select=created_at,ai_meta&order=created_at.desc&limit=30`
-  );
-  const cutoff = Date.now() - windowMs;
-  return (rows || []).some((row) => {
-    if (row?.ai_meta?.source !== 'auto_reply') return false;
-    const at = Date.parse(row.created_at || '');
-    return Number.isFinite(at) && at >= cutoff;
-  });
+  const cutoffIso = new Date(Date.now() - windowMs).toISOString();
+
+  // Primary guard: the welcome is tied to the sender on this connected
+  // WhatsApp account, not to CRM conversation creation. CRM linking can lag
+  // or fail independently, so relying only on conversation_id allows repeated
+  // welcomes for the same person.
+  if (storedEvent?.author_external_id) {
+    const connectionFilter = storedEvent.connection_id
+      ? `&connection_id=eq.${encodeURIComponent(storedEvent.connection_id)}`
+      : '';
+    const priorInbound = await rest(
+      `social_events?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.whatsapp&event_type=eq.message.received&author_external_id=eq.${encodeURIComponent(storedEvent.author_external_id)}${connectionFilter}&id=neq.${encodeURIComponent(storedEvent.id)}&occurred_at=gte.${encodeURIComponent(cutoffIso)}&select=id&order=occurred_at.desc&limit=1`
+    );
+    if (Array.isArray(priorInbound) && priorInbound.length > 0) return true;
+  }
+
+  // Secondary guard for older records that have a CRM conversation but may
+  // lack a reliable author id.
+  if (storedEvent?.conversation_id) {
+    const rows = await rest(
+      `messages?organization_id=eq.${encodeURIComponent(organizationId)}&conversation_id=eq.${encodeURIComponent(storedEvent.conversation_id)}&direction=eq.outbound&select=created_at,ai_meta&order=created_at.desc&limit=30`
+    );
+    const cutoff = Date.now() - windowMs;
+    return (rows || []).some((row) => {
+      if (row?.ai_meta?.source !== 'auto_reply') return false;
+      const at = Date.parse(row.created_at || '');
+      return Number.isFinite(at) && at >= cutoff;
+    });
+  }
+
+  return false;
 }
 
 async function processEvent(event, storedEvent, organizationId, rules) {
