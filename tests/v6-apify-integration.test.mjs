@@ -195,8 +195,8 @@ describe('Apify Maps lead workflow (mock)', () => {
 });
 
 describe('Admin authorization expectation (documented)', () => {
-  it('API module exists and exports default handler', async () => {
-    const mod = await import('../api/integrations/apify/[action].js');
+  it('Apify is consolidated into the V6 router to preserve Hobby function limit', async () => {
+    const mod = await import('../api/v6.js');
     assert.equal(typeof mod.default, 'function');
   });
 });
