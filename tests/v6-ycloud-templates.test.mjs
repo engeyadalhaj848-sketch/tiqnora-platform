@@ -16,7 +16,7 @@ describe('YCloud WhatsApp template presets', () => {
       assert.equal(template.category, 'MARKETING');
       const body = template.components.find(x => x.type === 'BODY');
       assert.ok(body);
-      assert.match(body.text, /{{1}}/);
+      assert.ok(body.text.includes('{{1}}'));
     }
   });
 
