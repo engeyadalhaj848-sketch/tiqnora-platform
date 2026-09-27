@@ -25,7 +25,7 @@ alter table public.integration_connections
   add constraint integration_connections_provider_check
   check (provider in (
     'openai','anthropic','google_ai','resend','stripe','whop','smsa','saudi_post',
-    'meta','linkedin','tiktok','vapi','retell','apify','google_places','telegram'
+    'meta','linkedin','tiktok','vapi','retell','apify','google_places','telegram','whatsapp'
   ));
 
 insert into public.integration_connections (provider, display_name, enabled, status, metadata)
