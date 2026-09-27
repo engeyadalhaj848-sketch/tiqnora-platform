@@ -668,6 +668,8 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
 }
 
 
+const SPECIALIST_HANDOFF_TEXT = 'هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.';
+
 function whatsappContextFallback(event, rule, { followUp = false } = {}) {
   const input = normalizeText(event.content);
   const templated = String(rule?.reply_template || 'شكرًا لتواصلك معنا. كيف نقدر نخدمك؟')
@@ -685,6 +687,14 @@ function whatsappContextFallback(event, rule, { followUp = false } = {}) {
 
   if (/(انت تعبان|ياخي انت تعبان|ما تفهم|مافهمت علي|تكرر|تردد|نفس الرد|ردك غلط)/.test(input)) {
     return 'معك حق، الرد السابق ما كان مناسب. اكتب سؤالك مباشرة وأنا أجاوبك عليه بدون تكرار أو لف ودوران.';
+  }
+
+  if (/(زعلان|زعلت|متضايق|مضايق|منزعج|متوتر|قلقان|خايف|محبط|تعبان نفسيا|مقهور|مشكله مزعجه)/.test(input)) {
+    return 'أتفهم شعورك، وإن شاء الله نساعدك بأفضل شكل. اشرح لي اللي حصل باختصار، وإذا احتاج الموضوع مختص راح نحول المحادثة له مباشرة.';
+  }
+
+  if (/(شكرا|مشكور|يعطيك العافيه|الله يسعدك|ممتاز|رائع|احبكم|كفو|بيض الله وجهك)/.test(input)) {
+    return 'يسعدك ربي 🌟 كلامك محل تقدير، وأنا حاضر لأي شيء تحتاجه.';
   }
 
   if (greetingOnly) {
@@ -709,9 +719,7 @@ function whatsappContextFallback(event, rule, { followUp = false } = {}) {
     return 'نقدر نربط واتساب بالـCRM ونجهز ردود ذكية، تأهيل العملاء، متابعة الطلبات وعروض الأسعار، مع موافقات قبل أي إرسال خارجي. وش نوع نشاطك؟';
   }
 
-  return followUp
-    ? 'أكيد، فهمت عليك. عطيني تفاصيل أكثر عن المطلوب أو نوع نشاطك عشان أعطيك جواب أدق.'
-    : templated;
+  return SPECIALIST_HANDOFF_TEXT;
 }
 
 async function recentConversationHistory(storedEvent, organizationId, limit = 8) {
@@ -743,6 +751,8 @@ async function generateAgentReply(event, rule, options = {}) {
     'اكتب ردًا عربيًا طبيعيًا ومختصرًا على رسالة العميل، وبأسلوب مهني وودود.',
     'إذا كانت رسالة العميل بالعربية فأجب بالعربية فقط. لا تستخدم ترجمة إنجليزية أو تعليقات إنجليزية بين أقواس.',
     'لا تقتبس رسالة العميل ولا تكرر نصها في الرد. أجب على المعنى مباشرة.',
+    'تعامل مع المشاعر بذكاء: إذا العميل غاضب أو متضايق أو قلق أو ممتن أو متحمس، اعترف بمشاعره باختصار وبأسلوب إنساني ثم أكمل المساعدة بدون مبالغة أو تصنع.',
+    'إذا كان السؤال خارج نطاق خدمات Tiqnora، أو لا تملك معلومة موثوقة تكفي للإجابة، أو كنت غير متأكد من الإجابة: لا تخمن ولا تخترع. استخدم هذه الجملة حرفيًا: هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.',
     followUp
       ? 'هذه محادثة مستمرة. لا تعيد رسالة الترحيب ولا تسأل كيف نقدر نخدمك إذا العميل أوضح سؤاله بالفعل.'
       : 'هذه بداية المحادثة. يمكن الترحيب باختصار ثم الإجابة مباشرة على سؤال العميل.',
@@ -1298,6 +1308,7 @@ async function processEvent(event, storedEvent, organizationId, rules) {
       followUp: whatsappFollowUp,
       history
     });
+    const specialistHandoff = event.platform === 'whatsapp' && /القسم المختص/.test(String(text || ''));
     try {
       const delivery = await sendAutomaticReply(event, storedEvent, organizationId, text);
       await rest(`social_event_actions?event_id=eq.${encodeURIComponent(storedEvent.id)}&action_type=eq.auto_reply&status=eq.pending`, {
@@ -1309,9 +1320,24 @@ async function processEvent(event, storedEvent, organizationId, rules) {
         })
       });
       if (delivery.sent) {
+        if (specialistHandoff) {
+          await createActionOnce({
+            organizationId,
+            eventId: storedEvent.id,
+            ruleId: rule.id,
+            actionType: 'specialist_handoff',
+            status: 'pending',
+            result: {
+              platform: event.platform,
+              conversation_id: storedEvent.conversation_id || null,
+              reason: 'ai_uncertain_or_out_of_scope',
+              text
+            }
+          });
+        }
         await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
           method: 'PATCH',
-          body: JSON.stringify({ processing_status: 'processed' })
+          body: JSON.stringify({ processing_status: specialistHandoff ? 'new' : 'processed' })
         });
       }
     } catch (error) {
