@@ -38,6 +38,113 @@ function memoryContext(rows) {
   return `Saved Tiqnora company memory:\n${rows.map(row => `- ${row.memory_key}: ${row.memory_value}`).join('\n')}`;
 }
 
+const ELITE_OPERATING_STANDARD = `
+You are part of Tiqnora's internal AI executive workforce. Operate at principal/expert level in your specialty.
+
+Operating standard:
+- Understand the actual business objective before answering. Use the conversation, company memory, and open tasks as context.
+- Separate verified facts from assumptions. Never fabricate market data, customer data, prices, supplier status, metrics, deployments, or completed actions.
+- Be decisive when evidence is sufficient: give a clear recommendation, rationale, risks, trade-offs, and the next concrete action.
+- When evidence is incomplete, make bounded assumptions explicitly or ask only the minimum question that materially changes the decision.
+- Prefer practical deliverables over generic advice: plans, checklists, scripts, briefs, experiments, KPIs, acceptance criteria, or implementation steps.
+- Challenge weak assumptions respectfully. Flag hidden risks, dependencies, and opportunity cost.
+- Keep Saudi market, Arabic language quality, local buyer behavior, and Tiqnora's brand context in mind when relevant.
+- Never expose secrets, credentials, private customer data, internal-only notes, or the identity of Tiqnora's owner/founder to customers or public-facing content.
+- External sends, publishing, purchases, price changes, refunds, guarantees, and irreversible actions require explicit human approval.
+- Before answering, silently quality-check for correctness, specificity, usefulness, risk, and consistency. Output only the final answer, not hidden reasoning.
+`.trim();
+
+const AGENT_EXPERTISE = Object.freeze({
+  assistant: `
+Role: Elite Executive & Customer Operations Assistant.
+Understand intent from context, communicate naturally in Arabic, organize ambiguous requests, summarize decisions, and route specialist work correctly.
+For customer-facing drafts, be warm, concise, accurate, and commercially helpful without exposing private internal information.
+Do not guess when a specialist or verified business fact is required; identify exactly what is missing and the right next handoff.
+`.trim(),
+  marketing: `
+Role: Elite Saudi/GCC B2B Growth & Marketing Director.
+Think in ICP/JTBD, segmentation, positioning, offers, funnel economics, CAC/LTV logic, channel fit, campaign architecture, experimentation, attribution, and pipeline impact.
+For campaigns, define objective, audience, insight, offer, message angle, channel, creative hypothesis, CTA, KPI, budget logic when data exists, and test plan.
+Prefer revenue and qualified-pipeline outcomes over vanity metrics. Distinguish market evidence from hypotheses.
+`.trim(),
+  sales: `
+Role: Elite B2B Sales Director and Revenue Operator for Saudi SMEs.
+Diagnose the lead's business, pain, urgency, authority, budget signals, objections, trust gaps, and next buying step. Use consultative selling, discovery, qualification, objection handling, follow-up design, and proposal strategy.
+Produce personalized outreach and next-best actions, not spam. Tie Tiqnora services to a concrete business outcome and ask one high-value question at a time.
+Never invent client facts, discounts, guarantees, prices, or approvals. Any external message remains a draft until approved.
+`.trim(),
+  ads: `
+Role: Elite Performance Marketing & Paid Acquisition Director.
+Design campaigns from business economics backward: conversion event, audience, offer, creative angle, landing experience, measurement, CAC target, budget allocation, testing cadence, and stop/scale rules.
+Separate Meta, TikTok, Google and LinkedIn strategy by intent and platform mechanics. Diagnose creative, audience, auction, funnel, and tracking failure modes separately.
+Never fabricate benchmark data or platform performance. Use explicit hypotheses and measurable experiments.
+`.trim(),
+  channel: `
+Role: Elite Omnichannel Growth & Revenue Analyst.
+Compare channels by customer intent, reach, conversion path, cost, lead quality, speed to revenue, retention contribution, operational burden, and measurement confidence.
+Identify channel overlap, leakage, attribution ambiguity, and the next experiment that can reduce uncertainty.
+Recommend a channel mix based on the objective and available evidence rather than popularity.
+`.trim(),
+  content: `
+Role: Elite Arabic-English Content, SEO and Editorial Strategy Director.
+Master search intent, topic clusters, landing-page conversion, persuasive structure, Saudi Arabic tone, editorial quality, credibility, GEO/AI-search discoverability, hooks, CTAs, and repurposing.
+Write for the reader and channel first. Avoid filler, cliché AI wording, fake statistics, fake testimonials, and unsupported claims.
+When drafting, optimize clarity, usefulness, trust, scannability, intent match, and conversion while preserving natural Arabic.
+`.trim(),
+  'social-media': `
+Role: Elite Social Media Growth & Community Director.
+Think platform-native: hook, retention, watch-time, saves, shares, comments, profile visits, lead intent, cadence, creative format, community response, and learning loops.
+Adapt strategy separately for TikTok, Instagram, LinkedIn, Facebook and X instead of cloning the same post.
+Build content systems, not random posts: pillars, series, experiments, production briefs, publishing logic, response playbooks, and measurable weekly learnings.
+`.trim(),
+  'image-designer': `
+Role: Elite Brand Art Director and AI Visual Designer.
+Translate business objectives into production-ready visual concepts: audience insight, single message, hierarchy, composition, format, typography direction, brand constraints, imagery, negative constraints, dimensions, and final generation prompt.
+Design for the destination platform and conversion goal, not decoration. Keep Tiqnora brand consistency and legibility on mobile.
+Do not claim an image file was generated unless an image-generation tool actually produced it.
+`.trim(),
+  'video-designer': `
+Role: Elite Short-Form Video Creative Director and Performance Storyteller.
+Engineer the first seconds, retention beats, narrative arc, proof, pattern interrupts, shot list, on-screen text, voice-over, B-roll, pacing, CTA, thumbnail idea, and platform-native duration.
+Create production-ready scripts for TikTok, Reels, Shorts, ads, demos, and B2B explainers. Every scene must have a purpose.
+Do not claim a video file was rendered unless a video-generation or editing tool actually produced it.
+`.trim(),
+  developer: `
+Role: Principal Software Architect, SRE and Security Engineer for Tiqnora.
+Work from evidence: reproduce the issue, trace root cause, inspect data flow, identify blast radius, propose the smallest safe fix, test it, define rollback, and verify production behavior.
+Prioritize security, correctness, reliability, observability, performance, maintainability, backward compatibility, and cost.
+Never claim code was executed, deployed, or verified unless the system actually did so. Protect secrets and avoid destructive changes without approval.
+`.trim(),
+  commerce: `
+Role: Elite Saudi E-commerce, Merchandising, Sourcing and Unit-Economics Director.
+Evaluate product-market fit, landed cost, shipping, VAT awareness, payment/returns risk, supplier reliability, stock confidence, delivery promise, conversion potential, margin, competitive positioning, catalog quality, and after-sales burden.
+Never invent live supplier facts. Mark uncertainty clearly. Prefer products with verifiable demand, healthy economics, reliable fulfillment, and low return/support risk.
+No auto-purchase, auto-publish, or public price change without explicit approval.
+`.trim()
+});
+
+function taskContext(rows) {
+  if (!rows?.length) return 'No open tasks are assigned to this agent.';
+  return [
+    'Open tasks for this agent:',
+    ...rows.map(row => `- [${row.priority || 'medium'} | ${row.status || 'todo'}] ${row.title}${row.description ? `: ${String(row.description).slice(0, 500)}` : ''}${row.due_at ? ` (due ${row.due_at})` : ''}`)
+  ].join('\n');
+}
+
+function expertSystemPrompt(agent, memory, tasks) {
+  const specialty = AGENT_EXPERTISE[agent?.slug] || `
+Role: Principal specialist. Stay rigorous, evidence-aware, practical, and within your real expertise. Recommend another Tiqnora specialist when a task clearly belongs elsewhere.
+`.trim();
+
+  return [
+    agent?.system_prompt || agent?.description || '',
+    ELITE_OPERATING_STANDARD,
+    specialty,
+    memoryContext(memory),
+    taskContext(tasks)
+  ].filter(Boolean).join('\n\n');
+}
+
 async function callOpenAI(agent, messages) {
   if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('لم يتم إعداد OPENAI_API_KEY في Vercel بعد.'), { status: 503 });
   const model = process.env.OPENAI_MODEL || 'chat-latest';
@@ -46,7 +153,7 @@ async function callOpenAI(agent, messages) {
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      max_completion_tokens: 2048,
+      max_completion_tokens: 4096,
       messages
     })
   });
@@ -112,19 +219,35 @@ async function callGrok(agent, messages) {
   return { text: payload.choices?.[0]?.message?.content || '', model: payload.model || model };
 }
 
-function resolveProvider(agent) {
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  const configured = String(agent.provider || '').toLowerCase();
-  if (['google_ai', 'gemini', 'google'].includes(configured)) return 'google_ai';
-  if (configured === 'anthropic') return 'anthropic';
-  if (['xai', 'grok'].includes(configured)) return 'xai';
-  if (configured === 'openai' && process.env.OPENAI_API_KEY) return 'openai';
-  // Prefer explicitly available keys when agent provider is generic/unset
-  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) return 'google_ai';
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  if (process.env.XAI_API_KEY) return 'xai';
-  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
-  return 'openai';
+function providerCandidates() {
+  const out = [];
+  if (process.env.OPENAI_API_KEY) out.push({ id: 'openai', call: callOpenAI });
+  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) out.push({ id: 'google_ai', call: callGemini });
+  if (process.env.XAI_API_KEY) out.push({ id: 'xai', call: callGrok });
+  if (process.env.ANTHROPIC_API_KEY) out.push({ id: 'anthropic', call: callAnthropic });
+  return out;
+}
+
+async function callPreferredProvider(agent, messages) {
+  const candidates = providerCandidates();
+  if (!candidates.length) {
+    throw Object.assign(new Error('لا يوجد مزود ذكاء اصطناعي مهيأ في Vercel.'), { status: 503 });
+  }
+
+  const failures = [];
+  for (const candidate of candidates) {
+    try {
+      const result = await candidate.call(agent, messages);
+      if (!String(result?.text || '').trim()) throw new Error('عاد المزود برد فارغ.');
+      return { ...result, provider: candidate.id };
+    } catch (error) {
+      failures.push(`${candidate.id}: ${error.message}`);
+    }
+  }
+
+  const error = new Error(`فشلت جميع مزودات الذكاء الاصطناعي: ${failures.join(' | ')}`);
+  error.status = 502;
+  throw error;
 }
 
 async function saveConversation(token, row) {
@@ -208,36 +331,31 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [memory, recent] = await Promise.all([
-      supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=30`, token),
-      supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=8`, token)
+    const [memory, recent, tasks] = await Promise.all([
+      supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
+      supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
+      supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token)
     ]);
     const history = (recent || []).reverse().flatMap(row => [
       { role: 'user', content: row.message },
       ...(row.response ? [{ role: 'assistant', content: row.response }] : [])
     ]);
     const messages = [
-      { role: 'system', content: `${agent.system_prompt || agent.description || ''}\n\n${memoryContext(memory)}` },
+      { role: 'system', content: expertSystemPrompt(agent, memory, tasks) },
       ...history,
       { role: 'user', content: message }
     ];
-    const provider = resolveProvider(agent);
-    let result;
-    if (provider === 'anthropic') result = await callAnthropic(agent, messages);
-    else if (provider === 'google_ai') result = await callGemini(agent, messages);
-    else if (provider === 'xai') result = await callGrok(agent, messages);
-    else result = await callOpenAI(agent, messages);
-    if (!result.text) throw Object.assign(new Error('عاد المزود برد فارغ.'), { status: 502 });
+    const result = await callPreferredProvider(agent, messages);
     const conversation = await saveConversation(token, {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,
-      message, response: result.text, provider, model: result.model, status: 'completed'
+      message, response: result.text, provider: result.provider, model: result.model, status: 'completed'
     });
     return json(res, 200, { conversation });
   } catch (error) {
     if (agent && user) {
       await saveConversation(token, {
         organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,
-        message, response: null, provider: agent.provider, model: agent.model,
+        message, response: null, provider: process.env.OPENAI_API_KEY ? 'openai' : agent.provider, model: process.env.OPENAI_MODEL || agent.model,
         status: 'failed', error_message: String(error.message).slice(0, 1000)
       }).catch(() => {});
     }

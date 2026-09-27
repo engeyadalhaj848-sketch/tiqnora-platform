@@ -1,4 +1,5 @@
 import { getConnector, listConnectorStatuses } from './connectors.js';
+import { generateText } from '../../lib/ai/provider.js';
 /** Commerce AI + Product Scout + Suppliers status (single serverless fn — Hobby 12 limit) */
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -95,27 +96,22 @@ function analyzeProduct({ cost, ship, price, demand, competition, seoOpportunity
   };
 }
 
-async function callGemini(system, message, temperature = 0.45) {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw Object.assign(new Error('لم يتم إعداد GEMINI_API_KEY'), { status: 503 });
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: message }] }],
-        generationConfig: { temperature, maxOutputTokens: 1400 },
-      }),
-    }
-  );
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw Object.assign(new Error(payload.error?.message || 'Gemini failed'), { status: 502 });
-  }
-  return (payload.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('\n');
+async function callCommerceAI(system, message, temperature = 0.45) {
+  const result = await generateText({
+    system: [
+      system,
+      'Operate as a principal-level Saudi commerce specialist.',
+      'Separate verified facts from assumptions and uncertainty.',
+      'Prefer decision-ready analysis: recommendation, rationale, risks, economics, verification needs, and next action.',
+      'Never invent live stock, supplier, shipping, certification, or market facts.',
+      'No auto-purchase, auto-publish, or public price changes without explicit admin approval.'
+    ].join('\n'),
+    prompt: message,
+    temperature,
+    maxTokens: 2400,
+    allowDeterministic: false
+  });
+  return result.text;
 }
 
 async function sbRest(path, { method = 'GET', body, prefer } = {}) {
@@ -182,7 +178,7 @@ async function handleScout(body) {
 
   let ai = null;
   try {
-    const text = await callGemini(
+    const text = await callCommerceAI(
       `You are Tiqnora AI Product Scout for Saudi B2B/B2C tech marketplace (POS, hotel tech, CCTV, networking, construction).
 Reply STRICT JSON only keys:
 seo_title_ar, seo_description_ar, seo_keywords, product_category,
@@ -505,7 +501,7 @@ SKU: ${body.sku || ''}
 Existing description: ${existing}
 Price SAR: ${body.price || ''}
 Write complete Saudi marketplace SEO package as strict JSON.`;
-  const text = await callGemini(MODE_PROMPTS.product_seo, prompt, 0.35);
+  const text = await callCommerceAI(MODE_PROMPTS.product_seo, prompt, 0.35);
   let data = null;
   try {
     data = JSON.parse(text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim());
@@ -1729,7 +1725,7 @@ export default async function handler(req, res) {
   const system = MODE_PROMPTS[mode] || MODE_PROMPTS.research;
 
   try {
-    const reply = await callGemini(system, message);
+    const reply = await callCommerceAI(system, message);
     if (SERVICE) {
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/analytics_events`, {
