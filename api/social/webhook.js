@@ -1092,6 +1092,19 @@ async function createActionOnce({ organizationId, eventId, ruleId = null, action
   return true;
 }
 
+async function hasRecentWhatsappAutoReply(storedEvent, organizationId, windowMs = 24 * 60 * 60 * 1000) {
+  if (!storedEvent?.conversation_id) return false;
+  const rows = await rest(
+    `messages?organization_id=eq.${encodeURIComponent(organizationId)}&conversation_id=eq.${encodeURIComponent(storedEvent.conversation_id)}&direction=eq.outbound&select=created_at,ai_meta&order=created_at.desc&limit=30`
+  );
+  const cutoff = Date.now() - windowMs;
+  return (rows || []).some((row) => {
+    if (row?.ai_meta?.source !== 'auto_reply') return false;
+    const at = Date.parse(row.created_at || '');
+    return Number.isFinite(at) && at >= cutoff;
+  });
+}
+
 async function processEvent(event, storedEvent, organizationId, rules) {
   // Meta echoes comments authored by the connected Page/Instagram account
   // back through the webhook. Treat those as outbound echoes so they never
@@ -1165,6 +1178,37 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   }
 
   if (rule.auto_reply && rule.reply_template) {
+    if (
+      event.platform === 'whatsapp'
+      && rule.intent === 'whatsapp_auto_reply'
+      && await hasRecentWhatsappAutoReply(storedEvent, organizationId)
+    ) {
+      await createActionOnce({
+        organizationId,
+        eventId: storedEvent.id,
+        ruleId: rule.id,
+        actionType: 'auto_reply',
+        status: 'skipped',
+        result: {
+          platform: event.platform,
+          external_event_id: event.external_event_id,
+          reason: 'welcome_already_sent_within_24h'
+        }
+      });
+      await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ processing_status: 'new' })
+      });
+      return {
+        matched: true,
+        queued: true,
+        intent: rule.intent || null,
+        confidence,
+        auto_reply_skipped: true,
+        reason: 'welcome_already_sent_within_24h'
+      };
+    }
+
     const reserved = await createActionOnce({
       organizationId,
       eventId: storedEvent.id,
