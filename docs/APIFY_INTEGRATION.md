@@ -53,3 +53,6 @@ Without the token, status is `not_configured` (no crash).
 5. `GET /api/integrations/apify/status` as admin → `connected`.
 
 Do **not** paste the token into chat or GitHub.
+
+
+<!-- preview-redeploy: 2026-09-27 apify env refresh -->
