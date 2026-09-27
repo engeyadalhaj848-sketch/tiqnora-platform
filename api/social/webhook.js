@@ -667,45 +667,103 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
   return null;
 }
 
-async function generateAgentReply(event, rule) {
-  const fallback = String(rule?.reply_template || 'شكرًا لتواصلك معنا. يسعدنا مساعدتك، أرسل لنا تفاصيل أكثر عن نشاطك.').replaceAll('{{author_name}}', event.author_name || '');
+
+function whatsappContextFallback(event, rule, { followUp = false } = {}) {
+  const input = normalizeText(event.content);
+  const templated = String(rule?.reply_template || 'شكرًا لتواصلك معنا. كيف نقدر نخدمك؟')
+    .replaceAll('{{author_name}}', event.author_name || '');
+
+  const greetingOnly = /^(السلام عليكم|سلام عليكم|وعليكم السلام|مرحبا|مرحبا بك|هلا|هلا والله|حياك الله|اهلا|اهلين)$/i.test(input);
+  if (greetingOnly) {
+    return followUp
+      ? 'الله يحييك ويسعدك 🌟 تفضل، وش حاب تعرف أو وش الخدمة اللي تحتاجها؟'
+      : templated;
+  }
+
+  if (/(الخدمات|خدماتكم|تقدمون|تقدموها|وش عندكم|ايش عندكم|ماذا تقدمون)/.test(input)) {
+    return 'نقدم تصميم وتطوير المواقع والمتاجر، أتمتة واتساب وCRM، وكلاء ذكاء اصطناعي، إدارة السوشيال والمحتوى، وSEO والحلول التقنية. قل لي نوع نشاطك وأقترح لك الأنسب.';
+  }
+
+  if (/(سعر|الاسعار|الأسعار|كم يكلف|تكلفه|تكلفة|عرض سعر)/.test(input)) {
+    return 'أكيد. الأسعار تعتمد على احتياج المشروع، لذلك ما نعطي رقم عشوائي. ارسل نوع نشاطك والخدمة المطلوبة، ونجهز لك تصور وعرض مناسب.';
+  }
+
+  if (/(موقع|ويب|متجر|متجر الكتروني|متجر إلكتروني)/.test(input)) {
+    return 'نقدر نبني لك موقع أو متجر سريع ومتجاوب وربطه بواتساب وCRM والنماذج والتحليلات. ارسل نوع نشاطك وهل تحتاج موقع تعريفي أو متجر بيع.';
+  }
+
+  if (/(واتساب|whatsapp|رد الي|رد آلي|crm|اتمته|أتمتة)/.test(input)) {
+    return 'نقدر نربط واتساب بالـCRM ونجهز ردود ذكية، تأهيل العملاء، متابعة الطلبات وعروض الأسعار، مع موافقات قبل أي إرسال خارجي. وش نوع نشاطك؟';
+  }
+
+  return followUp
+    ? 'أكيد، فهمت عليك. عطيني تفاصيل أكثر عن المطلوب أو نوع نشاطك عشان أعطيك جواب أدق.'
+    : templated;
+}
+
+async function recentConversationHistory(storedEvent, organizationId, limit = 8) {
+  if (!storedEvent?.conversation_id) return [];
+  try {
+    const rows = await rest(
+      `messages?organization_id=eq.${encodeURIComponent(organizationId)}&conversation_id=eq.${encodeURIComponent(storedEvent.conversation_id)}&select=direction,body,created_at&order=created_at.desc&limit=${Math.max(1, Math.min(12, Number(limit) || 8))}`
+    );
+    return (rows || []).slice().reverse().map((row) => ({
+      role: row.direction === 'outbound' ? 'assistant' : 'customer',
+      text: String(row.body || '').slice(0, 500)
+    }));
+  } catch (error) {
+    console.warn('Failed to load WhatsApp conversation history', { message: error.message });
+    return [];
+  }
+}
+
+async function generateAgentReply(event, rule, options = {}) {
+  const followUp = Boolean(options.followUp);
+  const history = Array.isArray(options.history) ? options.history : [];
+  const fallback = whatsappContextFallback(event, rule, { followUp });
 
   // Deterministic facts such as the official website should not be rewritten by AI.
   if (rule?.intent === 'platform_link') return fallback.slice(0, 320);
 
   const prompt = [
     'أنت وكيل خدمة عملاء لمنصة Tiqnora AI في السعودية.',
-    'اكتب ردًا عربيًا طبيعيًا ومختصرًا على رسالة أو تعليق العميل، وبأسلوب مهني وودود.',
-    'افهم المطلوب من النص نفسه. لا تخترع أسعارًا أو خصومات أو مواعيد أو وعودًا أو قدرات غير مؤكدة.',
-    'Tiqnora تقدم حلول مواقع وأتمتة وذكاء اصطناعي وخدمات تقنية. عند طلب سعر أو عرض، اطلب تفاصيل المشروع بدل إعطاء سعر ثابت.',
+    'اكتب ردًا عربيًا طبيعيًا ومختصرًا على رسالة العميل، وبأسلوب مهني وودود.',
+    followUp
+      ? 'هذه محادثة مستمرة. لا تعيد رسالة الترحيب ولا تسأل كيف نقدر نخدمك إذا العميل أوضح سؤاله بالفعل.'
+      : 'هذه بداية المحادثة. يمكن الترحيب باختصار ثم الإجابة مباشرة على سؤال العميل.',
+    'افهم المطلوب من النص نفسه والسياق السابق. لا تخترع أسعارًا أو خصومات أو مواعيد أو وعودًا أو قدرات غير مؤكدة.',
+    'Tiqnora تقدم تصميم وتطوير المواقع والمتاجر، أتمتة واتساب وCRM، وكلاء ذكاء اصطناعي، إدارة السوشيال والمحتوى، SEO وحلول تقنية.',
+    'عند طلب سعر أو عرض، اطلب تفاصيل المشروع بدل إعطاء سعر ثابت.',
     'إذا كان العميل يطلب تحليل نشاطه، اطلب اسم النشاط ورابط الحساب أو الموقع.',
-    'إذا كانت الرسالة مجرد تحية، رد بتحية طبيعية واسأله كيف يمكن مساعدته.',
-    'لا تطلب كلمات مرور أو رموز تحقق أو بيانات حساسة. إذا احتاج الأمر موظفًا، قل إن الفريق سيتابع معه دون ادعاء موعد.',
+    'لا تطلب كلمات مرور أو رموز تحقق أو بيانات حساسة.',
     'اجعل الرد من جملة أو جملتين وبحد أقصى 320 حرفًا، بدون Markdown.',
     `المنصة: ${event.platform}`,
     `اسم العميل إن توفر: ${event.author_name || 'غير معروف'}`,
-    `رسالة العميل: ${event.content || ''}`,
+    `السياق السابق: ${history.length ? JSON.stringify(history) : 'لا يوجد'}`,
+    `رسالة العميل الحالية: ${event.content || ''}`,
     `النية المتوقعة: ${rule?.intent || 'general'}`
   ].join('\n');
 
   try {
-    const result = await callSocialAI(prompt, { temperature: 0.45, maxTokens: 160 });
+    const result = await callSocialAI(prompt, { temperature: 0.35, maxTokens: 180 });
     const text = String(result?.text || '').replace(/\s+/g, ' ').trim();
     const words = text.split(/\s+/).filter(Boolean);
-    const tooShort = text.length < 28 || words.length < 5;
+    const tooShort = text.length < 18 || words.length < 4;
     const greetingOnly = /^(اهلا|أهلا|أهلاً|مرحبا|مرحباً|هلا|حياك)[!،,.\s]*$/i.test(text);
-    if (!text || tooShort || greetingOnly) {
-      console.warn('Social AI reply too short; using template fallback', {
+    const repeatedWelcome = followUp && /شكر[اأً]* لتواصلك.*كيف نقدر نخدمك/i.test(text);
+    if (!text || tooShort || greetingOnly || repeatedWelcome) {
+      console.warn('Social AI reply unsuitable; using contextual fallback', {
         provider: result?.provider || null,
         length: text.length,
-        words: words.length
+        words: words.length,
+        follow_up: followUp
       });
       return fallback.slice(0, 320);
     }
     return text.slice(0, 320);
   } catch (error) {
-    console.warn('Social AI reply generation failed; using template fallback', { message: error.message });
-    return fallback;
+    console.warn('Social AI reply generation failed; using contextual fallback', { message: error.message });
+    return fallback.slice(0, 320);
   }
 }
 
@@ -1199,36 +1257,12 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   }
 
   if (rule.auto_reply && rule.reply_template) {
-    if (
-      event.platform === 'whatsapp'
+    const whatsappFollowUp = event.platform === 'whatsapp'
       && rule.intent === 'whatsapp_auto_reply'
-      && await hasRecentWhatsappAutoReply(storedEvent, organizationId)
-    ) {
-      await createActionOnce({
-        organizationId,
-        eventId: storedEvent.id,
-        ruleId: rule.id,
-        actionType: 'auto_reply',
-        status: 'skipped',
-        result: {
-          platform: event.platform,
-          external_event_id: event.external_event_id,
-          reason: 'welcome_already_sent_within_24h'
-        }
-      });
-      await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ processing_status: 'new' })
-      });
-      return {
-        matched: true,
-        queued: true,
-        intent: rule.intent || null,
-        confidence,
-        auto_reply_skipped: true,
-        reason: 'welcome_already_sent_within_24h'
-      };
-    }
+      && await hasRecentWhatsappAutoReply(storedEvent, organizationId);
+    const history = event.platform === 'whatsapp'
+      ? await recentConversationHistory(storedEvent, organizationId)
+      : [];
 
     const reserved = await createActionOnce({
       organizationId,
@@ -1240,7 +1274,10 @@ async function processEvent(event, storedEvent, organizationId, rules) {
     });
     if (!reserved) return { matched: true, intent: rule.intent || null, confidence, auto_reply_duplicate: true };
 
-    const text = await generateAgentReply(event, rule);
+    const text = await generateAgentReply(event, rule, {
+      followUp: whatsappFollowUp,
+      history
+    });
     try {
       const delivery = await sendAutomaticReply(event, storedEvent, organizationId, text);
       await rest(`social_event_actions?event_id=eq.${encodeURIComponent(storedEvent.id)}&action_type=eq.auto_reply&status=eq.pending`, {
