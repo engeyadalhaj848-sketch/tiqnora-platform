@@ -53,3 +53,8 @@ Enforced in code via `GLOBAL_GUARDS`, not prompts alone.
 `/api/v6?route=workforce&op=...`
 
 ops: status, agents, workflow_list, workflow_start, workflow_runs, daily_report, analytics, next_best_action
+
+
+## Elite workforce + daily social autopilot
+
+OpenAI is the primary runtime for enabled Tiqnora agents, with configured fallback providers for resilience. The Chief of Staff coordinates specialist handoffs. Daily organic social autopilot is scoped by organization settings and currently supports connected Facebook and Instagram feeds at 08:00 Asia/Riyadh.
