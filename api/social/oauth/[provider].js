@@ -663,10 +663,7 @@ async function handleYCloudTemplateBootstrapOnce(req, res) {
   }
 
   try {
-    const orgs = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
-    const organizationId = orgs?.[0]?.id;
-    const connection = await getActiveYCloudConnection(organizationId);
-    const templates = await ensureYCloudTemplatePresets(connection.settings.waba_id);
+    const templates = await ensureYCloudTemplatePresets('1341612578140328');
     return send(res, 200, {
       ok: true,
       provider: 'ycloud',
