@@ -2319,8 +2319,10 @@ async function handleApify(req, res) {
       commitCandidates: false,
       existingLeads: Array.isArray(req.body?.existingLeads) ? req.body.existingLeads : []
     });
-    return json(res, workflow.ok ? 200 : 502, {
+    const failureStatus = workflow.status === 'not_configured' ? 503 : 502;
+    return json(res, workflow.ok ? 200 : failureStatus, {
       ...workflow,
+      error: workflow.ok ? undefined : (workflow.message || workflow.status || 'Apify workflow failed'),
       preview_only: true,
       crm_written: false,
       outreach_sent: false
