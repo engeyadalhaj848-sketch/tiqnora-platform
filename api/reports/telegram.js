@@ -1,6 +1,7 @@
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
+import { runMorningWhatsAppOutreach } from '../../lib/v6/whatsapp-outreach.js';
 import {
   handleTelegramUpdate,
   telegramConfigurationStatus,
@@ -77,7 +78,7 @@ function timedStep(step, startMs, extra = {}) {
   return payload;
 }
 
-async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
+async function runGrowthCron(res, publishing = { processed: 0, results: [] }, outreach = { sent: 0, failed: 0, skipped: {} }) {
   const cronStarted = Date.now();
   const timings = [];
 
@@ -170,6 +171,8 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
     `Completed agent tasks: <b>${completed}</b>`,
     `Failed tasks: <b>${failed}</b>`,
     `Scheduled social jobs processed: <b>${publishing.processed || 0}</b>`,
+    `WhatsApp templates sent: <b>${outreach.sent || 0}</b>`,
+    outreach?.skipped?.no_opt_in ? `WhatsApp waiting for opt-in: <b>${outreach.skipped.no_opt_in}</b>` : null,
     publishing?.autopilot?.created ? `Daily social autopilot: <b>prepared</b> (${(publishing.autopilot.platforms || []).join(', ')})` : null,
     workforce?.error ? `Workforce note: ${String(workforce.error).slice(0, 200)}` : null,
     growth?.prospecting?.error_message ? `Prospecting note: ${String(growth.prospecting.error_message).slice(0, 200)}` : null,
@@ -186,6 +189,7 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }) {
     workforce,
     growth,
     publishing,
+    outreach,
     timings
   });
 }
@@ -327,12 +331,22 @@ export default async function handler(req, res) {
   try {
     const schedule = String(req.headers['x-vercel-cron-schedule'] || '');
     let autopilot = { ok: true, enabled: false, created: false, reason: 'not_morning_schedule' };
+    let outreach = { ok: true, enabled: false, sent: 0, failed: 0, skipped: {}, reason: 'not_morning_schedule' };
     if (schedule === '0 5 * * *') {
       autopilot = await ensureDailySocialAutopilot().catch(error => ({
         ok: false,
         enabled: true,
         created: false,
         reason: 'autopilot_error',
+        error: String(error.message || error).slice(0, 500)
+      }));
+      outreach = await runMorningWhatsAppOutreach().catch(error => ({
+        ok: false,
+        enabled: true,
+        sent: 0,
+        failed: 1,
+        skipped: {},
+        reason: 'whatsapp_outreach_error',
         error: String(error.message || error).slice(0, 500)
       }));
     }
@@ -351,7 +365,7 @@ export default async function handler(req, res) {
       status: publishing?.error ? 'error' : 'ok',
       processed: publishing?.processed || 0
     }));
-    if (schedule === '0 5 * * *') return await runGrowthCron(res, publishing);
+    if (schedule === '0 5 * * *') return await runGrowthCron(res, publishing, outreach);
     return await runDailyReport(res, publishing);
   } catch (error) {
     console.error('Scheduled Tiqnora job failed', { message: error.message, stack: error.stack });
