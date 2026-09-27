@@ -561,6 +561,33 @@ async function metaGraphPost(path, accessToken, payload) {
 async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens = 180 } = {}) {
   const failures = [];
 
+  // Prefer OpenAI for customer conversations when configured. This produces
+  // materially better multi-turn Arabic dialogue than the previous
+  // keyword/fallback-heavy path. Other providers remain as automatic fallback.
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const model = process.env.OPENAI_MODEL || 'chat-latest';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          ...(json ? { response_format: { type: 'json_object' } } : {}),
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || `OpenAI failed (${response.status})`);
+      const text = body?.choices?.[0]?.message?.content?.trim();
+      if (text) return { text, provider: 'openai', model: body?.model || model };
+      throw new Error('OpenAI returned empty text');
+    } catch (error) {
+      failures.push(`openai: ${error.message}`);
+    }
+  }
+
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   if (geminiKey) {
     try {
@@ -584,30 +611,6 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
       throw new Error('Gemini returned empty text');
     } catch (error) {
       failures.push(`google_ai: ${error.message}`);
-    }
-  }
-
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          temperature,
-          max_tokens: maxTokens,
-          ...(json ? { response_format: { type: 'json_object' } } : {}),
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.error?.message || `OpenAI failed (${response.status})`);
-      const text = body?.choices?.[0]?.message?.content?.trim();
-      if (text) return { text, provider: 'openai', model: body?.model || model };
-      throw new Error('OpenAI returned empty text');
-    } catch (error) {
-      failures.push(`openai: ${error.message}`);
     }
   }
 
@@ -666,7 +669,6 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
   }
   return null;
 }
-
 
 const SPECIALIST_HANDOFF_TEXT = 'هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.';
 
@@ -727,15 +729,15 @@ function whatsappContextFallback(event, rule, { followUp = false } = {}) {
   return SPECIALIST_HANDOFF_TEXT;
 }
 
-async function recentConversationHistory(storedEvent, organizationId, limit = 8) {
+async function recentConversationHistory(storedEvent, organizationId, limit = 16) {
   if (!storedEvent?.conversation_id) return [];
   try {
     const rows = await rest(
-      `messages?organization_id=eq.${encodeURIComponent(organizationId)}&conversation_id=eq.${encodeURIComponent(storedEvent.conversation_id)}&select=direction,body,created_at&order=created_at.desc&limit=${Math.max(1, Math.min(12, Number(limit) || 8))}`
+      `messages?organization_id=eq.${encodeURIComponent(organizationId)}&conversation_id=eq.${encodeURIComponent(storedEvent.conversation_id)}&select=direction,body,created_at&order=created_at.desc&limit=${Math.max(1, Math.min(20, Number(limit) || 16))}`
     );
     return (rows || []).slice().reverse().map((row) => ({
       role: row.direction === 'outbound' ? 'assistant' : 'customer',
-      text: String(row.body || '').slice(0, 500)
+      text: String(row.body || '').slice(0, 900)
     }));
   } catch (error) {
     console.warn('Failed to load WhatsApp conversation history', { message: error.message });
@@ -748,23 +750,20 @@ async function generateAgentReply(event, rule, options = {}) {
   const history = Array.isArray(options.history) ? options.history : [];
   const fallback = whatsappContextFallback(event, rule, { followUp });
 
-  // Emotional reactions should never be mistaken for an unknown business request.
-  // Handle them deterministically so frustration/thanks/small-talk are answered naturally,
-  // while specialist handoff remains reserved for genuinely unknown work questions.
-  if (event.platform === 'whatsapp' && isWhatsappEmotionalMessage(event.content)) {
-    return fallback.slice(0, 320);
-  }
-
   // Deterministic facts such as the official website should not be rewritten by AI.
-  if (rule?.intent === 'platform_link') return fallback.slice(0, 320);
+  if (rule?.intent === 'platform_link') return fallback.slice(0, 700);
 
   const prompt = [
     'أنت وكيل خدمة عملاء لمنصة Tiqnora AI في السعودية.',
-    'اكتب ردًا عربيًا طبيعيًا ومختصرًا على رسالة العميل، وبأسلوب مهني وودود.',
-    'إذا كانت رسالة العميل بالعربية فأجب بالعربية فقط. لا تستخدم ترجمة إنجليزية أو تعليقات إنجليزية بين أقواس.',
+    'تصرف كمساعد محادثة ذكي جدًا، وليس كبوت ردود جاهزة. افهم مقصد العميل من كلامه والسياق السابق حتى لو كان عاميًا أو فيه أخطاء أو كلام عاطفي.',
+    'اكتب ردًا عربيًا طبيعيًا ومباشرًا، وبأسلوب إنساني وودود قريب من أسلوب المحادثة الحقيقية.',
+    'لا تعتمد على كلمات مفتاحية وحدها. اربط الرسالة الحالية بما قيل قبلها، وافهم الضمائر والتلميحات والاعتراضات والمتابعة.',
+    'إذا كان السؤال واضحًا فأجب عليه مباشرة ولا تطلب تفاصيل سبق أن ذكرها العميل ولا تعيد نفس السؤال بصياغة مختلفة.',
+    'إذا كان العميل يمزح أو يشتكي أو يعبّر عن مشاعر، رد على المعنى والمشاعر أولًا ثم أكمل المساعدة بشكل طبيعي.',
+    'إذا كانت رسالة العميل بالعربية فأجب بالعربية فقط، ويفضل لهجة عربية سعودية خفيفة إذا كان أسلوب العميل عاميًا. لا تستخدم ترجمة إنجليزية أو تعليقات إنجليزية بين أقواس.',
     'لا تقتبس رسالة العميل ولا تكرر نصها في الرد. أجب على المعنى مباشرة.',
     'تعامل مع المشاعر بذكاء: إذا العميل غاضب أو متضايق أو قلق أو ممتن أو متحمس، اعترف بمشاعره باختصار وبأسلوب إنساني ثم أكمل المساعدة بدون مبالغة أو تصنع.',
-    'المشاعر وحدها ليست سببًا لتحويل المحادثة للقسم المختص. إذا العميل فقط يعبّر عن انزعاجه أو امتنانه أو عدم فهمه، رد عليه إنسانيًا واسأله عن طلبه عند الحاجة.',
+    'المشاعر أو المزاح أو عدم الفهم ليست سببًا للتحويل. لا تحول إلا إذا كان هناك طلب عملي حقيقي خارج نطاقك أو معلومة لازمة لا تملكها ولا يمكن استنتاجها بأمان.',
     'إذا كان السؤال العملي خارج نطاق خدمات Tiqnora، أو لا تملك معلومة موثوقة تكفي للإجابة، أو كنت غير متأكد من الإجابة: لا تخمن ولا تخترع. استخدم هذه الجملة حرفيًا: هذا الطلب يحتاج متابعة أدق، لذلك سيتم تحويل المحادثة للقسم المختص، وبيكمل معك الفريق من هنا.',
     followUp
       ? 'هذه محادثة مستمرة. لا تعيد رسالة الترحيب ولا تسأل كيف نقدر نخدمك إذا العميل أوضح سؤاله بالفعل.'
@@ -774,7 +773,7 @@ async function generateAgentReply(event, rule, options = {}) {
     'عند طلب سعر أو عرض، اطلب تفاصيل المشروع بدل إعطاء سعر ثابت.',
     'إذا كان العميل يطلب تحليل نشاطه، اطلب اسم النشاط ورابط الحساب أو الموقع.',
     'لا تطلب كلمات مرور أو رموز تحقق أو بيانات حساسة.',
-    'اجعل الرد من جملة أو جملتين وبحد أقصى 320 حرفًا، بدون Markdown.',
+    'اجعل الرد قصيرًا ومفيدًا عادة من جملة إلى أربع جمل. لا تطيل بلا داعٍ، وبدون Markdown.',
     `المنصة: ${event.platform}`,
     `اسم العميل إن توفر: ${event.author_name || 'غير معروف'}`,
     `السياق السابق: ${history.length ? JSON.stringify(history) : 'لا يوجد'}`,
@@ -783,7 +782,7 @@ async function generateAgentReply(event, rule, options = {}) {
   ].join('\n');
 
   try {
-    const result = await callSocialAI(prompt, { temperature: 0.35, maxTokens: 180 });
+    const result = await callSocialAI(prompt, { temperature: 0.45, maxTokens: 320 });
     const text = String(result?.text || '').replace(/\s+/g, ' ').trim();
     const words = text.split(/\s+/).filter(Boolean);
     const tooShort = text.length < 18 || words.length < 4;
@@ -801,12 +800,12 @@ async function generateAgentReply(event, rule, options = {}) {
         follow_up: followUp,
         wrong_language: wrongLanguage
       });
-      return fallback.slice(0, 320);
+      return fallback.slice(0, 700);
     }
-    return text.slice(0, 320);
+    return text.slice(0, 700);
   } catch (error) {
     console.warn('Social AI reply generation failed; using contextual fallback', { message: error.message });
-    return fallback.slice(0, 320);
+    return fallback.slice(0, 700);
   }
 }
 
