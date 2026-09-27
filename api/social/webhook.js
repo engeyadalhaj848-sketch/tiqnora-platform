@@ -573,7 +573,7 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
         body: JSON.stringify({
           model,
           temperature,
-          max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           ...(json ? { response_format: { type: 'json_object' } } : {}),
           messages: [{ role: 'user', content: prompt }]
         })
@@ -581,7 +581,10 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body?.error?.message || `OpenAI failed (${response.status})`);
       const text = body?.choices?.[0]?.message?.content?.trim();
-      if (text) return { text, provider: 'openai', model: body?.model || model };
+      if (text) {
+        console.info('Social AI provider success', { provider: 'openai', model: body?.model || model });
+        return { text, provider: 'openai', model: body?.model || model };
+      }
       throw new Error('OpenAI returned empty text');
     } catch (error) {
       failures.push(`openai: ${error.message}`);
