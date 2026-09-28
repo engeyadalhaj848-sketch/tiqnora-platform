@@ -55,8 +55,7 @@ if (existsSync('public/customer-sw.js')) {
 async function submitWebDesignTemplateOnce() {
   if (process.env.VERCEL_ENV !== 'production') return;
   if (!String(process.env.YCLOUD_API_KEY || '').trim()) {
-    console.log('WhatsApp web-design template submission skipped: YCLOUD_API_KEY is not configured.');
-    return;
+    throw new Error('WhatsApp web-design template submission failed: YCLOUD_API_KEY is not configured.');
   }
 
   const wabaId = '1341612578140328';
@@ -64,8 +63,7 @@ async function submitWebDesignTemplateOnce() {
   try {
     const preset = TIQNORA_YCLOUD_TEMPLATE_PRESETS.find(x => x.name === target && x.language === 'ar');
     if (!preset) {
-      console.warn('WhatsApp web-design template preset missing.');
-      return;
+      throw new Error('WhatsApp web-design template preset missing.');
     }
 
     const existing = await listYCloudTemplates(wabaId);
@@ -100,7 +98,8 @@ async function submitWebDesignTemplateOnce() {
       rejected_reason: created?.rejectedReason || null
     }));
   } catch (error) {
-    console.warn('WhatsApp web-design template submission failed:', error.message);
+    console.error('WhatsApp web-design template submission failed:', error.message);
+    throw error;
   }
 }
 
