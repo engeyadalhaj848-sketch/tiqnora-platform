@@ -43,3 +43,14 @@ test('autopilot is explicitly scoped in organization settings', () => {
   assert.equal(migration.includes("'daily_time', '08:00'"), true);
   assert.equal(migration.includes("'authorized_scope'"), true);
 });
+
+
+test('chief of staff reviews and can return weak social work to a specialist before publish', () => {
+  assert.equal(autopilot.includes('managerQualityReview'), true);
+  assert.equal(autopilot.includes('managerReviewLoop'), true);
+  assert.equal(autopilot.includes('reviseSocialPackage'), true);
+  assert.equal(autopilot.includes("'approve|revise'"), true);
+  assert.equal(autopilot.includes("'returned_to_specialist'"), true);
+  assert.equal(autopilot.includes("reason:'manager_review_not_approved'"), true);
+  assert.equal(autopilot.includes('manager_approved:true'), true);
+});
