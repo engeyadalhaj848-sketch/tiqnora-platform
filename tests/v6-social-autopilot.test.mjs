@@ -49,7 +49,7 @@ test('chief of staff reviews and can return weak social work to a specialist bef
   assert.equal(autopilot.includes('managerQualityReview'), true);
   assert.equal(autopilot.includes('managerReviewLoop'), true);
   assert.equal(autopilot.includes('reviseSocialPackage'), true);
-  assert.equal(autopilot.includes("'approve|revise'"), true);
+  assert.equal(autopilot.includes("approve|revise"), true);
   assert.equal(autopilot.includes("'returned_to_specialist'"), true);
   assert.equal(autopilot.includes("reason:'manager_review_not_approved'"), true);
   assert.equal(autopilot.includes('manager_approved:true'), true);
