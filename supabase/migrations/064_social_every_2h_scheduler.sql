@@ -39,7 +39,7 @@ set settings = jsonb_set(
 )
 where slug='tiqnora';
 
-do $
+do $$
 begin
   if exists (select 1 from cron.job where jobname='tiqnora-social-autopilot-every-2h') then
     perform cron.unschedule('tiqnora-social-autopilot-every-2h');
