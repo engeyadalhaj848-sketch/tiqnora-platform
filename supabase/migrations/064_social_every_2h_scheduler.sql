@@ -24,13 +24,22 @@ set settings = jsonb_set(
     '"00:00,02:00,04:00,06:00,08:00,10:00,12:00,14:00,16:00,18:00,20:00,22:00 Asia/Riyadh"'::jsonb,
     true
   ),
+  '{social_autopilot,target_platforms}',
+  '["facebook","instagram","tiktok"]'::jsonb,
+  true
+)
+where slug='tiqnora';
+
+update public.organizations
+set settings = jsonb_set(
+  coalesce(settings,'{}'::jsonb),
   '{social_autopilot,tiktok_accounts_api_status}',
   '"needs_authorization"'::jsonb,
   true
 )
 where slug='tiqnora';
 
-do $$
+do $
 begin
   if exists (select 1 from cron.job where jobname='tiqnora-social-autopilot-every-2h') then
     perform cron.unschedule('tiqnora-social-autopilot-every-2h');
