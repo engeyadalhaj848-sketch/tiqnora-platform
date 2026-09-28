@@ -16,6 +16,8 @@ test('worker supports Facebook and Instagram Graph publishing', () => {
   assert.equal(runtime.includes('/feed'), true);
   assert.equal(runtime.includes('/media_publish'), true);
   assert.equal(runtime.includes('instagram_image_required'), true);
+  assert.equal(runtime.includes('waitForInstagramContainer'), true);
+  assert.equal(runtime.includes('status_code,status'), true);
 });
 
 test('worker does not fake TikTok or WhatsApp feed publishing', () => {
