@@ -1,7 +1,6 @@
 import { cpSync, existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
-import { runQueuedTasks } from './lib/autonomous-sales.js';
 
 const output = 'dist';
 rmSync(output, { recursive: true, force: true });
@@ -115,12 +114,6 @@ async function configureTelegramCommandCenter() {
 }
 
 
-async function runOneShotCampaignAgents() {
-  if (process.env.VERCEL_ENV !== 'production') return;
-  const result = await runQueuedTasks({ limit: 3 });
-  console.log('One-shot campaign R2:', JSON.stringify({ due: result?.due || 0, completed: result?.completed || 0, failed: result?.failed || 0 }));
-}
-
 function verifyBrowserScriptSyntax() {
   for (const file of ['js/admin-app.js', 'js/social-inbox-admin.js']) {
     if (!existsSync(file)) continue;
@@ -137,5 +130,4 @@ function verifyBrowserScriptSyntax() {
 verifyBrowserScriptSyntax();
 
 await configureTelegramCommandCenter();
-await runOneShotCampaignAgents();
 console.log('Build complete → dist/');
