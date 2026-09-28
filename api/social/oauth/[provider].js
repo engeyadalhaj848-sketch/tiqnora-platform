@@ -9,8 +9,7 @@ import {
   listYCloudTemplates,
   ensureYCloudTemplatePresets,
   retrieveYCloudTemplate,
-  sendYCloudTemplateMessage,
-  ycloudRequest
+  sendYCloudTemplateMessage
 } from '../../../lib/integrations/ycloud-templates.js';
 
 const providers = {
@@ -1409,122 +1408,10 @@ function handleTikTokBusinessCallback(req, res) {
 }
 
 
-async function handleAuthorizedWebsiteDesignTest(req, res) {
-  if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
-
-  const recipient = '+966561323977';
-  const leadId = '263e818b-7651-414d-8c04-791b59098bdb';
-  const activityTitle = 'تم إرسال رسالة اختبار تصميم المواقع عبر WhatsApp';
-
-  try {
-    const prior = await supa(
-      'crm_activities?lead_id=eq.' + encodeURIComponent(leadId)
-      + '&title=eq.' + encodeURIComponent(activityTitle)
-      + '&select=id,created_at&order=created_at.desc&limit=1'
-    ).catch(() => []);
-    if (prior?.[0]) {
-      return send(res, 200, { ok: true, already_sent: true, activity_id: prior[0].id });
-    }
-
-    const leadRows = await supa(
-      'leads?id=eq.' + encodeURIComponent(leadId)
-      + '&select=id,phone,whatsapp,custom_fields&limit=1'
-    );
-    const lead = Array.isArray(leadRows) ? leadRows[0] : null;
-    const optedIn = lead?.custom_fields?.whatsapp_opt_in === true
-      || String(lead?.custom_fields?.whatsapp_opt_in || '').toLowerCase() === 'true';
-    if (!lead || !optedIn || normalizeE164(lead.whatsapp || lead.phone) !== recipient) {
-      return send(res, 409, { error: 'Authorized test recipient is not ready.', code: 'authorized_test_recipient_missing' });
-    }
-
-    const conversations = await supa(
-      'conversations?platform=eq.whatsapp&external_thread_id=eq.'
-      + encodeURIComponent('dm:' + recipient)
-      + '&select=id,last_message_at&order=last_message_at.desc&limit=1'
-    ).catch(() => []);
-    const conversation = Array.isArray(conversations) ? conversations[0] : null;
-    if (!conversation?.id) {
-      return send(res, 409, { error: 'No active WhatsApp conversation found.', code: 'conversation_missing' });
-    }
-
-    const inboundRows = await supa(
-      'messages?conversation_id=eq.' + encodeURIComponent(conversation.id)
-      + '&direction=eq.inbound&select=created_at&order=created_at.desc&limit=1'
-    ).catch(() => []);
-    const lastInbound = inboundRows?.[0]?.created_at ? new Date(inboundRows[0].created_at).getTime() : 0;
-    if (!lastInbound || Date.now() - lastInbound > 24 * 60 * 60 * 1000) {
-      return send(res, 409, { error: 'The WhatsApp 24-hour service window is not open.', code: 'service_window_closed' });
-    }
-
-    const orgs = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
-    const organizationId = orgs?.[0]?.id;
-    if (!organizationId) return send(res, 500, { error: 'Organization missing' });
-
-    const connection = await getActiveYCloudConnection(organizationId);
-    const from = normalizeE164(connection.external_account_id);
-    if (!from) return send(res, 409, { error: 'Connected YCloud sender number is invalid.', code: 'sender_invalid' });
-
-    const message = [
-      'مرحبًا 👋 معك Tiqnora AI.',
-      'الموقع الاحترافي يساعد نشاطك يظهر بشكل أوضح وموثوق، يعرض خدماتك بطريقة مرتبة، ويوجه الزائر مباشرة للاستفسار عبر واتساب أو طلب عرض سعر.',
-      'إذا تحب، نجهز لك تصورًا مبدئيًا لموقع يناسب نشاطك ونوضح لك كيف نحول الزيارات إلى فرص عملاء.',
-      'https://www.tiqnora.com/services/web-design'
-    ].join('\n\n');
-
-    const apiResult = await ycloudRequest('/v2/whatsapp/messages', {
-      method: 'POST',
-      body: {
-        from,
-        to: recipient,
-        type: 'text',
-        text: { body: message, previewUrl: true }
-      }
-    });
-    const externalId = String(apiResult?.wamid || apiResult?.id || '').trim();
-    if (!externalId) {
-      return send(res, 502, { error: 'YCloud accepted the request without a message ID.', code: 'ycloud_id_missing' });
-    }
-
-    await supa('crm_activities', {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({
-        organization_id: organizationId,
-        lead_id: leadId,
-        activity_type: 'system',
-        title: activityTitle,
-        body: 'Website design value proposition test message',
-        metadata: {
-          kind: 'manual_web_design_test_2026_09_28',
-          provider: 'ycloud',
-          recipient,
-          outbound_external_id: externalId,
-          explicit_user_authorization: true
-        }
-      })
-    }).catch(() => null);
-
-    return send(res, 200, {
-      ok: true,
-      sent: true,
-      status: apiResult?.status || 'accepted',
-      outbound_external_id: externalId,
-      customer_messages_sent: 1
-    });
-  } catch (error) {
-    return send(res, error.status || 502, {
-      ok: false,
-      error: error.message || 'WhatsApp test send failed',
-      code: error.code || 'whatsapp_test_send_failed'
-    });
-  }
-}
-
 export default async function handler(req, res) {
   const provider = String(req.query?.provider || '').toLowerCase();
   const action = String(req.query?.action || '').toLowerCase();
   if (provider === 'tiktok-business') return handleTikTokBusinessCallback(req, res);
-  if (provider === 'whatsapp-authorized-test') return handleAuthorizedWebsiteDesignTest(req, res);
   if (req.method === 'POST' && (action === 'reply' || provider === 'reply')) return handleSocialReply(req, res);
   if (provider === 'whatsapp-templates') return handleWhatsappTemplates(req, res);
   if (provider === 'whatsapp-template-send') return handleWhatsappTemplateSend(req, res);
