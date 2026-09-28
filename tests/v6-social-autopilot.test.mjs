@@ -6,6 +6,7 @@ const autopilot = readFileSync(new URL('../lib/v6/social-autopilot.js', import.m
 const reports = readFileSync(new URL('../api/reports/telegram.js', import.meta.url), 'utf8');
 const workforceChat = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../supabase/migrations/060_daily_social_autopilot.sql', import.meta.url), 'utf8');
+const migration64 = readFileSync(new URL('../supabase/migrations/064_social_every_2h_scheduler.sql', import.meta.url), 'utf8');
 
 test('daily social autopilot is collaborative and OpenAI-backed through shared provider', () => {
   assert.equal(autopilot.includes('managerDirective'), true);
@@ -53,4 +54,16 @@ test('chief of staff reviews and can return weak social work to a specialist bef
   assert.equal(autopilot.includes("'returned_to_specialist'"), true);
   assert.equal(autopilot.includes("reason:'manager_review_not_approved'"), true);
   assert.equal(autopilot.includes('manager_approved:true'), true);
+});
+
+
+test('two-hour social scheduler is persisted with Riyadh-aligned cadence and secure scheduler token', () => {
+  assert.equal(autopilot.includes('slotRiyadh'), true);
+  assert.equal(autopilot.includes("config.interval_hours||2"), true);
+  assert.equal(autopilot.includes('autopilot_slot'), true);
+  assert.equal(reports.includes("route === 'social_autopilot_tick'"), true);
+  assert.equal(reports.includes('isAuthorizedSocialScheduler'), true);
+  assert.equal(migration64.includes("'0 1-23/2 * * *'"), true);
+  assert.equal(migration64.includes("tiqnora_social_scheduler_token"), true);
+  assert.equal(migration64.includes("organic_every_2h"), true);
 });
