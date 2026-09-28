@@ -1033,3 +1033,260 @@ body {
     animation-iteration-count: 1 !important;
   }
 }
+
+
+/* ---------------------------------------------------------
+   Mobile hardening
+   Some Android/in-app browsers request a wide desktop layout
+   even on a coarse pointer device. Force the intended mobile
+   composition by interaction capability, not viewport alone.
+   --------------------------------------------------------- */
+@media (hover: none) and (pointer: coarse) {
+  .site-header {
+    height: 64px;
+  }
+
+  .header-inner {
+    width: min(100% - 20px, var(--tq-max));
+    gap: 8px;
+  }
+
+  .brand {
+    order: 1;
+    flex: 0 0 auto;
+  }
+
+  .brand img {
+    width: 32px;
+    height: 32px;
+  }
+
+  .brand-text {
+    display: none;
+  }
+
+  .menu-toggle {
+    display: flex !important;
+    order: 4;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 10px 6px;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .site-nav {
+    display: none !important;
+  }
+
+  .site-nav.open {
+    display: flex !important;
+    position: fixed !important;
+    inset: 64px 0 0 0 !important;
+    z-index: 120 !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0 !important;
+    padding: 18px 20px 28px !important;
+    background: rgba(3,7,18,.98) !important;
+    border: 0 !important;
+    border-top: 1px solid var(--tq-border) !important;
+    border-radius: 0 !important;
+    overflow-y: auto !important;
+  }
+
+  .site-nav.open a {
+    min-height: 52px;
+    padding: 14px 2px !important;
+    border-bottom: 1px solid var(--tq-border) !important;
+    font-size: 15px !important;
+  }
+
+  .nav-actions {
+    order: 3;
+    margin-inline-start: auto;
+    gap: 6px;
+  }
+
+  .header-cta {
+    display: none !important;
+  }
+
+  .cart-button,
+  .language-toggle {
+    min-height: 36px;
+    height: 36px;
+    padding: 7px 9px;
+  }
+
+  .cart-button span {
+    display: none;
+  }
+
+  .hero {
+    min-height: auto;
+    padding: 112px 0 60px;
+  }
+
+  .hero::after {
+    display: none;
+  }
+
+  .hero-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    grid-template-columns: none !important;
+    gap: 38px !important;
+    align-items: stretch !important;
+  }
+
+  .hero-copy {
+    width: 100%;
+    max-width: none;
+  }
+
+  .hero h1 {
+    max-width: 680px;
+    font-size: clamp(38px, 11vw, 56px);
+    line-height: 1.08;
+  }
+
+  .hero-lead {
+    max-width: 680px;
+    font-size: 16px;
+  }
+
+  .hero-ctas {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .hero-ctas .btn {
+    width: 100%;
+  }
+
+  .hero-trust {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .live-visual {
+    order: 2;
+    width: 100%;
+    min-height: 410px;
+    max-width: none;
+    border-radius: 14px;
+  }
+
+  .command-shell {
+    min-height: 410px;
+  }
+
+  .command-sidebar {
+    display: none !important;
+  }
+
+  .command-main {
+    width: 100%;
+    min-width: 0;
+    padding: 14px;
+  }
+
+  .command-topbar {
+    gap: 10px;
+  }
+
+  .command-title strong {
+    font-size: 12px;
+  }
+
+  .command-title small {
+    font-size: 8px;
+  }
+
+  .command-metrics {
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    gap: 6px;
+  }
+
+  .command-metric {
+    min-width: 0;
+    padding: 10px 7px;
+  }
+
+  .command-metric strong {
+    font-size: 15px;
+  }
+
+  .command-metric em {
+    display: none;
+  }
+
+  .command-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .command-grid .command-panel:last-child {
+    display: none;
+  }
+
+  .command-panel {
+    padding: 11px;
+  }
+
+  .agent-row {
+    padding: 8px 7px;
+  }
+
+  .agent-copy strong {
+    font-size: 9px;
+  }
+
+  .agent-copy small {
+    font-size: 8px;
+  }
+
+  .section {
+    padding: 72px 0;
+  }
+
+  .systems-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .system-card {
+    min-height: 0;
+  }
+
+  .process-steps,
+  .why-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .step {
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--tq-border);
+  }
+
+  .step:last-child {
+    border-bottom: 0;
+  }
+}
+
+/* Keep navigation compact on narrower desktop/tablet widths too. */
+@media (min-width: 960px) and (max-width: 1180px) {
+  .site-nav {
+    gap: 12px;
+  }
+
+  .site-nav a {
+    font-size: 11px;
+  }
+
+  .header-cta {
+    padding-inline: 12px;
+  }
+}
