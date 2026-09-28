@@ -1194,3 +1194,170 @@ body {
     scroll-behavior:auto !important;
   }
 }
+
+
+/* ---------- Animated service icons ---------- */
+.system-card {
+  overflow: hidden;
+}
+
+.service-icon {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(10,92,255,.18), transparent 64%),
+    #111214;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 0 0 1px rgba(255,255,255,.12),
+    inset 0 -1px 0 rgba(0,0,0,.28);
+  transition:
+    transform .22s ease,
+    box-shadow .22s ease,
+    background .22s ease;
+}
+
+.service-icon svg {
+  width: 34px;
+  height: 34px;
+  overflow: visible;
+  fill: none;
+  stroke: #e7e7e8;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.service-icon .icon-motion {
+  stroke: var(--tq-cyan);
+}
+
+.system-card:hover .service-icon {
+  transform: translateY(-2px) scale(1.045);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(10,92,255,.26), transparent 68%),
+    #121419;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 0 0 1px rgba(99,161,255,.32),
+    0 10px 28px rgba(10,92,255,.10);
+}
+
+/* entrance reveal */
+.reveal-card {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.reveal-card.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity .46s cubic-bezier(.22,1,.36,1) var(--reveal-delay, 0ms),
+    transform .46s cubic-bezier(.22,1,.36,1) var(--reveal-delay, 0ms),
+    box-shadow .16s ease,
+    background .16s ease;
+}
+
+/* web — scanning line */
+.service-icon-web .icon-web-line {
+  stroke-dasharray: 18 8;
+  animation: tq-web-scan 3.4s ease-in-out infinite;
+}
+
+@keyframes tq-web-scan {
+  0%,100% { stroke-dashoffset: 0; opacity: .65; }
+  50% { stroke-dashoffset: -18; opacity: 1; }
+}
+
+/* AI — breathing intelligence wave */
+.service-icon-ai .icon-ai-wave {
+  transform-origin: center;
+  animation: tq-ai-wave 2.8s ease-in-out infinite;
+}
+
+@keyframes tq-ai-wave {
+  0%,100% { opacity: .42; transform: scaleX(.94); }
+  50% { opacity: 1; transform: scaleX(1.04); }
+}
+
+/* Social — orbiting signal */
+.service-icon-social .icon-social-orbit {
+  fill: var(--tq-cyan);
+  stroke: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tq-social-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes tq-social-pulse {
+  0%,100% { opacity: .45; transform: scale(.75); }
+  50% { opacity: 1; transform: scale(1.35); }
+}
+
+/* Security — protective sweep */
+.service-icon-security .icon-security-sweep {
+  stroke-dasharray: 9 28;
+  animation: tq-shield-sweep 2.9s linear infinite;
+}
+
+@keyframes tq-shield-sweep {
+  from { stroke-dashoffset: 0; opacity: .35; }
+  45% { opacity: 1; }
+  to { stroke-dashoffset: -37; opacity: .35; }
+}
+
+/* CRM — moving workflow node */
+.service-icon-crm .icon-crm-dot {
+  fill: var(--tq-cyan);
+  stroke: none;
+  animation: tq-crm-flow 2.7s ease-in-out infinite;
+}
+
+@keyframes tq-crm-flow {
+  0%,100% { transform: translateX(-6px); opacity: .45; }
+  50% { transform: translateX(6px); opacity: 1; }
+}
+
+/* Commerce — floating package */
+.service-icon-commerce .icon-commerce-box {
+  animation: tq-commerce-float 2.7s ease-in-out infinite;
+}
+
+@keyframes tq-commerce-float {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+
+@media (max-width: 767px), (hover:none) and (pointer:coarse) {
+  .service-icon {
+    width: 54px;
+    height: 54px;
+    margin-bottom: 24px;
+  }
+
+  .service-icon svg {
+    width: 31px;
+    height: 31px;
+  }
+
+  .system-card:hover .service-icon {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .service-icon .icon-motion,
+  .service-icon-commerce .icon-commerce-box {
+    animation: none !important;
+  }
+
+  .reveal-card {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
