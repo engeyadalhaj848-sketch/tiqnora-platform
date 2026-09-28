@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/social/publish-worker",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/reports/telegram",
       "schedule": "0 3 * * *"
     },
