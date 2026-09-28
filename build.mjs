@@ -1,7 +1,6 @@
 import { cpSync, existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
-import { TIQNORA_YCLOUD_TEMPLATE_PRESETS, listYCloudTemplates, ycloudRequest } from './lib/integrations/ycloud-templates.js';
 
 const output = 'dist';
 rmSync(output, { recursive: true, force: true });
@@ -51,57 +50,6 @@ if (existsSync('public/customer-sw.js')) {
   cpSync('public/customer-sw.js', `${output}/customer-sw.js`);
 }
 
-
-async function submitWebDesignTemplateOnce() {
-  if (process.env.VERCEL_ENV !== 'production') return;
-  if (!String(process.env.YCLOUD_API_KEY || '').trim()) {
-    throw new Error('WhatsApp web-design template submission failed: YCLOUD_API_KEY is not configured.');
-  }
-
-  const wabaId = '1341612578140328';
-  const target = 'tiqnora_web_design_intro_ar';
-  try {
-    const preset = TIQNORA_YCLOUD_TEMPLATE_PRESETS.find(x => x.name === target && x.language === 'ar');
-    if (!preset) {
-      throw new Error('WhatsApp web-design template preset missing.');
-    }
-
-    const existing = await listYCloudTemplates(wabaId);
-    const found = (existing || []).find(x => x.name === target && x.language === 'ar');
-    if (found) {
-      console.log('WhatsApp web-design template already exists:', JSON.stringify({
-        name: found.name,
-        status: found.status,
-        category: found.category,
-        official_template_id: found.official_template_id || null,
-        rejected_reason: found.rejected_reason || null
-      }));
-      return;
-    }
-
-    const created = await ycloudRequest('/v2/whatsapp/templates', {
-      method: 'POST',
-      body: {
-        wabaId,
-        name: preset.name,
-        language: preset.language,
-        category: preset.category,
-        components: preset.components
-      }
-    });
-
-    console.log('WhatsApp web-design template submitted:', JSON.stringify({
-      name: created?.name || preset.name,
-      status: created?.status || 'PENDING',
-      category: created?.category || preset.category,
-      official_template_id: created?.officialTemplateId || created?.id || null,
-      rejected_reason: created?.rejectedReason || null
-    }));
-  } catch (error) {
-    console.error('WhatsApp web-design template submission failed:', error.message);
-    throw error;
-  }
-}
 
 async function configureTelegramCommandCenter() {
   if (process.env.VERCEL_ENV !== 'production') return;
@@ -182,5 +130,4 @@ function verifyBrowserScriptSyntax() {
 verifyBrowserScriptSyntax();
 
 await configureTelegramCommandCenter();
-await submitWebDesignTemplateOnce();
 console.log('Build complete → dist/');
