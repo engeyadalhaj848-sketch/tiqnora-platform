@@ -1,3 +1,5 @@
-/* Tiqnora v6 Zos-inspired - loading full via push_files next */
-:root{--navy-950:#030712;--navy-900:#060B1E;--surface:#fff;--text-dark:#0B1529;--blue:#0A5CFF;--cyan:#00C8E0;}
-body{font-family:system-ui;background:#fff;color:#0B1529;}
+@import url("tq-style-0.css?v=6.0.0");
+@import url("tq-style-1.css?v=6.0.0");
+@import url("tq-style-2.css?v=6.0.0");
+@import url("tq-style-3.css?v=6.0.0");
+@import url("tq-style-4.css?v=6.0.0");
