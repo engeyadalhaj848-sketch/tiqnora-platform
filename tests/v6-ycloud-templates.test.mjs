@@ -9,8 +9,8 @@ import {
 } from '../lib/integrations/ycloud-templates.js';
 
 describe('YCloud WhatsApp template presets', () => {
-  it('defines three Arabic marketing templates with one body variable', () => {
-    assert.equal(TIQNORA_YCLOUD_TEMPLATE_PRESETS.length, 3);
+  it('defines Arabic marketing templates including the website design campaign', () => {
+    assert.equal(TIQNORA_YCLOUD_TEMPLATE_PRESETS.length, 4);
     for (const template of TIQNORA_YCLOUD_TEMPLATE_PRESETS) {
       assert.equal(template.language, 'ar');
       assert.equal(template.category, 'MARKETING');
@@ -18,6 +18,11 @@ describe('YCloud WhatsApp template presets', () => {
       assert.ok(body);
       assert.ok(body.text.includes('{{1}}'));
     }
+    const website = TIQNORA_YCLOUD_TEMPLATE_PRESETS.find(x => x.name === 'tiqnora_web_design_intro_ar');
+    assert.ok(website);
+    assert.ok(website.components.find(x => x.type === 'BODY').text.includes('{{2}}'));
+    const buttons = website.components.find(x => x.type === 'BUTTONS');
+    assert.ok(buttons?.buttons?.some(x => x.url === 'https://www.tiqnora.com/services/web-design'));
   });
 
   it('normalizes YCloud paginated template responses', () => {
@@ -64,8 +69,8 @@ describe('YCloud WhatsApp template presets', () => {
     };
     try {
       const out = await ensureYCloudTemplatePresets('waba-test');
-      assert.equal(out.length, 3);
-      assert.equal(requests.filter(x => x.options.method === 'POST').length, 3);
+      assert.equal(out.length, 4);
+      assert.equal(requests.filter(x => x.options.method === 'POST').length, 4);
       assert.ok(out.every(x => x.status === 'PENDING'));
     } finally {
       globalThis.fetch = previousFetch;
