@@ -1447,8 +1447,14 @@ export default async function handler(req, res) {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('state', state);
     const metaConfigId = String(process.env.META_LOGIN_CONFIG_ID || '').trim();
-    if (provider === 'meta' && metaConfigId) url.searchParams.set('config_id', metaConfigId);
-    else url.searchParams.set('scope', scopes);
+    if (provider === 'meta' && metaConfigId) {
+      url.searchParams.set('config_id', metaConfigId);
+      url.searchParams.set('override_default_response_type', 'true');
+      url.searchParams.set('auth_type', 'rerequest');
+    } else {
+      url.searchParams.set('scope', scopes);
+      if (provider === 'meta') url.searchParams.set('auth_type', 'rerequest');
+    }
     if (provider === 'google_business_profile') {
       url.searchParams.set('access_type', 'offline');
       url.searchParams.set('prompt', 'consent');
