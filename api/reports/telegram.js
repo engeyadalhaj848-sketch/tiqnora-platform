@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
@@ -62,6 +63,40 @@ function isAuthorizedCron(req) {
     return req.headers.authorization === `Bearer ${cronSecret}` || req.headers['x-cron-secret'] === cronSecret;
   }
   return Boolean(req.headers['x-vercel-cron-schedule']);
+}
+
+async function isAuthorizedSocialScheduler(req) {
+  const supplied = String(req.headers['x-tiqnora-scheduler-token'] || '').trim();
+  if (!supplied) return false;
+  const rows = await query('organizations', 'slug=eq.tiqnora&select=settings&limit=1').catch(() => []);
+  const expectedHash = String(rows?.[0]?.settings?.social_autopilot?.scheduler_token_sha256 || '').trim();
+  if (!expectedHash || !/^[a-f0-9]{64}$/i.test(expectedHash)) return false;
+  const actualHash = createHash('sha256').update(supplied).digest('hex');
+  const a = Buffer.from(actualHash, 'hex');
+  const b = Buffer.from(expectedHash, 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function runSocialAutopilotTick(res) {
+  const autopilot = await ensureDailySocialAutopilot().catch(error => ({
+    ok: false,
+    enabled: true,
+    created: false,
+    reason: 'autopilot_error',
+    error: String(error.message || error).slice(0, 500)
+  }));
+  const publishing = await processPublishingQueue({ limit: 10 }).catch(error => ({
+    ok: false,
+    processed: 0,
+    results: [],
+    error: String(error.message || error).slice(0, 500)
+  }));
+  return json(res, 200, {
+    ok: Boolean(autopilot?.ok) && !publishing?.error,
+    trigger: 'supabase_cron_2h',
+    autopilot,
+    publishing
+  });
 }
 
 function timedStep(step, startMs, extra = {}) {
@@ -311,6 +346,11 @@ export default async function handler(req, res) {
       last_error: status.last_error,
       webhook_url: 'https://tiqnora.com/api/telegram/webhook'
     });
+  }
+
+  if (route === 'social_autopilot_tick') {
+    if (!(await isAuthorizedSocialScheduler(req))) return json(res, 401, { error: 'Unauthorized social scheduler' });
+    return await runSocialAutopilotTick(res);
   }
 
   if (route === 'telegram_webhook') {
