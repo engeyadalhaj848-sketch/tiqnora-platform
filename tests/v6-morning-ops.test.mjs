@@ -11,6 +11,8 @@ test('morning WhatsApp outreach is opt-in gated and template-only',()=>{
   assert.equal(outreach.includes('whatsapp_opt_in'),true);
   assert.equal(outreach.includes("tiqnora_building_intro_ar"),true);
   assert.equal(outreach.includes("tiqnora_electrical_intro_ar"),true);
+  assert.equal(outreach.includes("tiqnora_web_design_intro_ar"),true);
+  assert.equal(outreach.includes("campaign||''"),true);
   assert.equal(outreach.includes("status||'').toUpperCase()==='APPROVED'"),true);
   assert.equal(outreach.includes('max_per_day'),true);
   assert.equal(outreach.includes('user_authorized:true'),true);
