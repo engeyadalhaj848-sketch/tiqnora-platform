@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#24160f"/><stop offset="1" stop-color="#090909"/></linearGradient><linearGradient id="wood" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#bb7b49"/><stop offset="1" stop-color="#5a321f"/></linearGradient></defs>
+<rect width="1200" height="720" fill="url(#bg)"/>
+<rect x="105" y="95" width="990" height="530" rx="30" fill="#101010" stroke="#2c211b" stroke-width="4"/>
+<g transform="translate(170 170)">
+<rect width="670" height="110" rx="18" fill="url(#wood)"/><path d="M40 36c120 58 210-45 340 2s195-12 250-6" fill="none" stroke="#e6b07c" stroke-opacity=".45" stroke-width="8"/>
+<rect y="140" width="760" height="110" rx="18" fill="#7d4c31"/><path d="M40 185c130-58 220 55 350 0s200 12 320 10" fill="none" stroke="#d8a075" stroke-opacity=".38" stroke-width="8"/>
+<rect y="280" width="590" height="110" rx="18" fill="#5f3827"/><path d="M35 330c110 40 200-42 320 0s165-4 200-2" fill="none" stroke="#c38761" stroke-opacity=".38" stroke-width="8"/>
+</g>
+<path d="M930 220v320M890 260h80M890 360h80M890 460h80" stroke="#a56b45" stroke-width="20" stroke-linecap="round"/>
+<text x="115" y="78" fill="#e7c2aa" font-family="Arial" font-size="36" font-weight="700">WOOD & INTERIORS</text>
+</svg>

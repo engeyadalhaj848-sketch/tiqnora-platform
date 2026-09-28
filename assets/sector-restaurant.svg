@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2a120c"/><stop offset="1" stop-color="#090706"/></linearGradient><linearGradient id="food" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e06a42"/><stop offset="1" stop-color="#7f2d18"/></linearGradient></defs>
+<rect width="1200" height="720" fill="url(#bg)"/>
+<rect x="100" y="95" width="1000" height="530" rx="34" fill="#100b09" stroke="#3a1a11" stroke-width="4"/>
+<circle cx="500" cy="360" r="185" fill="#17100d" stroke="#5f2a1b" stroke-width="16"/>
+<circle cx="500" cy="360" r="130" fill="url(#food)" opacity=".88"/>
+<path d="M420 320c45-65 120-20 160-55M390 395c60 45 145 30 220-25" fill="none" stroke="#ffd4b8" stroke-width="18" stroke-linecap="round" opacity=".7"/>
+<path d="M815 215v310M770 215v120c0 55 90 55 90 0V215M815 335v190" fill="none" stroke="#d6b29d" stroke-width="18" stroke-linecap="round"/>
+<circle cx="980" cy="210" r="85" fill="#d95b36" opacity=".09"/>
+<text x="120" y="78" fill="#f0c3ad" font-family="Arial" font-size="36" font-weight="700">RESTAURANT & HOSPITALITY</text>
+</svg>
