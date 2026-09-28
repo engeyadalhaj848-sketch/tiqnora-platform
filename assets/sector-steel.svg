@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#18202a"/><stop offset="1" stop-color="#07090b"/></linearGradient><linearGradient id="steel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a9b6c6"/><stop offset=".5" stop-color="#596675"/><stop offset="1" stop-color="#222a32"/></linearGradient></defs>
+<rect width="1200" height="720" fill="url(#bg)"/>
+<rect x="95" y="105" width="1010" height="515" rx="30" fill="#0d1014" stroke="#27313d" stroke-width="4"/>
+<g fill="none" stroke="url(#steel)" stroke-width="28">
+<path d="M170 525h760M220 210h710M250 210v315M850 210v315M250 365h600"/>
+</g>
+<g stroke="#7f8e9d" stroke-width="16"><path d="M170 570h820"/><path d="M210 600h740"/></g>
+<circle cx="985" cy="235" r="105" fill="#8394a8" opacity=".08"/>
+<text x="115" y="85" fill="#d4dde6" font-family="Arial" font-size="36" font-weight="700">STEEL & STRUCTURES</text>
+</svg>
