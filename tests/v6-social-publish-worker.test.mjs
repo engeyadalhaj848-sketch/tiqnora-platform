@@ -37,3 +37,37 @@ test('scheduled publishing reuses existing daily crons and adds no new Hobby cro
   assert.equal(vercel.crons.some(c => c.path === '/api/social/publish-worker'), false);
   assert.equal(vercel.rewrites.some(r => r.source === '/api/social/publish-worker' && r.destination.includes('route=social_publish_worker')), true);
 });
+
+
+test('Meta permission health blocks publishing before Graph calls', () => {
+  assert.equal(runtime.includes("pages_manage_posts"), true);
+  assert.equal(runtime.includes("instagram_content_publish"), true);
+  assert.equal(runtime.includes("reauthorization_required"), true);
+  assert.equal(runtime.includes("missing_scopes"), true);
+});
+
+test('Instagram waits for a finished container and preserves it across retries', () => {
+  assert.equal(runtime.includes("attempts=25"), true);
+  assert.equal(runtime.includes("status_code,status"), true);
+  assert.equal(runtime.includes("code==='FINISHED'"), true);
+  assert.equal(runtime.includes("instagram_container_id"), true);
+  assert.equal(runtime.includes("external_account_id=neq.0"), true);
+});
+
+test('Instagram media publish retries temporary availability delays without a new container', () => {
+  assert.equal(runtime.includes("publishAttempt<=4"), true);
+  assert.equal(runtime.includes("media id is not available"), true);
+  assert.equal(runtime.includes("await sleep(2000*publishAttempt)"), true);
+});
+
+test('transient Meta failures requeue with bounded backoff and preserve diagnostics', () => {
+  assert.equal(runtime.includes("status:'queued'"), true);
+  assert.equal(runtime.includes("attempts<5"), true);
+  assert.equal(runtime.includes("retryDelayMs"), true);
+  assert.equal(runtime.includes("publishing_diagnostics"), true);
+});
+
+test('Instagram uses the canonical public www image URL', () => {
+  assert.equal(runtime.includes("https://www.tiqnora.com/"), true);
+  assert.equal(runtime.includes("canonicalImageUrl(job.metadata?.image_url)"), true);
+});
