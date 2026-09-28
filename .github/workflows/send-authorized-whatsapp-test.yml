@@ -20,7 +20,7 @@ jobs:
           set -euo pipefail
           for attempt in 1 2 3 4 5; do
             echo "Attempt $attempt"
-            if response="$(curl -sS --fail-with-body --max-time 30 'https://tiqnora.com/api/social/oauth/whatsapp-authorized-test')"; then
+            if response="$(curl -L -sS --fail-with-body --max-time 30 'https://tiqnora.com/api/social/oauth/whatsapp-authorized-test')"; then
               echo "$response"
               exit 0
             fi
