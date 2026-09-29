@@ -200,56 +200,71 @@
     async getProductsPage({ limit = 12, offset = 0, cat = null, brand = null, q = null } = {}) {
       const lim = Math.min(48, Math.max(1, Number(limit) || 12));
       const off = Math.max(0, Number(offset) || 0);
-      const cacheKey = `prod-page-v2-${lim}-${off}-${cat || ''}-${brand || ''}-${(q || '').slice(0, 40)}`;
+      const safeQ = String(q || '').trim().slice(0, 40);
+      const cacheKey = `prod-page-v3-${lim}-${off}-${cat || ''}-${brand || ''}-${safeQ}`;
       const cached = cacheGet(cacheKey);
       if (cached) return cached;
 
       const mapRows = (rows) => (rows || []).map((r) => this._mapPublicProduct(r));
 
+      // Fast path for the public store: call PostgREST directly.
+      // This avoids waiting for the much larger Supabase JS bundle before products can render.
+      if (enabled) {
+        let select = this._productCardSelect();
+        if (cat) select = select.replace('categories(', 'categories!inner(');
+        if (brand) select = select.replace('brands(', 'brands!inner(');
+        const extra = {
+          is_active: 'eq.true',
+          limit: String(lim),
+          offset: String(off),
+          _count: true,
+        };
+        if (cat) extra['categories.slug'] = `eq.${cat}`;
+        if (brand) extra['brands.slug'] = `eq.${brand}`;
+        if (safeQ) {
+          const clean = safeQ.replace(/[,*()]/g, ' ').trim();
+          if (clean) extra.or = `(name_ar.ilike.*${clean}*,name_en.ilike.*${clean}*)`;
+        }
+        const pack = await fromRest('products', select, { col: 'sort_order' }, extra);
+        if (pack) {
+          const rows = Array.isArray(pack.data) ? pack.data : (Array.isArray(pack) ? pack : []);
+          const items = mapRows(rows);
+          const total = pack.total != null ? pack.total : items.length;
+          const result = { items, total, hasMore: off + lim < total };
+          cacheSet(cacheKey, result);
+          return result;
+        }
+      }
+
+      // Fallback to the loaded Supabase client only if direct REST failed.
       if (client) {
+        let select = this._productCardSelect();
+        if (cat) select = select.replace('categories(', 'categories!inner(');
+        if (brand) select = select.replace('brands(', 'brands!inner(');
         let query = client
           .from('products')
-          .select(this._productCardSelect(), { count: 'exact' })
-          .eq('is_active', true)
+          .select(select, { count: 'exact' })
+          .eq('is_active', true);
+        if (cat) query = query.eq('categories.slug', cat);
+        if (brand) query = query.eq('brands.slug', brand);
+        if (safeQ) {
+          const clean = safeQ.replace(/[%_,*()]/g, ' ').trim();
+          if (clean) query = query.or(`name_ar.ilike.%${clean}%,name_en.ilike.%${clean}%`);
+        }
+        const { data, error, count } = await query
           .order('sort_order', { ascending: true })
           .range(off, off + lim - 1);
-        // Note: nested filter on categories.slug requires !inner in some setups; filter client-side if needed
-        const { data, error, count } = await query;
         if (error) {
           console.warn('[tiqnora] getProductsPage', error.message);
           return null;
         }
-        let items = mapRows(data);
-        if (cat) items = items.filter((p) => p.categories?.slug === cat);
-        if (brand) items = items.filter((p) => p.brands?.slug === brand);
-        if (q) {
-          const qq = String(q).toLowerCase();
-          items = items.filter((p) =>
-            (p.name_ar || '').toLowerCase().includes(qq) ||
-            (p.name_en || '').toLowerCase().includes(qq)
-          );
-        }
+        const items = mapRows(data);
         const total = typeof count === 'number' ? count : items.length;
         const result = { items, total, hasMore: off + lim < total };
         cacheSet(cacheKey, result);
         return result;
       }
-
-      if (!enabled) return null;
-      const extra = {
-        'is_active': 'eq.true',
-        limit: String(lim),
-        offset: String(off),
-        _count: true,
-      };
-      const pack = await fromRest('products', this._productCardSelect(), { col: 'sort_order' }, extra);
-      if (!pack) return null;
-      const rows = Array.isArray(pack.data) ? pack.data : (Array.isArray(pack) ? pack : []);
-      let items = mapRows(rows);
-      const total = pack.total != null ? pack.total : items.length;
-      const result = { items, total, hasMore: off + lim < total };
-      cacheSet(cacheKey, result);
-      return result;
+      return null;
     },
 
     /** Single product by slug — avoids loading entire catalog on product page */
