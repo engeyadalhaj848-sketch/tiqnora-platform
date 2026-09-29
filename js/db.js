@@ -54,90 +54,62 @@
   function loadSupabaseClient(index = 0) {
     const sources = [
       'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
-      'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js'
+      'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js',
     ];
-    if (window.supabase?.createClient) {
-      client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-      finishClientLoad(true);
-      return;
-    }
-    if (index >= sources.length) {
-      console.error('[tiqnora] Unable to load the Supabase browser client.');
-      finishClientLoad(false);
-      return;
-    }
+    if (!enabled) { finishClientLoad(false); return; }
+    if (index >= sources.length) { finishClientLoad(false); return; }
     const s = document.createElement('script');
-    let settled = false;
-    const retry = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      s.remove();
-      loadSupabaseClient(index + 1);
-    };
-    const timer = setTimeout(retry, 6000);
     s.src = sources[index];
     s.async = true;
     s.onload = () => {
-      if (!window.supabase?.createClient) return retry();
-      settled = true;
-      clearTimeout(timer);
-      client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-      finishClientLoad(true);
+      try {
+        if (window.supabase) {
+          client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+          finishClientLoad(true);
+        } else loadSupabaseClient(index + 1);
+      } catch (e) {
+        console.warn('[tiqnora] supabase init', e);
+        loadSupabaseClient(index + 1);
+      }
     };
-    s.onerror = retry;
+    s.onerror = () => loadSupabaseClient(index + 1);
     document.head.appendChild(s);
   }
+  loadSupabaseClient();
 
-  if (enabled) loadSupabaseClient();
-  else finishClientLoad(false);
-
-  const CACHE_PREFIX = 'tiqnora-db-v2-';
+  const CACHE_NS = 'tiqnora-db-v2';
   const CACHE_TTL = 5 * 60 * 1000;
-
   function cacheGet(key) {
     try {
-      const raw = localStorage.getItem(CACHE_PREFIX + key);
+      const raw = localStorage.getItem(CACHE_NS + ':' + key);
       if (!raw) return null;
-      const { t, d } = JSON.parse(raw);
-      if (Date.now() - t > CACHE_TTL) return null;
-      return d;
-    } catch { return null; }
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.t || Date.now() - parsed.t > CACHE_TTL) return null;
+      return parsed.v;
+    } catch (_) { return null; }
   }
-  function cacheSet(key, data) {
-    try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ t: Date.now(), d: data })); } catch {}
+  function cacheSet(key, value) {
+    try {
+      localStorage.setItem(CACHE_NS + ':' + key, JSON.stringify({ t: Date.now(), v: value }));
+    } catch (_) {}
   }
 
   async function fromDb(table, select = '*', order = null) {
-    if (!client) return fromRest(table, select, order);
-    let q = client.from(table).select(select);
-    if (order) q = q.order(order.col, { ascending: order.asc !== false });
-    const { data, error } = await q;
-    if (error) { console.warn('[tiqnora] db:', table, error.message); return null; }
-    return data;
+    if (client) {
+      let q = client.from(table).select(select);
+      if (order) q = q.order(order.col, { ascending: order.asc !== false });
+      const { data, error } = await q;
+      if (error) { console.warn('[tiqnora] db', table, error.message); return null; }
+      return data;
+    }
+    return fromRest(table, select, order);
   }
 
-  /* ---------- public API ---------- */
   window.TiqnoraDB = {
-    get isConfigured() { return enabled; },
-    get raw() { return client; },
-    ready() {
-      return readyPromise;
-    },
+    ready: readyPromise,
+    isEnabled: () => enabled,
+    getClient: () => client,
 
-    async getServices() {
-      const cached = cacheGet('services'); if (cached) return cached;
-      const rows = await fromDb('services', '*,categories(slug,name_ar,name_en )', { col: 'sort_order' });
-      if (!rows) return null;
-      cacheSet('services', rows); return rows;
-    },
-    async getPackages() {
-      const cached = cacheGet('packages'); if (cached) return cached;
-      const rows = await fromDb('packages', '*', { col: 'sort_order' });
-      if (!rows) return null;
-      cacheSet('packages', rows); return rows;
-    },
-    /* Slim fields for product cards — no long descriptions / internal costs */
     _productCardSelect() {
       return 'id,slug,name_ar,name_en,price,discount_percent,stock_quantity,track_stock,images,is_active,featured,sort_order,categories(slug,name_ar),brands(slug,name)';
     },
@@ -170,7 +142,6 @@
       };
     },
 
-    /** Full active catalog (slim fields). Prefer getProductsPage for shop. */
     async getProducts() {
       const cached = cacheGet('products-slim-v2'); if (cached) return cached;
       if (!client && !enabled) return null;
@@ -193,22 +164,57 @@
       return publicRows;
     },
 
-    /**
-     * Paginated storefront catalog — server-side range, active only, card fields.
-     * @returns {{ items: Array, total: number, hasMore: boolean }}
-     */
     async getProductsPage({ limit = 12, offset = 0, cat = null, brand = null, q = null } = {}) {
       const lim = Math.min(48, Math.max(1, Number(limit) || 12));
       const off = Math.max(0, Number(offset) || 0);
       const safeQ = String(q || '').trim().slice(0, 40);
-      const cacheKey = `prod-page-v3-${lim}-${off}-${cat || ''}-${brand || ''}-${safeQ}`;
+      const cacheKey = `prod-page-v4-${lim}-${off}-${cat || ''}-${brand || ''}-${safeQ}`;
       const cached = cacheGet(cacheKey);
       if (cached) return cached;
 
       const mapRows = (rows) => (rows || []).map((r) => this._mapPublicProduct(r));
 
+      // Preferred path: SECURITY DEFINER RPC (survives RLS policy mistakes on is_admin)
+      if (enabled && restUrl) {
+        try {
+          const headers = {
+            apikey: cfg.supabaseAnonKey,
+            Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=representation',
+          };
+          const res = await fetch(`${restUrl}/rpc/get_storefront_products`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              p_limit: lim,
+              p_offset: off,
+              p_cat: cat || null,
+              p_brand: brand || null,
+              p_q: safeQ || null,
+            }),
+          });
+          if (res.ok) {
+            const body = await res.json();
+            const payload = body && body.items ? body : (Array.isArray(body) ? body[0] : body);
+            if (payload && Array.isArray(payload.items)) {
+              const items = mapRows(payload.items);
+              const total = Number(payload.total) || items.length;
+              const result = {
+                items,
+                total,
+                hasMore: payload.hasMore != null ? !!payload.hasMore : off + lim < total,
+              };
+              cacheSet(cacheKey, result);
+              return result;
+            }
+          }
+        } catch (e) {
+          console.warn('[tiqnora] storefront rpc:', e.message || e);
+        }
+      }
+
       // Fast path for the public store: call PostgREST directly.
-      // This avoids waiting for the much larger Supabase JS bundle before products can render.
       if (enabled) {
         let select = this._productCardSelect();
         if (cat) select = select.replace('categories(', 'categories!inner(');
@@ -244,21 +250,21 @@
         let query = client
           .from('products')
           .select(select, { count: 'exact' })
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true })
+          .range(off, off + lim - 1);
         if (cat) query = query.eq('categories.slug', cat);
         if (brand) query = query.eq('brands.slug', brand);
         if (safeQ) {
-          const clean = safeQ.replace(/[%_,*()]/g, ' ').trim();
+          const clean = safeQ.replace(/[,*()]/g, ' ').trim();
           if (clean) query = query.or(`name_ar.ilike.%${clean}%,name_en.ilike.%${clean}%`);
         }
-        const { data, error, count } = await query
-          .order('sort_order', { ascending: true })
-          .range(off, off + lim - 1);
+        const { data, error, count } = await query;
         if (error) {
           console.warn('[tiqnora] getProductsPage', error.message);
           return null;
         }
-        const items = mapRows(data);
+        const items = mapRows(data || []);
         const total = typeof count === 'number' ? count : items.length;
         const result = { items, total, hasMore: off + lim < total };
         cacheSet(cacheKey, result);
@@ -267,35 +273,34 @@
       return null;
     },
 
-    /** Single product by slug — avoids loading entire catalog on product page */
     async getProductBySlug(slug) {
       if (!slug) return null;
-      const cacheKey = 'prod-slug-v2-' + slug;
-      const cached = cacheGet(cacheKey); if (cached) return cached;
+      const key = 'prod-' + slug;
+      const cached = cacheGet(key); if (cached) return cached;
       if (client) {
         const { data, error } = await client
           .from('products')
           .select(this._productDetailSelect())
           .eq('slug', slug)
           .eq('is_active', true)
-          .limit(1)
           .maybeSingle();
         if (error || !data) return null;
-        const row = this._mapPublicProduct(data);
-        cacheSet(cacheKey, row);
-        return row;
+        const mapped = this._mapPublicProduct(data);
+        cacheSet(key, mapped);
+        return mapped;
       }
-      if (!enabled) return null;
-      const rows = await fromRest(
-        'products',
-        this._productDetailSelect(),
-        null,
-        { slug: `eq.${slug}`, is_active: 'eq.true', limit: '1' }
-      );
-      const row = Array.isArray(rows) && rows[0] ? this._mapPublicProduct(rows[0]) : null;
-      if (row) cacheSet(cacheKey, row);
-      return row;
+      const rows = await fromRest('products', this._productDetailSelect(), null, {
+        slug: `eq.${slug}`,
+        is_active: 'eq.true',
+        limit: '1',
+      });
+      const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
+      if (!row) return null;
+      const mapped = this._mapPublicProduct(row);
+      cacheSet(key, mapped);
+      return mapped;
     },
+
     async getCategories(type) {
       const cached = cacheGet('cat-' + type); if (cached) return cached;
       const rows = await fromDb('categories', '*', { col: 'sort_order' });
@@ -319,42 +324,7 @@
     async getShippingSettings() { return fromDb('shipping_settings', '*', { col: 'provider' }); },
     async logPageView(path) {
       if (!client) return;
-      client.from('page_views').insert({ path: path || location.pathname }).then(() => {}, () => {});
+      client.from('page_views').insert({ path: path || location.pathname }).then(() => {}).catch(() => {});
     },
-
-    clearCache() {
-      Object.keys(localStorage)
-        .filter(k => k.startsWith('tiqnora-db-'))
-        .forEach(k => localStorage.removeItem(k));
-    },
-
-    /* ---------- store actions ---------- */
-    async submitLead(name, email, message) {
-      if (!client) return { ok: false, fallback: 'mailto' };
-      const { error } = await client.from('leads').insert({ name, email, message });
-      return { ok: !error, fallback: error ? 'mailto' : null };
-    },
-
-    /**
-     * @deprecated Browser must not insert orders (RLS). Use POST /api/orders/create.
-     */
-    async placeOrder(_order) {
-      console.warn('[tiqnora] placeOrder from browser is disabled; use /api/orders/create');
-      return { ok: false, error: 'use_server_order_create' };
-    },
-
-    async validateCoupon(code, subtotal) {
-      if (!client || !code) return { valid: false };
-      const { data, error } = await client.rpc('validate_coupon', { p_code: code, p_subtotal: subtotal });
-      if (error || !data || !data.length) return { valid: false };
-      return data[0];
-    },
-
-    async trackOrder(orderNumber) {
-      if (!client) return null;
-      const { data, error } = await client.rpc('track_order', { p_order_number: orderNumber });
-      if (error || !data || !data.length) return null;
-      return data[0];
-    }
   };
 })();
