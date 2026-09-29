@@ -17,13 +17,13 @@ test('daily social autopilot is collaborative and OpenAI-backed through shared p
   assert.equal(autopilot.includes("collaboration:['manager','marketing','content','social-media','image-designer']"), true);
 });
 
-test('daily social autopilot queues connected Facebook, Instagram and TikTok feeds', () => {
+test('daily social autopilot prepares connected Facebook, Instagram and TikTok feeds behind owner approval', () => {
   assert.equal(autopilot.includes("['facebook','instagram','tiktok']"), true);
   assert.equal(autopilot.includes("platforms.has('facebook')"), true);
   assert.equal(autopilot.includes("platforms.has('instagram')"), true);
   assert.equal(autopilot.includes("platforms.has('tiktok')"), true);
-  assert.equal(autopilot.includes("requires_approval:false"), true);
-  assert.equal(autopilot.includes("user_authorized_auto_publish:true"), true);
+  assert.equal(autopilot.includes("requires_approval:ownerApprovalRequired"), true);
+  assert.equal(autopilot.includes("user_authorized_auto_publish:false"), true);
 });
 
 test('morning cron prepares social content before processing publish queue', () => {
@@ -80,4 +80,14 @@ test('social autopilot fails closed until a Gold Standard visual is explicitly a
   assert.ok(migration67.includes("'{social_autopilot,enabled}'"));
   assert.ok(migration67.includes("'false'::jsonb"));
   assert.ok(migration67.includes("cron.unschedule('tiqnora-social-autopilot-every-2h')"));
+});
+
+
+test('autopilot sends every approved-quality post to Telegram for owner approval instead of auto-publishing', () => {
+  assert.equal(autopilot.includes("notifySocialApproval"), true);
+  assert.equal(autopilot.includes("ownerApprovalRequired"), true);
+  assert.equal(autopilot.includes("status:ownerApprovalRequired?'waiting_approval':'queued'"), true);
+  assert.equal(autopilot.includes("requires_approval:ownerApprovalRequired"), true);
+  assert.equal(autopilot.includes("user_authorized_auto_publish:false"), true);
+  assert.equal(autopilot.includes("approval_channel:'telegram_group'"), true);
 });

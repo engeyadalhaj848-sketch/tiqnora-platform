@@ -73,3 +73,12 @@ test('Instagram uses the canonical public www image URL', () => {
   assert.equal(runtime.includes("https://www.tiqnora.com/"), true);
   assert.equal(runtime.includes("canonicalImageUrl(job.metadata?.image_url)"), true);
 });
+
+
+test('publisher fails closed until Tiqnora owner approves in Telegram', () => {
+  assert.equal(runtime.includes('ownerApprovalSatisfied'), true);
+  assert.equal(runtime.includes("owner_approved_via"), true);
+  assert.equal(runtime.includes("status:'waiting_approval'"), true);
+  assert.equal(runtime.includes("requires_approval:true"), true);
+  assert.equal(runtime.includes("notifySocialApproval"), true);
+});
