@@ -31,3 +31,11 @@ test('telegram-command-center status enrichment fields present', () => {
   assert.ok(src.includes('reachable'));
   assert.ok(src.includes('export async function isTelegramOperational') || src.includes('isTelegramOperational'));
 });
+
+
+test('telegram command center handles owner social approval callbacks and publishes only approved jobs', () => {
+  assert.ok(src.includes('handleSocialApprovalCallback'));
+  assert.ok(src.includes('processPublishingJob'));
+  assert.ok(src.includes("approval.action === 'approve'"));
+  assert.ok(src.includes('نتيجة النشر بعد اعتمادك'));
+});
