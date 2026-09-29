@@ -7,6 +7,7 @@ const reports = readFileSync(new URL('../api/reports/telegram.js', import.meta.u
 const workforceChat = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../supabase/migrations/060_daily_social_autopilot.sql', import.meta.url), 'utf8');
 const migration64 = readFileSync(new URL('../supabase/migrations/064_social_every_2h_scheduler.sql', import.meta.url), 'utf8');
+const migration67 = readFileSync(new URL('../supabase/migrations/067_social_quality_gate_pause.sql', import.meta.url), 'utf8');
 
 test('daily social autopilot is collaborative and OpenAI-backed through shared provider', () => {
   assert.equal(autopilot.includes('managerDirective'), true);
@@ -67,4 +68,16 @@ test('two-hour social scheduler is persisted with Riyadh-aligned cadence and sec
   assert.equal(migration64.includes("'0 1-23/2 * * *'"), true);
   assert.equal(migration64.includes("tiqnora_social_scheduler_token"), true);
   assert.equal(migration64.includes("organic_every_2h"), true);
+});
+
+
+test('social autopilot fails closed until a Gold Standard visual is explicitly approved', () => {
+  assert.ok(autopilot.includes('approved_visual_missing'));
+  assert.ok(autopilot.includes('SOCIAL_VISUAL_NOT_APPROVED'));
+  assert.ok(autopilot.includes('legacy_placeholder_assets_blocked') || migration67.includes('legacy_placeholder_assets_blocked'));
+  assert.ok(autopilot.includes('wireframes'));
+  assert.ok(autopilot.includes('platformSpecific'));
+  assert.ok(migration67.includes("'{social_autopilot,enabled}'"));
+  assert.ok(migration67.includes("'false'::jsonb"));
+  assert.ok(migration67.includes("cron.unschedule('tiqnora-social-autopilot-every-2h')"));
 });

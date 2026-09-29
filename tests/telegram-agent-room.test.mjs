@@ -24,17 +24,23 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('collaboration group routes normal owner messages into multi-agent discussion', () => {
+test('collaboration group keeps explicit discussions multi-agent but routes normal chat to one specialist', () => {
   const src = readFileSync(join(root, 'lib/telegram-command-center.js'), 'utf8');
   assert.ok(src.includes('isCollaborationGroup'));
   assert.ok(src.includes('directAgentTarget'));
-  assert.ok(src.includes('return await runAgentRoomDiscussion(message, agents)'));
+  assert.ok(src.includes('isCasualGroupMessage'));
+  assert.ok(src.includes('selectedGroupAgent'));
+  assert.ok(src.includes('runAgentRoomDiscussion(message, agents)'));
 });
 
-test('agent room supports provider fallback and retries', () => {
-  const src = readFileSync(join(root, 'lib/telegram-agent-room.js'), 'utf8');
-  assert.ok(src.includes("process.env.OPENAI_API_KEY"));
-  assert.ok(src.includes("https://api.openai.com/v1/responses"));
-  assert.ok(src.includes('retryableStatus'));
-  assert.ok(src.includes('callProvider'));
+test('agent room uses shared provider fallback and never exposes raw provider errors', () => {
+  const room = readFileSync(join(root, 'lib/telegram-agent-room.js'), 'utf8');
+  const center = readFileSync(join(root, 'lib/telegram-command-center.js'), 'utf8');
+  assert.ok(room.includes('generateText'));
+  assert.ok(room.includes('callProvider'));
+  assert.equal(room.includes('https://api.openai.com/v1/responses'), false);
+  assert.equal(room.includes('generativelanguage.googleapis.com/v1beta/models/'), false);
+  assert.ok(center.includes('generateText'));
+  assert.ok(center.includes("error: 'ai_provider_unavailable'"));
+  assert.ok(center.includes('سجلت الخطأ داخلياً'));
 });
