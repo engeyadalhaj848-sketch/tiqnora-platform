@@ -39,3 +39,5 @@ The final reviewer must reject and return work to one named specialist when any 
 3. AI agents — automate repetitive coordination while keeping human review at decision points.
 
 These three items are stored as draft content records with `source=gold_standard_v1` and remain publish-blocked until their visuals are approved.
+
+- Immediate owner-review batches are one-time armed and still remain Telegram approval-gated before publish.
