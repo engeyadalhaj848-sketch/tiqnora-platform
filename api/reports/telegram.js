@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
+import { getTikTokBusinessAccess, tiktokBusinessPost, tiktokBusinessGet } from '../../lib/v6/tiktok-business.js';
 import { runMorningWhatsAppOutreach } from '../../lib/v6/whatsapp-outreach.js';
 import {
   handleTelegramUpdate,
@@ -75,6 +76,93 @@ async function isAuthorizedSocialScheduler(req) {
   const a = Buffer.from(actualHash, 'hex');
   const b = Buffer.from(expectedHash, 'hex');
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+
+async function updateTiqnoraSocialAutopilotSettings(patch = {}) {
+  const key = supabaseKey();
+  const rows = await query('organizations', 'slug=eq.tiqnora&select=id,settings&limit=1');
+  const org = rows?.[0];
+  if (!org?.id) throw new Error('Tiqnora organization not found');
+  const nextSettings = {
+    ...(org.settings || {}),
+    social_autopilot: {
+      ...(org.settings?.social_autopilot || {}),
+      ...patch
+    }
+  };
+  const r = await fetch(`${supabaseUrl()}/rest/v1/organizations?id=eq.${encodeURIComponent(org.id)}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify({ settings: nextSettings })
+  });
+  if (!r.ok) throw new Error(`Supabase organizations PATCH: ${r.status}`);
+  return { organization_id: org.id, settings: nextSettings };
+}
+
+async function runTikTokUrlPropertyAction(res, action) {
+  const rows = await query('organizations', 'slug=eq.tiqnora&select=id&limit=1');
+  const org = rows?.[0];
+  if (!org?.id) return json(res, 500, { ok: false, error: 'Tiqnora organization not found' });
+
+  const appId = String(process.env.TIKTOK_BUSINESS_APP_ID || '').trim();
+  if (!appId) return json(res, 503, { ok: false, error: 'TIKTOK_BUSINESS_APP_ID missing' });
+
+  const propertyType = 2;
+  const propertyUrl = 'https://www.tiqnora.com/';
+  const credentials = await getTikTokBusinessAccess(org.id);
+  const payload = {
+    app_id: appId,
+    url_property_meta: {
+      property_type: propertyType,
+      url: propertyUrl
+    }
+  };
+
+  if (action === 'add') {
+    const out = await tiktokBusinessPost('business/property/add/', credentials.accessToken, payload);
+    const info = out?.data?.url_property_info || out?.data || {};
+    const saved = {
+      url: propertyUrl,
+      property_type: propertyType,
+      signature: info?.signature || null,
+      file_name: info?.file_name || null,
+      property_status: info?.property_status ?? null,
+      added_at: new Date().toISOString()
+    };
+    await updateTiqnoraSocialAutopilotSettings({ tiktok_url_property: saved });
+    return json(res, 200, { ok: true, action: 'add', property: saved });
+  }
+
+  if (action === 'verify') {
+    const out = await tiktokBusinessPost('business/property/verify/', credentials.accessToken, payload);
+    const info = out?.data?.url_property_info || out?.data || {};
+    const verified = Number(info?.property_status) === 1;
+    const saved = {
+      url: propertyUrl,
+      property_type: propertyType,
+      property_status: info?.property_status ?? null,
+      verified,
+      verified_at: verified ? new Date().toISOString() : null
+    };
+    await updateTiqnoraSocialAutopilotSettings({
+      tiktok_url_property_verification: saved,
+      tiktok_url_verified: verified
+    });
+    return json(res, 200, { ok: true, action: 'verify', property: saved, raw: info });
+  }
+
+  if (action === 'list') {
+    const out = await tiktokBusinessGet('business/property/list/', credentials.accessToken, { app_id: appId });
+    return json(res, 200, { ok: true, action: 'list', data: out?.data || out });
+  }
+
+  return json(res, 400, { ok: false, error: 'Unsupported TikTok URL property action' });
 }
 
 async function runSocialAutopilotTick(res) {
@@ -346,6 +434,12 @@ export default async function handler(req, res) {
       last_error: status.last_error,
       webhook_url: 'https://tiqnora.com/api/telegram/webhook'
     });
+  }
+
+  if (route === 'tiktok_property_add' || route === 'tiktok_property_verify' || route === 'tiktok_property_list') {
+    if (!(await isAuthorizedSocialScheduler(req))) return json(res, 401, { error: 'Unauthorized social scheduler' });
+    const action = route === 'tiktok_property_add' ? 'add' : route === 'tiktok_property_verify' ? 'verify' : 'list';
+    return await runTikTokUrlPropertyAction(res, action);
   }
 
   if (route === 'social_autopilot_tick') {
