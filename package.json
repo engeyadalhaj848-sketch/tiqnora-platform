@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node scripts/generate-social-review-assets.mjs && node build.mjs",
     "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs",
     "prebuild": "npm run test:v6",
     "test:lead-enrichment": "node --test tests/v6-lead-enrichment.test.mjs",
@@ -32,6 +32,7 @@
     "test:apify": "node --test tests/v6-apify-integration.test.mjs"
   },
   "dependencies": {
-    "jpeg-js": "^0.4.4"
+    "jpeg-js": "^0.4.4",
+    "sharp": "^0.34.3"
   }
 }
