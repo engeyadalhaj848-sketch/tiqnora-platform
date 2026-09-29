@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { deflateSync } from 'node:zlib';
 /**
  * Tiqnora V6 consolidated router.
  * Keeps Hobby deployments under the Serverless Function limit.
@@ -162,6 +163,116 @@ function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   return res.end(JSON.stringify(payload));
+}
+
+function socialCreativeCrc32(buf) {
+  let crc = 0xffffffff;
+  for (const byte of buf) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function socialCreativeChunk(type, data) {
+  const typeBuf = Buffer.from(type, 'ascii');
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(socialCreativeCrc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([len, typeBuf, data, crc]);
+}
+
+function socialCreativePng(kind = 'web_design') {
+  const width = 1080;
+  const height = 1350;
+  const stride = width * 3 + 1;
+  const raw = Buffer.alloc(stride * height);
+  const fill = (x0, y0, x1, y1, rgb) => {
+    const [r, g, b] = rgb;
+    for (let y = Math.max(0, y0); y < Math.min(height, y1); y += 1) {
+      let offset = y * stride + 1 + Math.max(0, x0) * 3;
+      for (let x = Math.max(0, x0); x < Math.min(width, x1); x += 1) {
+        raw[offset++] = r; raw[offset++] = g; raw[offset++] = b;
+      }
+    }
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    raw[y * stride] = 0;
+    fill(0, y, width, y + 1, [6, 11 + Math.floor(y / 110), 30 + Math.floor(y / 70)]);
+  }
+
+  const navy = [18, 31, 65];
+  const white = [247, 251, 255];
+  const blue = [10, 92, 255];
+  const cyan = [0, 210, 255];
+  const pale = [225, 240, 255];
+  const line = [80, 110, 155];
+
+  fill(0, 0, 18, height, blue);
+  fill(width - 18, 0, width, height, cyan);
+  fill(100, 150, 980, 930, white);
+  fill(100, 150, 980, 245, navy);
+
+  if (kind === 'ecommerce') {
+    for (let row = 0; row < 2; row += 1) {
+      for (let col = 0; col < 3; col += 1) {
+        const x = 145 + col * 270;
+        const y = 300 + row * 300;
+        fill(x, y, x + 215, y + 245, pale);
+        fill(x + 32, y + 28, x + 183, y + 155, (row + col) % 2 ? cyan : blue);
+        fill(x + 30, y + 182, x + 170, y + 196, line);
+        fill(x + 30, y + 210, x + 125, y + 221, [130, 160, 195]);
+      }
+    }
+    fill(650, 850, 980, 1170, navy);
+    fill(725, 940, 915, 955, cyan);
+    fill(760, 970, 900, 985, white);
+  } else {
+    fill(155, 310, 600, 470, navy);
+    fill(665, 310, 925, 470, pale);
+    for (let row = 0; row < 2; row += 1) {
+      for (let col = 0; col < 3; col += 1) {
+        const x = 150 + col * 260;
+        const y = 535 + row * 205;
+        fill(x, y, x + 205, y + 160, pale);
+        fill(x + 22, y + 22, x + 183, y + 78, (row + col) % 2 ? cyan : blue);
+        fill(x + 25, y + 105, x + 170, y + 114, line);
+        fill(x + 25, y + 128, x + 145, y + 137, [130, 160, 195]);
+      }
+    }
+    fill(730, 825, 980, 1180, white);
+    fill(755, 885, 955, 1010, blue);
+  }
+
+  fill(75, 1180, 650, 1190, cyan);
+  fill(75, 1225, 500, 1235, blue);
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  return Buffer.concat([
+    signature,
+    socialCreativeChunk('IHDR', ihdr),
+    socialCreativeChunk('IDAT', deflateSync(raw, { level: 9 })),
+    socialCreativeChunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
+function handleSocialCreative(req, res) {
+  if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+  const kind = String(req.query?.kind || 'web_design').toLowerCase() === 'ecommerce' ? 'ecommerce' : 'web_design';
+  const image = socialCreativePng(kind);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Content-Length', String(image.length));
+  res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  return res.end(image);
 }
 
 function bearer(req) {
@@ -2467,6 +2578,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const route = String(req.query?.route || '').toLowerCase();
+
+  if (route === 'social_creative') return handleSocialCreative(req, res);
 
   if (route === 'ai_health') {
     if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
