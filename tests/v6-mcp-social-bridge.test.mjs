@@ -13,12 +13,14 @@ test('MCP social bridge is consolidated into the existing V6 function', () => {
   assert.equal(runtime.includes("fallback_provider:'gemini_optional'"), true);
 });
 
-test('MCP tool execution requires admin auth and persisted approved content', () => {
+test('MCP tool execution requires admin auth and routes Tiqnora publishing through owner approval', () => {
   assert.equal(api.includes('const auth = await requireAdmin(req)'), true);
   assert.equal(runtime.includes('persisted_content_required'), true);
   assert.equal(runtime.includes('const gate=canPublish(persisted.publishable)'), true);
-  assert.equal(runtime.includes('if(!gate?.ok)'), true);
-  assert.equal(runtime.includes("requires_approval:false"), true);
+  assert.equal(runtime.includes('ownerApprovalPolicy'), true);
+  assert.equal(runtime.includes("status:policy.required?'waiting_approval':'queued'"), true);
+  assert.equal(runtime.includes('requires_approval:Boolean(policy.required)'), true);
+  assert.equal(runtime.includes('notifySocialApproval'), true);
   assert.equal(runtime.includes("source:'mcp'"), true);
 });
 
