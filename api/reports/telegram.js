@@ -111,13 +111,15 @@ async function runTikTokUrlPropertyAction(res, action) {
   if (!org?.id) return json(res, 500, { ok: false, error: 'Tiqnora organization not found' });
 
   const appId = String(process.env.TIKTOK_BUSINESS_APP_ID || '').trim();
-  if (!appId) return json(res, 503, { ok: false, error: 'TIKTOK_BUSINESS_APP_ID missing' });
+  const appSecret = String(process.env.TIKTOK_BUSINESS_APP_SECRET || '').trim();
+  if (!appId || !appSecret) return json(res, 503, { ok: false, error: 'TikTok Business app credentials missing' });
 
   const propertyType = 2;
   const propertyUrl = 'https://www.tiqnora.com/';
   const credentials = await getTikTokBusinessAccess(org.id);
   const payload = {
     app_id: appId,
+    secret: appSecret,
     url_property_meta: {
       property_type: propertyType,
       url: propertyUrl
@@ -158,7 +160,7 @@ async function runTikTokUrlPropertyAction(res, action) {
   }
 
   if (action === 'list') {
-    const out = await tiktokBusinessGet('business/property/list/', credentials.accessToken, { app_id: appId });
+    const out = await tiktokBusinessGet('business/property/list/', credentials.accessToken, { app_id: appId, secret: appSecret });
     return json(res, 200, { ok: true, action: 'list', data: out?.data || out });
   }
 
