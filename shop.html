@@ -1,1 +1,129 @@
-PLACEHOLDER
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0A5CFF" />
+  <meta name="description" content="متجر حلول تقنية Tiqnora AI في السعودية." />
+  <link rel="canonical" href="https://www.tiqnora.com/shop" />
+  <link rel="preconnect" href="https://mndyabvlhvrhdbgmepkg.supabase.co" crossorigin />
+  <title>المتجر | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" />
+  <link rel="stylesheet" href="styles.css?v=6.1.0" />
+  <link rel="stylesheet" href="shop-store.css?v=1" />
+</head>
+<body>
+  <div class="store-topbar"><div class="container">شحن داخل المملكة · دعم واتساب · متجر تيقنورا التقني</div></div>
+  <header class="store-header">
+    <div class="container store-nav">
+      <a class="brand" href="/"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" width="36" height="36" /><span>تيقنورا</span></a>
+      <button type="button" class="icon-btn mobile-cat-toggle" id="mobile-cat-btn" aria-label="القائمة">☰</button>
+      <nav class="cat-nav" id="cat-nav" aria-label="تصنيفات المتجر">
+        <div class="cat-item"><a href="national-day.html">عروض اليوم الوطني</a></div>
+        <div class="cat-item" data-mega="tech">
+          <button type="button">الأجهزة والتقنية <span class="chev">▾</span></button>
+          <div class="mega">
+            <a href="shop.html?cat=computers-laptops">كمبيوترات ولابتوب</a>
+            <a href="shop.html?cat=networking">شبكات</a>
+            <a href="shop.html?cat=cctv-security">كاميرات ومراقبة</a>
+            <a href="shop.html?cat=printers">طابعات</a>
+            <a href="shop.html?cat=pos-systems">نقاط بيع POS</a>
+          </div>
+        </div>
+        <div class="cat-item" data-mega="office">
+          <button type="button">مكتب ذكي <span class="chev">▾</span></button>
+          <div class="mega">
+            <a href="shop.html?cat=smart-office">مكتب ذكي</a>
+            <a href="shop.html?cat=accessories">إكسسوارات</a>
+            <a href="shop.html">كل المنتجات</a>
+          </div>
+        </div>
+        <div class="cat-item" data-mega="ai">
+          <button type="button">حلول AI <span class="chev">▾</span></button>
+          <div class="mega">
+            <a href="services/ai-agents.html">وكلاء AI</a>
+            <a href="services/social-automation.html">أتمتة السوشيال</a>
+            <a href="services/web-design.html">تصميم مواقع</a>
+          </div>
+        </div>
+        <div class="cat-item"><a href="shop.html" class="active">كل المتجر</a></div>
+        <div class="cat-item"><a href="/#contact">تواصل</a></div>
+      </nav>
+      <div class="store-icons">
+        <a class="icon-btn" href="shop.html#f-q" aria-label="بحث">🔍</a>
+        <a class="icon-btn" href="cart.html" aria-label="السلة">🛒<span class="badge-count" id="store-cart-count">0</span></a>
+      </div>
+    </div>
+  </header>
+  <main class="store-main">
+    <div class="container">
+      <h1 class="store-title">المتجر</h1>
+      <p class="store-sub">كمبيوترات · شبكات · مراقبة وأمن · طابعات · مكتب ذكي · حلول AI — شحن داخل المملكة.</p>
+      <div class="trust-bar">
+        <div class="trust-item"><span>🚚</span>شحن داخل المملكة</div>
+        <div class="trust-item"><span>🔒</span>دفع آمن</div>
+        <div class="trust-item"><span>⚡</span>عرض فوري للمنتجات</div>
+        <div class="trust-item"><span>💬</span>دعم واتساب</div>
+      </div>
+      <div class="shop-filters" id="shop-filters">
+        <input type="search" id="f-q" placeholder="ابحث عن منتج..." autocomplete="off" />
+        <select id="f-cat" aria-label="القسم"><option value="">كل الأقسام</option></select>
+        <select id="f-brand" aria-label="العلامة"><option value="">كل العلامات</option></select>
+        <select id="f-price" aria-label="السعر">
+          <option value="">كل الأسعار</option>
+          <option value="0-200">حتى 200 ر.س</option>
+          <option value="200-500">200 – 500</option>
+          <option value="500-1500">500 – 1,500</option>
+          <option value="1500-5000">1,500 – 5,000</option>
+          <option value="5000-999999">أكثر من 5,000</option>
+        </select>
+        <select id="f-status" aria-label="الحالة">
+          <option value="">كل الحالات</option>
+          <option value="in">متوفر</option>
+          <option value="out">غير متوفر</option>
+          <option value="featured">مميز</option>
+          <option value="national">عروض وطنية</option>
+        </select>
+      </div>
+      <div class="chip-scroll" id="section-chips" role="tablist">
+        <button type="button" class="chip active" data-shop-section="all">الكل</button>
+        <button type="button" class="chip" data-shop-section="featured">مميز</button>
+        <button type="button" class="chip" data-shop-section="national">عروض وطنية</button>
+        <button type="button" class="chip" data-shop-section="best">الأحدث</button>
+      </div>
+      <div class="chip-scroll" id="cat-chips" role="tablist"></div>
+      <div class="shop-meta-row">
+        <span id="shop-result-meta">جارٍ التحميل…</span>
+        <a href="faq.html">الأسئلة الشائعة</a>
+      </div>
+      <section class="rail" id="rail-featured" hidden>
+        <div class="rail-head"><h2>منتجات مميزة</h2><a href="#products-grid">عرض الكل</a></div>
+        <div class="rail-track" id="rail-featured-track"></div>
+      </section>
+      <div class="products-grid" id="products-grid" aria-live="polite">
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+        <div class="skel" aria-hidden="true"><div class="skel-img"></div><div class="skel-line"></div><div class="skel-line s"></div></div>
+      </div>
+    </div>
+  </main>
+  <section class="container" style="padding:8px 0 20px">
+    <h2 style="font-size:1.1rem;margin:0 0 10px;color:var(--shop-text)">الأقسام الرئيسية</h2>
+    <div class="chip-scroll" id="cat-links"></div>
+  </section>
+  <footer class="store-footer">
+    <div class="container">© <span id="year"></span> Tiqnora AI · <a href="national-day.html">عروض اليوم الوطني</a> · <a href="about.html">عن الشركة</a></div>
+  </footer>
+  <script src="js/config.js" defer></script>
+  <script src="js/db.js" defer></script>
+  <script src="script.js" defer></script>
+  <script src="js/analytics.js" defer></script>
+  <script src="js/whatsapp.js" defer></script>
+  <script src="js/shop-store.js?v=1" defer></script>
+</body>
+</html>
