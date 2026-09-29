@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
+import jpeg from 'jpeg-js';
 
 const output = 'dist';
 rmSync(output, { recursive: true, force: true });
@@ -34,6 +35,48 @@ if (existsSync('public/assets')) {
 // Also merge root assets/ (e.g. product catalog images) if present
 if (existsSync('assets')) {
   cpSync('assets', `${output}/assets`, { recursive: true });
+}
+
+function generateTikTokSafeSocialJpeg(kind = 'web_design') {
+  const width = 1080;
+  const height = 1350;
+  const rgba = Buffer.alloc(width * height * 4);
+  const fill = (x0, y0, x1, y1, rgb) => {
+    for (let y = Math.max(0, y0); y < Math.min(height, y1); y += 1) {
+      for (let x = Math.max(0, x0); x < Math.min(width, x1); x += 1) {
+        const i = (y * width + x) * 4;
+        rgba[i] = rgb[0]; rgba[i + 1] = rgb[1]; rgba[i + 2] = rgb[2]; rgba[i + 3] = 255;
+      }
+    }
+  };
+  for (let y = 0; y < height; y += 1) fill(0, y, width, y + 1, [6, 11 + Math.floor(y / 110), 30 + Math.floor(y / 70)]);
+  const navy=[18,31,65], white=[247,251,255], blue=[10,92,255], cyan=[0,210,255], pale=[225,240,255], line=[80,110,155];
+  fill(0,0,18,height,blue); fill(width-18,0,width,height,cyan); fill(100,150,980,930,white); fill(100,150,980,245,navy);
+  if(kind==='ecommerce'){
+    for(let row=0;row<2;row+=1) for(let col=0;col<3;col+=1){
+      const x=145+col*270,y=300+row*300;
+      fill(x,y,x+215,y+245,pale); fill(x+32,y+28,x+183,y+155,(row+col)%2?cyan:blue);
+      fill(x+30,y+182,x+170,y+196,line); fill(x+30,y+210,x+125,y+221,[130,160,195]);
+    }
+    fill(650,850,980,1170,navy); fill(725,940,915,955,cyan); fill(760,970,900,985,white);
+  } else {
+    fill(155,310,600,470,navy); fill(665,310,925,470,pale);
+    for(let row=0;row<2;row+=1) for(let col=0;col<3;col+=1){
+      const x=150+col*260,y=535+row*205;
+      fill(x,y,x+205,y+160,pale); fill(x+22,y+22,x+183,y+78,(row+col)%2?cyan:blue);
+      fill(x+25,y+105,x+170,y+114,line); fill(x+25,y+128,x+145,y+137,[130,160,195]);
+    }
+    fill(730,825,980,1180,white); fill(755,885,955,1010,blue);
+  }
+  fill(75,1180,650,1190,cyan); fill(75,1225,500,1235,blue);
+  return jpeg.encode({data:rgba,width,height},90).data;
+}
+
+mkdirSync(`${output}/assets/social`, { recursive: true });
+for (const kind of ['web_design','ecommerce']) {
+  const name = kind === 'web_design' ? 'web-design' : 'ecommerce';
+  const image = generateTikTokSafeSocialJpeg(kind);
+  await import('node:fs').then(({ writeFileSync }) => writeFileSync(`${output}/assets/social/${name}.jpg`, image));
 }
 
 if (existsSync('public/tiktokKwQOiO2m2sBXlRJ0sdIrr4OU2TgPYsrz.txt')) {
