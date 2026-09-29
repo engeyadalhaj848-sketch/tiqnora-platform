@@ -17,13 +17,13 @@ test('daily social autopilot is collaborative and OpenAI-backed through shared p
   assert.equal(autopilot.includes("collaboration:['manager','marketing','content','social-media','image-designer']"), true);
 });
 
-test('daily social autopilot queues connected Facebook, Instagram and TikTok feeds', () => {
+test('daily social autopilot prepares connected Facebook, Instagram and TikTok feeds behind owner approval', () => {
   assert.equal(autopilot.includes("['facebook','instagram','tiktok']"), true);
   assert.equal(autopilot.includes("platforms.has('facebook')"), true);
   assert.equal(autopilot.includes("platforms.has('instagram')"), true);
   assert.equal(autopilot.includes("platforms.has('tiktok')"), true);
-  assert.equal(autopilot.includes("requires_approval:false"), true);
-  assert.equal(autopilot.includes("user_authorized_auto_publish:true"), true);
+  assert.equal(autopilot.includes("requires_approval:ownerApprovalRequired"), true);
+  assert.equal(autopilot.includes("user_authorized_auto_publish:false"), true);
 });
 
 test('morning cron prepares social content before processing publish queue', () => {
