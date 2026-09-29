@@ -30,5 +30,8 @@
     "test:mcp-social": "node --test tests/v6-mcp-social-bridge.test.mjs",
     "test:telegram-cc": "node --test tests/telegram-command-center-regression.test.mjs",
     "test:apify": "node --test tests/v6-apify-integration.test.mjs"
+  },
+  "dependencies": {
+    "jpeg-js": "^0.4.4"
   }
 }
