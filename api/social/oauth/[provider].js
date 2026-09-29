@@ -1370,7 +1370,7 @@ async function handleSocialReply(req, res) {
 }
 
 
-function handleTikTokBusinessCallback(req, res) {
+async function handleTikTokBusinessCallback(req, res) {
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
 
   const authCode = String(req.query?.auth_code || req.query?.code || '').trim();
@@ -1381,6 +1381,7 @@ function handleTikTokBusinessCallback(req, res) {
       ok: true,
       provider: 'tiktok_business',
       status: 'callback_ready',
+      credentials_configured: Boolean(process.env.TIKTOK_BUSINESS_APP_ID && process.env.TIKTOK_BUSINESS_APP_SECRET),
       message: 'TikTok for Business callback is ready.'
     });
   }
@@ -1398,13 +1399,90 @@ function handleTikTokBusinessCallback(req, res) {
     });
   }
 
-  return send(res, 409, {
-    ok: false,
-    provider: 'tiktok_business',
-    code: 'token_exchange_pending',
-    message: 'TikTok for Business callback received. Token exchange will be enabled after app setup is completed.',
-    account_id: accountId || null
-  });
+  try {
+    const redirectUri = String(process.env.TIKTOK_BUSINESS_REDIRECT_URI || 'https://tiqnora.com/api/social/oauth/tiktok-business').trim();
+    const tokenRes = await fetch('https://business-api.tiktok.com/open_api/v1.3/tt_user/oauth2/token/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: process.env.TIKTOK_BUSINESS_APP_ID,
+        client_secret: process.env.TIKTOK_BUSINESS_APP_SECRET,
+        grant_type: 'authorization_code',
+        auth_code: authCode,
+        redirect_uri: redirectUri
+      })
+    });
+    const payload = await tokenRes.json().catch(() => ({}));
+    const data = payload?.data || {};
+    if (!tokenRes.ok || Number(payload?.code || 0) !== 0 || !data.access_token) {
+      throw Object.assign(new Error(payload?.message || `TikTok Business token exchange failed (${tokenRes.status})`), { status: tokenRes.status || 502 });
+    }
+
+    const orgRows = await supa('organizations?slug=eq.tiqnora&select=id&limit=1');
+    const org = Array.isArray(orgRows) ? orgRows[0] : null;
+    if (!org?.id) throw new Error('Tiqnora organization not found');
+
+    const accessEncrypted = encrypt(String(data.access_token));
+    const refreshToken = String(data.refresh_token || '').trim();
+    const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
+    const businessOpenId = String(data.open_id || accountId || '').trim() || null;
+
+    await supa('social_provider_tokens?on_conflict=organization_id,provider', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        organization_id: org.id,
+        provider: 'tiktok_business',
+        ...accessEncrypted,
+        scopes: data.scope || null,
+        open_id: businessOpenId,
+        expires_at: data.expires_in ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString() : null,
+        refresh_expires_at: data.refresh_token_expires_in ? new Date(Date.now() + Number(data.refresh_token_expires_in) * 1000).toISOString() : null,
+        updated_at: new Date().toISOString(),
+        ...(refreshEncrypted ? {
+          refresh_ciphertext: refreshEncrypted.ciphertext,
+          refresh_iv: refreshEncrypted.iv,
+          refresh_tag: refreshEncrypted.tag
+        } : {})
+      })
+    });
+
+    const connections = await supa(`social_connections?organization_id=eq.${encodeURIComponent(org.id)}&platform=eq.tiktok&status=eq.active&select=id,settings,capabilities&order=updated_at.desc&limit=10`).catch(() => []);
+    for (const connection of connections || []) {
+      await supa(`social_connections?id=eq.${encodeURIComponent(connection.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          settings: {
+            ...(connection.settings || {}),
+            accounts_api_status: 'authorized',
+            business_open_id: businessOpenId,
+            accounts_api_scope: data.scope || null,
+            accounts_api_authorized_at: new Date().toISOString()
+          },
+          capabilities: {
+            ...(connection.capabilities || {}),
+            accounts_api_required: false,
+            direct_post: true,
+            photo_publish: true,
+            video_publish: true
+          },
+          updated_at: new Date().toISOString()
+        })
+      });
+    }
+
+    return res.redirect('/admin.html?social=tiktok-business&status=connected');
+  } catch (e) {
+    console.warn('TikTok for Business callback failed', { message: e.message });
+    return send(res, e.status >= 400 && e.status < 600 ? e.status : 502, {
+      ok: false,
+      provider: 'tiktok_business',
+      code: 'token_exchange_failed',
+      message: e.message || 'TikTok for Business authorization failed.',
+      account_id: accountId || null
+    });
+  }
 }
 
 
