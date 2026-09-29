@@ -20,8 +20,10 @@ test('worker supports Facebook and Instagram Graph publishing', () => {
   assert.equal(runtime.includes('status_code,status'), true);
 });
 
-test('worker does not fake TikTok or WhatsApp feed publishing', () => {
-  assert.equal(runtime.includes('tiktok_media_consent_required'), true);
+test('worker publishes TikTok through Accounts API while WhatsApp stays conversation-based', () => {
+  assert.equal(runtime.includes('publishTikTokPhoto'), true);
+  assert.equal(runtime.includes("business/photo/publish/"), true);
+  assert.equal(runtime.includes('getTikTokBusinessAccess'), true);
   assert.equal(runtime.includes('whatsapp_not_feed'), true);
 });
 
