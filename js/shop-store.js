@@ -179,36 +179,17 @@ window.addEventListener('DOMContentLoaded', () => {
         const cur=catSel.value||initialCat;
         const productCats=catRows.filter(c=>!c.type||c.type==='product'||c.type==='products');
         if(productCats.length){
-          catSel.innerHTML='<option value="">كل التصنيفات</option>'+productCats.map(c=>`<option value="${esc(c.slug)}">${esc(c.name_ar||c.slug)}</option>`).join('');
+          catSel.innerHTML='<option value="">كل الأقسام</option>'+productCats.map(c=>`<option value="${esc(c.slug)}">${esc(c.name_ar||c.slug)}</option>`).join('');
           catSel.value=cur||'';
-          const chipHost=document.querySelector('#cat-chips');
-          if(chipHost){
-            chipHost.innerHTML=`<button type="button" class="chip${!catSel.value?' active':''}" data-cat="">كل المنتجات</button>`+
-              productCats.map(c=>`<button type="button" class="chip${catSel.value===c.slug?' active':''}" data-cat="${esc(c.slug)}">${esc(c.name_ar||c.slug)}</button>`).join('');
-            chipHost.querySelectorAll('[data-cat]').forEach(btn=>{
-              btn.addEventListener('click',()=>{
-                catSel.value=btn.getAttribute('data-cat')||'';
-                chipHost.querySelectorAll('[data-cat]').forEach(x=>x.classList.toggle('active',x===btn));
-                loadPage(true);
-              });
-            });
-          }
-          const linksHost=document.querySelector('#cat-links');
-          if(linksHost){
-            linksHost.innerHTML=productCats.map(c=>`<a class="chip" href="shop.html?cat=${encodeURIComponent(c.slug)}">${esc(c.name_ar||c.slug)}</a>`).join('');
-          }
+          /* no chip walls — categories only in top mega-menu + this select */
         }
       }
     }catch(_){}
   }
-  document.querySelectorAll('[data-shop-section]').forEach(el=>{
-    el.addEventListener('click',e=>{e.preventDefault(); section=el.getAttribute('data-shop-section')||'all';
-      document.querySelectorAll('[data-shop-section]').forEach(x=>x.classList.toggle('active',x===el)); loadPage(true);});
-  });
   ['#f-q','#f-cat','#f-brand','#f-price','#f-status'].forEach(sel=>{
     const el=document.querySelector(sel); if(!el) return;
     el.addEventListener('change',()=>loadPage(true));
-    if(el.tagName==='INPUT'){let t; el.addEventListener('input',()=>{clearTimeout(t); t=setTimeout(()=>loadPage(true),280);});}
+    if(el.tagName==='INPUT' && el.type==='search'){let t; el.addEventListener('input',()=>{clearTimeout(t); t=setTimeout(()=>loadPage(true),280);});}
   });
   document.getElementById('mobile-cat-btn')?.addEventListener('click',()=>{
     document.getElementById('cat-nav')?.classList.toggle('mobile-open');
