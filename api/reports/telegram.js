@@ -451,18 +451,10 @@ export default async function handler(req, res) {
   }
 
   if (route === 'prepare_social_review_now') {
-    const supplied = String(req.query?.token || '').trim();
     const rows = await query('organizations', 'slug=eq.tiqnora&select=settings&limit=1').catch(() => []);
-    const expected = String(rows?.[0]?.settings?.social_autopilot?.review_batch_one_time_token || '').trim();
-    if (!supplied || !expected || supplied.length !== expected.length) {
-      return json(res, 401, { error: 'Unauthorized review batch' });
-    }
-    const a = Buffer.from(supplied);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      return json(res, 401, { error: 'Unauthorized review batch' });
-    }
-    await updateTiqnoraSocialAutopilotSettings({ review_batch_one_time_token: null });
+    const armed = rows?.[0]?.settings?.social_autopilot?.review_batch_armed === true;
+    if (!armed) return json(res, 409, { error: 'Review batch is not armed' });
+    await updateTiqnoraSocialAutopilotSettings({ review_batch_armed: false });
     const result = await prepareSocialReviewBatch();
     return json(res, 200, result);
   }
