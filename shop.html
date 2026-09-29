@@ -369,11 +369,6 @@
       const brand = document.querySelector('#f-brand')?.value || null;
 
       try {
-        const ok = await window.TiqnoraDB.ready();
-        if (!ok) {
-          grid.innerHTML = '<p style="color:var(--muted)">تعذر تحميل المنتجات.</p>';
-          return;
-        }
         const page = await window.TiqnoraDB.getProductsPage({
           limit: PAGE,
           offset,
@@ -488,10 +483,10 @@
       }
     });
 
-    // Immediate skeleton, then products first (don't block on brands)
+    // Render products immediately via lightweight REST. Load filter metadata in parallel.
     grid.innerHTML = skeleton(8);
     loadPage(true);
-    window.TiqnoraDB.ready().then(() => loadBrandsAndCats());
+    loadBrandsAndCats();
     renderCount();
   });
   </script>
