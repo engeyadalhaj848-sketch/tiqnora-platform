@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
+import { prepareSocialReviewBatch } from '../../lib/social-review-batch.js';
 import { getTikTokBusinessAccess, tiktokBusinessPost, tiktokBusinessGet } from '../../lib/v6/tiktok-business.js';
 import { runMorningWhatsAppOutreach } from '../../lib/v6/whatsapp-outreach.js';
 import {
@@ -447,6 +448,23 @@ export default async function handler(req, res) {
   if (route === 'social_autopilot_tick') {
     if (!(await isAuthorizedSocialScheduler(req))) return json(res, 401, { error: 'Unauthorized social scheduler' });
     return await runSocialAutopilotTick(res);
+  }
+
+  if (route === 'prepare_social_review_now') {
+    const supplied = String(req.query?.token || '').trim();
+    const rows = await query('organizations', 'slug=eq.tiqnora&select=settings&limit=1').catch(() => []);
+    const expected = String(rows?.[0]?.settings?.social_autopilot?.review_batch_one_time_token || '').trim();
+    if (!supplied || !expected || supplied.length !== expected.length) {
+      return json(res, 401, { error: 'Unauthorized review batch' });
+    }
+    const a = Buffer.from(supplied);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return json(res, 401, { error: 'Unauthorized review batch' });
+    }
+    await updateTiqnoraSocialAutopilotSettings({ review_batch_one_time_token: null });
+    const result = await prepareSocialReviewBatch();
+    return json(res, 200, result);
   }
 
   if (route === 'telegram_webhook') {
