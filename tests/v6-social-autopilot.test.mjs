@@ -8,6 +8,8 @@ const workforceChat = readFileSync(new URL('../api/ai-workforce/chat.js', import
 const migration = readFileSync(new URL('../supabase/migrations/060_daily_social_autopilot.sql', import.meta.url), 'utf8');
 const migration64 = readFileSync(new URL('../supabase/migrations/064_social_every_2h_scheduler.sql', import.meta.url), 'utf8');
 const migration67 = readFileSync(new URL('../supabase/migrations/067_social_quality_gate_pause.sql', import.meta.url), 'utf8');
+const reviewBatch = readFileSync(new URL('../lib/social-review-batch.js', import.meta.url), 'utf8');
+const assetScript = readFileSync(new URL('../scripts/generate-social-review-assets.mjs', import.meta.url), 'utf8');
 
 test('daily social autopilot is collaborative and OpenAI-backed through shared provider', () => {
   assert.equal(autopilot.includes('managerDirective'), true);
@@ -90,4 +92,18 @@ test('autopilot sends every approved-quality post to Telegram for owner approval
   assert.equal(autopilot.includes("requires_approval:ownerApprovalRequired"), true);
   assert.equal(autopilot.includes("user_authorized_auto_publish:false"), true);
   assert.equal(autopilot.includes("approval_channel:'telegram_group'"), true);
+});
+
+
+test('agent review batch prepares three owner-gated posts with premium artwork', () => {
+  assert.equal(reviewBatch.includes('prepareSocialReviewBatch'), true);
+  assert.equal(reviewBatch.includes("['facebook','instagram','tiktok']"), true);
+  assert.equal(reviewBatch.includes("status:'waiting_approval'"), true);
+  assert.equal(reviewBatch.includes('notifySocialApproval'), true);
+  assert.equal(reviewBatch.includes('review-web-design.png'), true);
+  assert.equal(reviewBatch.includes('review-whatsapp-automation.png'), true);
+  assert.equal(reviewBatch.includes('review-ai-agents.png'), true);
+  assert.equal(assetScript.includes("review-web-design.png"), true);
+  assert.equal(assetScript.includes("review-whatsapp-automation.png"), true);
+  assert.equal(assetScript.includes("review-ai-agents.png"), true);
 });
