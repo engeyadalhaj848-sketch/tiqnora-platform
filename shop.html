@@ -281,10 +281,7 @@
     let brands = [];
 
     const params = new URLSearchParams(location.search);
-    if (params.get('cat')) {
-      const el = document.querySelector('#f-cat');
-      if (el) el.value = params.get('cat');
-    }
+    const initialCat = params.get('cat') || '';
 
     function renderCount(){
       const c = (window.TiqnoraStore?.getCart()||[]).reduce((a,i)=>a+i.qty,0);
@@ -439,7 +436,30 @@
           if (productCats.length) {
             catSel.innerHTML = '<option value=\"\">كل التصنيفات</option>' +
               productCats.map(c => `<option value=\"${esc(c.slug)}\">${esc(c.name_ar || c.slug)}</option>`).join('');
-            catSel.value = cur;
+            catSel.value = cur || initialCat;
+
+            const chipHost = document.querySelector('#cat-chips');
+            if (chipHost) {
+              chipHost.innerHTML =
+                `<button type="button" class="chip${catSel.value ? '' : ' active'}" data-cat="">كل المنتجات</button>` +
+                productCats.map(c => `<button type="button" class="chip${catSel.value === c.slug ? ' active' : ''}" data-cat="${esc(c.slug)}">${esc(c.name_ar || c.slug)}</button>`).join('');
+              chipHost.querySelectorAll('[data-cat]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                  catSel.value = btn.getAttribute('data-cat') || '';
+                  chipHost.querySelectorAll('[data-cat]').forEach(x => x.classList.toggle('active', x === btn));
+                  loadPage(true);
+                });
+              });
+            }
+
+            const linksHost = document.querySelector('#cat-links');
+            if (linksHost) {
+              linksHost.innerHTML = productCats.map(c =>
+                `<a class="chip" href="/shop?cat=${encodeURIComponent(c.slug)}">${esc(c.name_ar || c.slug)}</a>`
+              ).join('');
+            }
+
+            if (initialCat && !cur) loadPage(true);
           }
         }
       } catch (_) {}
