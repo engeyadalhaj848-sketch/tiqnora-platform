@@ -36,6 +36,10 @@ if (existsSync('assets')) {
   cpSync('assets', `${output}/assets`, { recursive: true });
 }
 
+if (existsSync('public/tiktokKwQOiO2m2sBXlRJ0sdIrr4OU2TgPYsrz.txt')) {
+  cpSync('public/tiktokKwQOiO2m2sBXlRJ0sdIrr4OU2TgPYsrz.txt', `${output}/tiktokKwQOiO2m2sBXlRJ0sdIrr4OU2TgPYsrz.txt`);
+}
+
 // PWA admin assets
 if (existsSync('public/admin-manifest.json')) {
   cpSync('public/admin-manifest.json', `${output}/admin-manifest.json`);
