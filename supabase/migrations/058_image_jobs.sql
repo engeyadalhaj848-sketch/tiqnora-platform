@@ -1,6 +1,4 @@
--- Image Designer production jobs log
--- Run in Supabase SQL Editor. Safe / additive.
-
+-- Image Designer production jobs log + RLS
 create table if not exists public.image_jobs (
   id uuid primary key default gen_random_uuid(),
   image_job_id text not null unique,
@@ -34,4 +32,20 @@ create index if not exists image_jobs_status_idx on public.image_jobs (generatio
 create index if not exists image_jobs_created_idx on public.image_jobs (created_at desc);
 create index if not exists image_jobs_org_idx on public.image_jobs (organization_id);
 
-comment on table public.image_jobs is 'Tiqnora Image Designer production log — never auto-publish social.';
+alter table public.image_jobs enable row level security;
+
+drop policy if exists image_jobs_admin_select on public.image_jobs;
+create policy image_jobs_admin_select
+  on public.image_jobs
+  for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('admin', 'super_admin')
+    )
+  );
+
+comment on table public.image_jobs is 'Tiqnora Image Designer production log — internal; never auto-publish social.';
