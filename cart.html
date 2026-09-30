@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex,follow" />
+  <meta name="description" content="سلة التسوق — متجر Tiqnora AI. راجع منتجاتك وأكمل الطلب." />
+  <link rel="canonical" href="https://www.tiqnora.com/cart" />
+  <title>السلة | Tiqnora AI</title>
+  <link rel="icon" type="image/png" href="assets/tiqnora-logo.png" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="shop-store.css" />
+  <style>
+    :root {
+      --brand: #0A5CFF;
+      --brand-cyan: #00D2FF;
+      --navy: #060B1E;
+      --text: #0B1529;
+      --muted: #6B7C93;
+      --line: #E5EAF1;
+      --bg: #FFFFFF;
+      --soft: #F7F9FC;
+    }
+    body { background: var(--bg); color: var(--text); font-family: "IBM Plex Sans Arabic", system-ui, sans-serif; margin: 0; }
+    .cart-layout { display: grid; grid-template-columns: 1.4fr .9fr; gap: 24px; align-items: start; padding: 28px 0 48px; }
+    @media (max-width: 900px) { .cart-layout { grid-template-columns: 1fr; } }
+    .cart-panel, .summary-panel {
+      background: #fff; border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(11, 21, 41, 0.04); padding: 20px;
+    }
+    .cart-title { font-size: 1.45rem; font-weight: 800; margin: 0 0 6px; color: var(--navy); }
+    .cart-sub { color: var(--muted); margin: 0 0 18px; font-size: .92rem; }
+    .cart-item {
+      display: grid; grid-template-columns: 72px 1fr auto; gap: 14px;
+      padding: 14px 0; border-bottom: 1px solid var(--line); align-items: center;
+    }
+    .cart-item:last-child { border-bottom: 0; }
+    .cart-item img {
+      width: 72px; height: 72px; object-fit: cover; border-radius: 12px;
+      background: var(--soft); border: 1px solid var(--line);
+    }
+    .cart-item-title { font-weight: 700; font-size: .95rem; color: var(--text); margin: 0 0 4px; }
+    .cart-item-price { color: var(--muted); font-size: .85rem; margin: 0; }
+    .qty-row { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
+    .qty-btn {
+      width: 32px; height: 32px; border-radius: 10px; border: 1px solid var(--line);
+      background: #fff; color: var(--text); font-size: 1rem; cursor: pointer;
+      display: grid; place-items: center;
+    }
+    .qty-btn:hover { border-color: var(--brand); color: var(--brand); }
+    .qty-val { min-width: 28px; text-align: center; font-weight: 700; }
+    .line-total { font-weight: 800; color: var(--navy); white-space: nowrap; }
+    .item-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+    .btn-remove {
+      border: 0; background: transparent; color: #c24141; cursor: pointer;
+      font-size: .82rem; font-weight: 600; padding: 4px 0;
+    }
+    .btn-remove:hover { text-decoration: underline; }
+    .summary-panel h2 { margin: 0 0 16px; font-size: 1.1rem; color: var(--navy); }
+    .sum-row { display: flex; justify-content: space-between; margin-bottom: 10px; color: var(--muted); font-size: .92rem; }
+    .sum-row.total { color: var(--navy); font-weight: 800; font-size: 1.1rem; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .ship-note {
+      background: #F0F6FF; border: 1px solid #D6E6FF; color: #0A3D99;
+      border-radius: 12px; padding: 10px 12px; font-size: .85rem; margin: 12px 0 16px;
+    }
+    .btn-primary {
+      display: block; width: 100%; text-align: center; background: var(--brand); color: #fff;
+      border: 0; border-radius: 14px; padding: 14px 18px; font-weight: 800; font-size: 1rem;
+      cursor: pointer; text-decoration: none;
+    }
+    .btn-primary:hover { filter: brightness(1.05); }
+    .btn-ghost {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      border: 1px solid var(--line); background: #fff; color: var(--text);
+      border-radius: 12px; padding: 10px 14px; font-weight: 600; cursor: pointer; font-size: .9rem;
+    }
+    .btn-ghost:hover { border-color: var(--brand); color: var(--brand); }
+    .cart-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .empty-state {
+      text-align: center; padding: 56px 20px; background: #fff; border: 1px solid var(--line);
+      border-radius: 16px; box-shadow: 0 4px 20px rgba(11, 21, 41, 0.04);
+    }
+    .empty-state .emoji { font-size: 2.4rem; margin-bottom: 10px; }
+    .empty-state h2 { margin: 0 0 8px; color: var(--navy); }
+    .empty-state p { color: var(--muted); margin: 0 0 18px; }
+  </style>
+</head>
+<body>
+  <div class="store-topbar"><div class="container">شحن داخل المملكة · دعم واتساب · متجر تيقنورا التقني</div></div>
+  <header class="store-header">
+    <div class="container store-nav">
+      <a class="brand" href="/"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" width="36" height="36" /><span>تيقنورا</span></a>
+      <nav class="cat-nav" aria-label="روابط المتجر" style="justify-content:flex-start">
+        <div class="cat-item"><a href="shop.html">المتجر</a></div>
+        <div class="cat-item"><a href="track.html">تتبع الطلب</a></div>
+      </nav>
+      <div class="store-icons">
+        <a class="icon-btn" href="cart.html" aria-label="السلة">🛒<span class="badge-count" id="store-cart-count">0</span></a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" style="max-width:1100px">
+    <div id="cart-root">
+      <p style="color:var(--muted);padding:40px 0;text-align:center">جارٍ تحميل السلة…</p>
+    </div>
+  </main>
+
+  <footer class="store-footer" style="margin-top:40px;padding:24px 0;border-top:1px solid #E5EAF1;color:#6B7C93;text-align:center;font-size:.88rem">
+    <div class="container">© <span id="year"></span> Tiqnora AI · <a href="shop.html" style="color:#0A5CFF">المتجر</a></div>
+  </footer>
+
+  <script src="js/config.js" defer></script>
+  <script src="script.js" defer></script>
+  <script>
+  (function () {
+    const money = n => `${new Intl.NumberFormat('ar-SA').format(Number(n) || 0)} ر.س`;
+    const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    const FREE_SHIP_THRESHOLD = 500;
+    const SHIP_COST = 25;
+
+    function getCart() {
+      if (window.TiqnoraStore?.getCart) return window.TiqnoraStore.getCart() || [];
+      try { return JSON.parse(localStorage.getItem('tiqnora-store-cart-v1') || '[]'); } catch { return []; }
+    }
+    function saveCart(c) {
+      if (window.TiqnoraStore?.saveCart) window.TiqnoraStore.saveCart(c);
+      else localStorage.setItem('tiqnora-store-cart-v1', JSON.stringify(c));
+      render();
+    }
+    function updateBadge(c) {
+      const n = (c || []).reduce((a, i) => a + (Number(i.qty) || 0), 0);
+      const el = document.getElementById('store-cart-count');
+      if (el) el.textContent = String(n);
+    }
+
+    function render() {
+      const root = document.getElementById('cart-root');
+      const cart = getCart();
+      updateBadge(cart);
+
+      if (!cart.length) {
+        root.innerHTML = `
+          <div class="empty-state">
+            <div class="emoji">🛒</div>
+            <h2>سلتك فارغة</h2>
+            <p>تصفّح المتجر وأضف المنتجات التي تحتاجها.</p>
+            <a class="btn-primary" href="shop.html" style="display:inline-block;width:auto;padding:12px 28px">تصفح المنتجات</a>
+          </div>`;
+        return;
+      }
+
+      const subtotal = cart.reduce((a, i) => a + (Number(i.price) || 0) * (Number(i.qty) || 0), 0);
+      const shipping = subtotal >= FREE_SHIP_THRESHOLD ? 0 : SHIP_COST;
+      const total = subtotal + shipping;
+      const remain = Math.max(0, FREE_SHIP_THRESHOLD - subtotal);
+
+      root.innerHTML = `
+        <h1 class="cart-title">سلة التسوق</h1>
+        <p class="cart-sub">${cart.length} منتج · راجع الكميات ثم أكمل الطلب</p>
+        <div class="cart-layout">
+          <div class="cart-panel" id="cart-items">
+            ${cart.map((it, idx) => {
+              const line = (Number(it.price) || 0) * (Number(it.qty) || 0);
+              const img = it.image || 'assets/tiqnora-logo.png';
+              const title = esc(it.titleAr || it.titleEn || it.slug || 'منتج');
+              return `
+                <div class="cart-item" data-idx="${idx}">
+                  <img src="${esc(img)}" alt="" loading="lazy" width="72" height="72" onerror="this.src='assets/tiqnora-logo.png'" />
+                  <div>
+                    <p class="cart-item-title">${title}</p>
+                    <p class="cart-item-price">${money(it.price)} للوحدة</p>
+                    <div class="qty-row">
+                      <button type="button" class="qty-btn" data-act="dec" data-idx="${idx}" aria-label="تقليل">−</button>
+                      <span class="qty-val">${Number(it.qty) || 1}</span>
+                      <button type="button" class="qty-btn" data-act="inc" data-idx="${idx}" aria-label="زيادة">+</button>
+                    </div>
+                  </div>
+                  <div class="item-actions">
+                    <span class="line-total">${money(line)}</span>
+                    <button type="button" class="btn-remove" data-act="rm" data-idx="${idx}">حذف</button>
+                  </div>
+                </div>`;
+            }).join('')}
+            <div class="cart-actions">
+              <button type="button" class="btn-ghost" id="clear-cart">تفريغ السلة</button>
+              <a class="btn-ghost" href="shop.html">متابعة التسوق</a>
+            </div>
+          </div>
+          <aside class="summary-panel">
+            <h2>ملخص الطلب</h2>
+            <div class="sum-row"><span>المجموع الفرعي</span><span>${money(subtotal)}</span></div>
+            <div class="sum-row"><span>الشحن</span><span>${shipping === 0 ? 'مجاني' : money(shipping)}</span></div>
+            <div class="sum-row total"><span>الإجمالي</span><span>${money(total)}</span></div>
+            ${remain > 0
+              ? `<div class="ship-note">أضف منتجات بقيمة ${money(remain)} للحصول على شحن مجاني داخل المملكة.</div>`
+              : `<div class="ship-note">🎉 مؤهل للشحن المجاني داخل المملكة.</div>`}
+            <a class="btn-primary" href="/checkout">إتمام الطلب</a>
+          </aside>
+        </div>`;
+
+      root.querySelectorAll('[data-act]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.getAttribute('data-idx'));
+          const act = btn.getAttribute('data-act');
+          const c = getCart();
+          if (!c[idx]) return;
+          if (act === 'inc') c[idx].qty = (Number(c[idx].qty) || 1) + 1;
+          if (act === 'dec') {
+            c[idx].qty = Math.max(1, (Number(c[idx].qty) || 1) - 1);
+          }
+          if (act === 'rm') c.splice(idx, 1);
+          saveCart(c);
+        });
+      });
+      document.getElementById('clear-cart')?.addEventListener('click', () => {
+        if (confirm('هل تريد تفريغ السلة بالكامل؟')) saveCart([]);
+      });
+    }
+
+    function boot() {
+      const y = document.getElementById('year');
+      if (y) y.textContent = new Date().getFullYear();
+      render();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+    else boot();
+  })();
+  </script>
+</body>
+</html>
