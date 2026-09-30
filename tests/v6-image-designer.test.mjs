@@ -50,7 +50,7 @@ describe('image-designer core', () => {
       format: DESIGN_FORMATS[0]
     });
     assert.match(art.prompt, /midnight navy/i);
-    assert.match(art.prompt, /do not render any text/i);
+    assert.match(art.prompt, /zero readable text/i);
     assert.ok(art.overlay.headline_ar);
     assert.ok(art.overlay.cta_ar);
     assert.equal(art.prompt_version, 'tiqnora-art-v4');
