@@ -104,10 +104,13 @@ Adapt strategy separately for TikTok, Instagram, LinkedIn, Facebook and X instea
 Build content systems, not random posts: pillars, series, experiments, production briefs, publishing logic, response playbooks, and measurable weekly learnings.
 `.trim(),
   'image-designer': `
-Role: Elite Brand Art Director and AI Visual Designer.
+Role: Elite Brand Art Director and AI Visual Designer with cross-industry commercial creative direction expertise equivalent to a principal creative director operating across SaaS, B2B, e-commerce, and Saudi market campaigns.
 Translate business objectives into production-ready visual concepts: audience insight, single message, hierarchy, composition, format, typography direction, brand constraints, imagery, negative constraints, dimensions, and final generation prompt.
 Design for the destination platform and conversion goal, not decoration. Keep Tiqnora brand consistency and legibility on mobile.
-Do not claim an image file was generated unless an image-generation tool actually produced it.
+Operate the platform image pipeline when the user requests a design, poster, social visual, or campaign creative: generate real images via generateImage(), compose Arabic text and the official Tiqnora logo programmatically, run quality gates, store outputs, and send Telegram design-review previews with approval controls.
+Never reply that you have no image tool or that you can only provide a prompt unless every configured image provider has already failed — then report the technical error briefly.
+Never auto-publish to Instagram, Facebook, TikTok, LinkedIn, or WhatsApp; default approval_status is pending_approval.
+Do not claim an image file was generated unless the image pipeline actually produced it.
 `.trim(),
   'video-designer': `
 Role: Elite Short-Form Video Creative Director and Performance Storyteller.
@@ -141,7 +144,6 @@ function expertSystemPrompt(agent, memory, tasks) {
   const specialty = AGENT_EXPERTISE[agent?.slug] || `
 Role: Principal specialist. Stay rigorous, evidence-aware, practical, and within your real expertise. Recommend another Tiqnora specialist when a task clearly belongs elsewhere.
 `.trim();
-
   return [
     agent?.system_prompt || agent?.description || '',
     ELITE_OPERATING_STANDARD,
@@ -157,11 +159,7 @@ async function callOpenAI(agent, messages) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      max_completion_tokens: 4096,
-      messages
-    })
+    body: JSON.stringify({ model, max_completion_tokens: 4096, messages })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(payload.error?.message || `OpenAI request failed (${response.status})`), { status: 502 });
@@ -207,18 +205,13 @@ async function callGemini(agent, messages) {
   return { text, model };
 }
 
-
 async function callGrok(agent, messages) {
   if (!process.env.XAI_API_KEY) throw Object.assign(new Error('لم يتم إعداد XAI_API_KEY في Vercel بعد.'), { status: 503 });
   const model = agent.model?.startsWith('grok-') ? agent.model : (process.env.XAI_MODEL || 'grok-3-mini');
   const response = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      temperature: Number(agent.temperature ?? 0.7),
-      messages
-    })
+    body: JSON.stringify({ model, temperature: Number(agent.temperature ?? 0.7), messages })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(payload.error?.message || `xAI/Grok request failed (${response.status})`), { status: 502 });
@@ -236,10 +229,7 @@ function providerCandidates() {
 
 async function callPreferredProvider(agent, messages) {
   const candidates = providerCandidates();
-  if (!candidates.length) {
-    throw Object.assign(new Error('لا يوجد مزود ذكاء اصطناعي مهيأ في Vercel.'), { status: 503 });
-  }
-
+  if (!candidates.length) throw Object.assign(new Error('لا يوجد مزود ذكاء اصطناعي مهيأ في Vercel.'), { status: 503 });
   const failures = [];
   for (const candidate of candidates) {
     try {
@@ -250,7 +240,6 @@ async function callPreferredProvider(agent, messages) {
       failures.push(`${candidate.id}: ${error.message}`);
     }
   }
-
   const error = new Error(`فشلت جميع مزودات الذكاء الاصطناعي: ${failures.join(' | ')}`);
   error.status = 502;
   throw error;
@@ -263,43 +252,14 @@ async function saveConversation(token, row) {
   return data?.[0];
 }
 
-
 function providerStatusPayload() {
   const providers = [
-    {
-      id: 'google_ai',
-      name: 'Google Gemini',
-      configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY),
-      defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-      envVars: ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GEMINI_MODEL']
-    },
-    {
-      id: 'openai',
-      name: 'OpenAI',
-      configured: Boolean(process.env.OPENAI_API_KEY),
-      defaultModel: process.env.OPENAI_MODEL || 'chat-latest',
-      envVars: ['OPENAI_API_KEY', 'OPENAI_MODEL']
-    },
-    {
-      id: 'anthropic',
-      name: 'Claude (Anthropic)',
-      configured: Boolean(process.env.ANTHROPIC_API_KEY),
-      defaultModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest',
-      envVars: ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL']
-    },
-    {
-      id: 'xai',
-      name: 'Grok (xAI)',
-      configured: Boolean(process.env.XAI_API_KEY),
-      defaultModel: process.env.XAI_MODEL || 'grok-3-mini',
-      envVars: ['XAI_API_KEY', 'XAI_MODEL']
-    }
+    { id: 'google_ai', name: 'Google Gemini', configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY), defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash', envVars: ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GEMINI_MODEL'] },
+    { id: 'openai', name: 'OpenAI', configured: Boolean(process.env.OPENAI_API_KEY), defaultModel: process.env.OPENAI_MODEL || 'chat-latest', envVars: ['OPENAI_API_KEY', 'OPENAI_MODEL'] },
+    { id: 'anthropic', name: 'Claude (Anthropic)', configured: Boolean(process.env.ANTHROPIC_API_KEY), defaultModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', envVars: ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'] },
+    { id: 'xai', name: 'Grok (xAI)', configured: Boolean(process.env.XAI_API_KEY), defaultModel: process.env.XAI_MODEL || 'grok-3-mini', envVars: ['XAI_API_KEY', 'XAI_MODEL'] }
   ];
-  return {
-    providers,
-    anyConfigured: providers.some(provider => provider.configured),
-    note: 'المفاتيح تُدار فقط من Vercel Environment Variables ولا تُعرض هنا.'
-  };
+  return { providers, anyConfigured: providers.some(p => p.configured), note: 'المفاتيح تُدار فقط من Vercel Environment Variables ولا تُعرض هنا.' };
 }
 
 export default async function handler(req, res) {
@@ -312,9 +272,7 @@ export default async function handler(req, res) {
       const user = await supabase('/auth/v1/user', token);
       const profiles = await supabase(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role,is_active`, token);
       const profile = profiles?.[0];
-      if (!profile || !profile.is_active || !['admin','super_admin'].includes(profile.role)) {
-        return json(res, 403, { error: 'صلاحية أدمن مطلوبة.' });
-      }
+      if (!profile || !profile.is_active || !['admin','super_admin'].includes(profile.role)) return json(res, 403, { error: 'صلاحية أدمن مطلوبة.' });
       return json(res, 200, providerStatusPayload());
     } catch (error) {
       return json(res, error.status && error.status < 600 ? error.status : 500, { error: error.message || 'حدث خطأ غير متوقع.' });
@@ -351,12 +309,26 @@ export default async function handler(req, res) {
       ...history,
       { role: 'user', content: message }
     ];
-    const result = await callPreferredProvider(agent, messages);
+
+    let result;
+    try {
+      const { tryHandleImageDesignerChat } = await import('../../lib/v6/image-designer-chat-hook.js');
+      const imageResult = await tryHandleImageDesignerChat({ agent, message, user, token });
+      if (imageResult) result = imageResult;
+    } catch (hookErr) {
+      if (String(agent?.slug || '').toLowerCase() === 'image-designer') {
+        console.error('image-designer-hook', hookErr?.message || hookErr);
+      }
+    }
+    if (!result) {
+      result = await callPreferredProvider(agent, messages);
+    }
+
     const conversation = await saveConversation(token, {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,
       message, response: result.text, provider: result.provider, model: result.model, status: 'completed'
     });
-    return json(res, 200, { conversation });
+    return json(res, 200, { conversation, meta: result.meta || null });
   } catch (error) {
     if (agent && user) {
       await saveConversation(token, {
