@@ -4,23 +4,10 @@
    All existing class names preserved for admin-app.js
    ============================================================ */
 :root {
-  --bg: #070d18;
-  --bg2: #0b1424;
-  --surface: #101c30;
-  --surface2: #152438;
-  --line: rgba(140, 180, 220, 0.12);
-  --line-strong: rgba(0, 229, 255, 0.22);
-  --text: #eaf3ff;
-  --muted: #8aa0b8;
-  --accent: #00e5ff;
-  --accent2: #0a5cff;
-  --danger: #ff8d9b;
-  --ok: #7be3a3;
-  --warn: #ffd166;
-  --radius: 12px;
-  --side-w: 260px;
-  --top-h: 60px;
-  --font: "IBM Plex Sans Arabic", system-ui, -apple-system, sans-serif;
+  --bg: #F7F9FC; --bg2: #FFFFFF; --surface: #FFFFFF; --surface2: #F2F6FB;
+  --line: #E5EAF1; --line-strong: #B9D0FF; --text: #0B1529; --muted: #6B7C93;
+  --accent: #0A5CFF; --accent2: #00D2FF; --danger: #B42318; --ok: #067647; --warn: #B54708;
+  --radius: 12px; --side-w: 270px; --top-h: 64px; --font: "IBM Plex Sans Arabic", system-ui, -apple-system, sans-serif;
 }
 * { box-sizing: border-box; }
 body {
@@ -55,11 +42,7 @@ button {
   transition: filter 0.15s, background 0.15s;
 }
 button:hover { filter: brightness(1.12); }
-.btn-primary {
-  background: linear-gradient(135deg, var(--accent2), #0066ff);
-  color: #fff;
-  font-weight: 700;
-}
+.btn-primary { background: #0A5CFF; color: #fff; font-weight: 700; box-shadow: none; }
 .btn-danger {
   background: rgba(255, 141, 155, 0.12);
   color: var(--danger);
@@ -76,7 +59,7 @@ button:hover { filter: brightness(1.12); }
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 34px 30px;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+  box-shadow: 0 24px 70px rgba(11,21,41,.12);
 }
 .login-card img { height: 44px; display: block; margin: 0 auto 8px; }
 .login-card h1 { font-size: 1.35rem; text-align: center; margin: 6px 0 22px; }
@@ -149,7 +132,7 @@ button:hover { filter: brightness(1.12); }
   justify-content: space-between;
   padding: 0 20px;
   border-bottom: 1px solid var(--line);
-  background: rgba(7, 13, 24, 0.9);
+  background: rgba(255,255,255,.96);
   backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
@@ -228,14 +211,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
   padding: 10px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
-  background: rgba(0,0,0,0.15);
+  background: #F7F9FC;
 }
 .tbl td {
   padding: 11px 10px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
-.tbl tr:hover td { background: rgba(140, 180, 220, 0.04); }
+.tbl tr:hover td { background: #F7FAFF; }
 .tbl .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .pill {
@@ -656,3 +639,23 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 
 .v6-studio-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto auto;gap:8px;margin:12px 0}
 @media (max-width:900px){.v6-studio-controls{grid-template-columns:1fr}}
+
+/* Tiqnora light accordion navigation */
+.admin-side{box-shadow:8px 0 28px rgba(11,21,41,.035)}
+.side-brand{background:#fff;color:#060B1E}
+.side-section{margin:6px 8px}
+.side-section-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;background:transparent;color:#26364B;border:0;border-radius:10px;padding:10px 11px;font-weight:800;text-align:start}
+.side-section-toggle:hover,.side-section.open>.side-section-toggle{background:#F0F6FF;color:#0A5CFF}
+.side-chevron{transition:transform .18s ease;color:#6B7C93}
+.side-section.open .side-chevron{transform:rotate(180deg)}
+.side-subnav{display:grid;grid-template-rows:0fr;transition:grid-template-rows .2s ease}
+.side-subnav-inner{overflow:hidden}
+.side-section.open .side-subnav{grid-template-rows:1fr}
+.side-section .side-link{margin:2px 4px;padding:9px 12px;border-radius:9px;border-inline-start:0;color:#6B7C93}
+.side-section .side-link:hover{background:#F7F9FC;color:#0B1529}
+.side-section .side-link.active{background:#EAF2FF;color:#0A5CFF;border-inline-start:0;font-weight:700}
+.admin-topbar{box-shadow:0 1px 0 #E5EAF1}
+.kpi,.card,.modal{box-shadow:0 8px 28px rgba(11,21,41,.04)}
+input:focus,select:focus,textarea:focus{outline:2px solid rgba(10,92,255,.14);border-color:#0A5CFF}
+a{color:#0A5CFF}
+@media(max-width:900px){.admin-side{box-shadow:18px 0 55px rgba(11,21,41,.15)}}
