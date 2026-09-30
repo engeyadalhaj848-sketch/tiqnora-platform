@@ -50,6 +50,11 @@ describe('phone voice agent', () => {
     const migration = read('supabase/migrations/071_voice_calls.sql');
     assert.match(adapter, /recording_default: false/);
     assert.match(adapter, /transcript_storage_default: false/);
+    assert.match(adapter, /assistantOverrides/);
+    assert.match(adapter, /recordingEnabled: false/);
+    assert.match(adapter, /loggingEnabled: false/);
+    assert.match(adapter, /pcapEnabled: false/);
+    assert.match(adapter, /transcriptPlan: \{ enabled: false \}/);
     assert.doesNotMatch(migration, /recording_url/);
     assert.doesNotMatch(migration, /\btranscript\b\s+text/i);
   });
