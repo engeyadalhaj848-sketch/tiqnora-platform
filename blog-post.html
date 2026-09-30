@@ -1,51 +1,6 @@
-<!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>مقال | Tiqnora AI</title>
-  <meta name="description" content="مقال من مدونة Tiqnora AI" />
-  <meta name="robots" content="index, follow" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" />
-  <link rel="stylesheet" href="/marketing.css" />
-</head>
-<body>
-  <div class="wrap">
-    <nav class="nav"><b>Tiqnora AI</b><a href="/blog">المدونة</a><a href="/customer">بوابة العملاء</a><a href="/">الرئيسية</a></nav>
-    <article id="post"><p class="lead">جارٍ التحميل…</p></article>
-    <div class="cta"><a class="btn btn-primary" href="/customer">جرّب المنصة</a><a class="btn btn-ghost" href="/#contact">تواصل</a></div>
-    <div class="footer">© Tiqnora AI</div>
-  </div>
-  <script src="/js/config.js"></script>
-  <script src="/js/analytics.js"></script>
-  <script src="/js/db.js"></script>
-  <script src="/js/supabase-client-fix.js"></script>
-  <script>
-  (async () => {
-    const qs = new URLSearchParams(location.search);
-    const parts = location.pathname.split('/').filter(Boolean);
-    let slug = qs.get('slug');
-    if (!slug && parts[0] === 'blog' && parts[1]) slug = parts[1];
-    if (!slug) slug = parts.pop();
-    if (slug === 'blog-post' || slug === 'blog') slug = qs.get('slug');
-    await window.TiqnoraDB.ready();
-    const db = window.TiqnoraDB.raw;
-    const el = document.getElementById('post');
-    if (!db || !slug || slug === 'blog-post') { el.innerHTML = '<p>مقال غير موجود</p>'; return; }
-    const { data: p, error } = await db.from('blog_posts').select('*').eq('slug', slug).eq('status','published').maybeSingle();
-    if (error || !p) { el.innerHTML = '<p class="lead">المقال غير متاح</p>'; return; }
-    document.title = (p.seo_title || p.title_ar) + ' | Tiqnora AI';
-    const md = document.querySelector('meta[name=description]');
-    if (md) md.content = p.seo_description || p.excerpt_ar || '';
-    let link = document.querySelector('link[rel=canonical]');
-    if (!link) { link = document.createElement('link'); link.rel = 'canonical'; document.head.appendChild(link); }
-    link.href = 'https://www.tiqnora.com/blog/' + p.slug;
-    const body = (p.body_ar||'').split(/\n\n+/).map(block => {
-      if (block.startsWith('## ')) return '<h2>' + block.slice(3) + '</h2>';
-      return '<p>' + block.replace(/\n/g,'<br>') + '</p>';
-    }).join('');
-    el.innerHTML = `<header class="hero"><h1>${p.title_ar}</h1><p class="lead">${p.excerpt_ar||''}</p></header><div class="card prose">${body}</div>`;
-  })();
-  </script>
-</body>
-</html>
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0A5CFF"><title>مقال | Tiqnora AI</title><meta name="description" content="مقال من مدونة Tiqnora AI"><meta name="robots" content="index, follow, max-image-preview:large"><link rel="icon" type="image/png" href="/assets/tiqnora-logo.png"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap"><style>
+:root{--blue:#0A5CFF;--navy:#060B1E;--text:#0B1529;--muted:#6B7C93;--line:#E5EAF1}*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--text);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif}.container{width:min(1120px,calc(100% - 32px));margin:auto}.top{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}.nav{min-height:72px;display:flex;align-items:center;gap:18px}.brand{margin-inline-end:auto;display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--navy);font-weight:800}.brand img{width:38px;height:38px}.nav a{color:#3A4A63;text-decoration:none;font-weight:600}.crumb{padding:26px 0 8px;color:var(--muted);font-size:.85rem}.article-head{padding:22px 0 28px;max-width:900px}.category{display:inline-flex;padding:6px 10px;border-radius:999px;background:#F0F6FF;color:var(--blue);font-size:.75rem;font-weight:800}.article-head h1{font-size:clamp(2rem,5vw,4rem);line-height:1.28;margin:14px 0;color:var(--navy)}.lead{color:var(--muted);font-size:1.08rem;line-height:1.9}.meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:.84rem}.hero-media{min-height:320px;border-radius:24px;overflow:hidden;background:radial-gradient(circle at 20% 20%,rgba(0,210,255,.26),transparent 35%),linear-gradient(135deg,#061330,#0A5CFF);display:grid;place-items:center;margin-bottom:30px}.hero-media img{width:100%;height:100%;max-height:520px;object-fit:cover}.hero-media .brand-art{width:110px;height:110px;object-fit:contain}.article-grid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:34px;align-items:start}.toc{position:sticky;top:92px;border:1px solid var(--line);border-radius:16px;padding:18px;background:#fff}.toc b{display:block;color:var(--navy);margin-bottom:10px}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 0;font-size:.86rem}.toc a:hover{color:var(--blue)}.prose{font-size:1.02rem;line-height:2;color:#26364B}.prose h2{color:var(--navy);font-size:1.55rem;margin:34px 0 10px;scroll-margin-top:100px}.prose p{margin:0 0 18px}.share{display:flex;gap:10px;flex-wrap:wrap;margin:30px 0}.btn{border:1px solid var(--line);background:#fff;color:var(--text);border-radius:12px;padding:10px 14px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.related{padding:38px 0 64px}.related-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.related-card{border:1px solid var(--line);border-radius:16px;padding:18px}.related-card a{text-decoration:none;color:var(--navy);font-weight:800}.cta{background:#F5F9FF;border:1px solid #DDE9FF;border-radius:20px;padding:28px;margin:38px 0}.cta h2{margin-top:0;color:var(--navy)}.footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:.85rem}@media(max-width:850px){.article-grid{grid-template-columns:1fr}.toc{position:static}.related-grid{grid-template-columns:1fr}.nav a:not(.brand){display:none}.container{width:min(100% - 22px,1120px)}}</style></head>
+<body><header class="top"><div class="container nav"><a class="brand" href="/"><img src="/assets/tiqnora-logo.png" alt="Tiqnora AI"><span>Tiqnora AI</span></a><a href="/blog">المدونة</a><a href="/#services">الخدمات</a><a href="/shop">المتجر</a></div></header><main class="container"><div class="crumb"><a href="/" style="color:inherit">الرئيسية</a> / <a href="/blog" style="color:inherit">المدونة</a> / <span id="crumb-title">المقال</span></div><article id="post"><p class="lead">جارٍ التحميل…</p></article><section id="related" class="related"></section></main><footer class="footer"><div class="container">© Tiqnora AI · المدينة المنورة، المملكة العربية السعودية</div></footer>
+<script src="/js/config.js"></script><script src="/js/analytics.js"></script><script src="/js/db.js"></script><script src="/js/supabase-client-fix.js"></script><script>
+(async()=>{const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');const qs=new URLSearchParams(location.search),parts=location.pathname.split('/').filter(Boolean);let slug=qs.get('slug');if(!slug&&parts[0]==='blog'&&parts[1])slug=parts[1];if(!slug)slug=parts.pop();if(slug==='blog-post'||slug==='blog')slug=qs.get('slug');await window.TiqnoraDB.ready();const db=window.TiqnoraDB.raw,el=document.getElementById('post');if(!db||!slug||slug==='blog-post'){el.innerHTML='<p>مقال غير موجود</p>';return}const {data:p,error}=await db.from('blog_posts').select('*').eq('slug',slug).eq('status','published').maybeSingle();if(error||!p){el.innerHTML='<p class="lead">المقال غير متاح</p>';return}document.title=(p.seo_title||p.title_ar)+' | Tiqnora AI';const md=document.querySelector('meta[name=description]');if(md)md.content=p.seo_description||p.excerpt_ar||'';let canon=document.querySelector('link[rel=canonical]');if(!canon){canon=document.createElement('link');canon.rel='canonical';document.head.appendChild(canon)}canon.href='https://www.tiqnora.com/blog/'+p.slug;document.getElementById('crumb-title').textContent=p.title_ar;const raw=p.body_ar||'';let h=0;const toc=[];const body=raw.split(/\n\n+/).map(block=>{if(block.startsWith('## ')){const title=block.slice(3).trim(),id='section-'+(++h);toc.push({id,title});return '<h2 id="'+id+'">'+esc(title)+'</h2>'}return '<p>'+esc(block).replace(/\n/g,'<br>')+'</p>'}).join('');const image=p.featured_image||p.cover_image||p.image_url||'',read=Math.max(2,Math.round(raw.split(/\s+/).length/180)),category=esc((p.tags||[])[0]||'تقنية وذكاء اصطناعي'),date=p.published_at?new Date(p.published_at).toLocaleDateString('ar-SA'):'';const media=image?'<img src="'+esc(image)+'" alt="'+esc(p.title_ar)+'">':'<img class="brand-art" src="/assets/tiqnora-logo.png" alt="">';el.innerHTML='<header class="article-head"><span class="category">'+category+'</span><h1>'+esc(p.title_ar)+'</h1><p class="lead">'+esc(p.excerpt_ar||'')+'</p><div class="meta"><span>'+date+'</span><span>•</span><span>'+read+' دقائق قراءة</span></div></header><div class="hero-media">'+media+'</div><div class="article-grid"><aside class="toc">'+(toc.length?'<b>محتويات المقال</b>'+toc.map(x=>'<a href="#'+x.id+'">'+esc(x.title)+'</a>').join(''):'<b>مقال Tiqnora</b><span class="lead" style="font-size:.84rem">رؤى عملية قابلة للتطبيق.</span>')+'</aside><div><div class="prose">'+body+'</div><div class="share"><button class="btn" id="share-btn">مشاركة المقال</button><button class="btn" id="copy-btn">نسخ الرابط</button></div><section class="cta"><h2>هل تريد تطبيق الفكرة على مشروعك؟</h2><p class="lead">تيقنورا تساعدك في تصميم المواقع، الأتمتة ووكلاء الذكاء الاصطناعي.</p><a class="btn primary" href="/#contact">ناقش مشروعك</a></section></div></div>';document.getElementById('share-btn').onclick=async()=>{if(navigator.share){try{await navigator.share({title:p.title_ar,url:location.href})}catch(_){}}else navigator.clipboard?.writeText(location.href)};document.getElementById('copy-btn').onclick=()=>navigator.clipboard?.writeText(location.href);const {data:rel}=await db.from('blog_posts').select('slug,title_ar,excerpt_ar,published_at').eq('status','published').neq('slug',p.slug).order('published_at',{ascending:false}).limit(3);if(rel?.length)document.getElementById('related').innerHTML='<h2 style="color:var(--navy)">مقالات ذات صلة</h2><div class="related-grid">'+rel.map(x=>'<article class="related-card"><a href="/blog/'+encodeURIComponent(x.slug)+'">'+esc(x.title_ar)+'</a><p class="lead" style="font-size:.88rem">'+esc(x.excerpt_ar||'')+'</p></article>').join('')+'</div>'})();
+</script></body></html>
