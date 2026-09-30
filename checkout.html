@@ -33,13 +33,17 @@
       .field-group label{display:block;margin-bottom:10px}
     }
   </style>
-</head>
+<style id="tiqnora-checkout-light">
+:root{--bg:#F7F9FC;--bg2:#FFFFFF;--surface:#FFFFFF;--surface2:#F7F9FC;--line:#E5EAF1;--text:#0B1529;--muted:#6B7C93;--accent:#0A5CFF;--accent2:#00D2FF}
+html,body,.checkout-page{background:#F7F9FC!important;color:#0B1529!important}.store-header{background:#fff!important;border-bottom:1px solid #E5EAF1!important}.panel,.checkout-card,.order-summary,#whop-mount{background:#fff!important;border-color:#E5EAF1!important;box-shadow:0 10px 30px rgba(11,21,41,.05)!important}.pay-opt{background:#fff!important;border-color:#E5EAF1!important}.pay-opt.selected{border-color:#0A5CFF!important;background:#F0F6FF!important}input,select,textarea{background:#fff!important;color:#0B1529!important;border-color:#DDE5EF!important}.btn-primary,button[type="submit"]{background:#0A5CFF!important;color:#fff!important;box-shadow:none!important}#checkout-error{color:#B42318!important}.trust-pill{background:#fff!important;border:1px solid #E5EAF1!important}@media(max-width:760px){.checkout-grid{grid-template-columns:1fr!important}.store-main{padding-top:18px!important}}
+</style></head>
 <body class="checkout-page">
   <header class="store-header">
     <div class="container store-nav">
       <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
       <nav class="store-links" aria-label="المتجر">
         <a href="shop.html">المتجر</a>
+        <a href="/cart">السلة</a>
         <a href="track.html">تتبع الطلب</a>
       </nav>
     </div>
@@ -269,8 +273,7 @@
             mountWhop(data.whop.sessionId, data.whop.planId, data.whop.environment || 'sandbox', data.return_url);
             btn.textContent = 'أدخل بيانات الدفع أعلاه';
             btn.disabled = true;
-            try { window.TiqnoraStore?.saveCart?.([]); } catch (_) {}
-            try { window.TiqnoraAnalytics?.purchase?.(data.order_number, data.total, cart.map(i => i.titleAr)); } catch (_) {}
+
           } else {
             showError((data.whop && data.whop.message) || 'تم إنشاء الطلب لكن بوابة الدفع غير جاهزة. تواصل معنا عبر واتساب.');
             btn.disabled = false;
