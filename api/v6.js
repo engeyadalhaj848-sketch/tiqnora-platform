@@ -125,6 +125,12 @@ import {
   HARD_CAP_RESULTS as APIFY_HARD_CAP_RESULTS
 } from '../lib/integrations/apify.js';
 import { runApifyGoogleMapsLeadWorkflow } from '../lib/v6/apify-lead-workflow.js';
+import {
+  vapiStatus,
+  verifyVapiWebhook,
+  mapVapiWebhook,
+  normalizeE164
+} from '../lib/integrations/vapi.js';
 
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/, '');
@@ -2313,6 +2319,321 @@ async function handleWorkforce(req, res, auth) {
 }
 
 
+async function syncVapiIntegration(status = {}, token = '') {
+  try {
+    const rows = await sbGet('integration_connections?provider=eq.vapi&select=*&limit=1', token);
+    const current = Array.isArray(rows) ? rows[0] : null;
+    const configured = Boolean(status.configured);
+    const now = new Date().toISOString();
+    const body = {
+      provider: 'vapi',
+      display_name: current?.display_name || 'Vapi Voice AI',
+      enabled: configured,
+      mode: 'production',
+      status: configured ? 'connected' : 'not_configured',
+      metadata: {
+        ...(current?.metadata || {}),
+        purpose: 'voice_agent_phone_calls',
+        consent_required: true,
+        recording_default: false,
+        transcript_storage_default: false,
+        api_key: Boolean(status.api_key),
+        assistant_id: Boolean(status.assistant_id),
+        phone_number_id: Boolean(status.phone_number_id),
+        webhook_secret: Boolean(status.webhook_secret)
+      },
+      last_checked_at: now,
+      updated_at: now
+    };
+    if (current?.id) {
+      await sbWrite(`integration_connections?id=eq.${encodeURIComponent(current.id)}`, {
+        method: 'PATCH', body
+      }, token);
+    } else {
+      await sbWrite('integration_connections', { method: 'POST', body }, token);
+    }
+  } catch (error) {
+    console.warn('Vapi integration state sync failed', error?.message || String(error));
+  }
+}
+
+async function handleVoiceWebhook(req, res) {
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+  if (!verifyVapiWebhook(req)) return json(res, 401, { error: 'Invalid voice webhook authentication' });
+  if (!SERVICE) return json(res, 503, { error: 'Server database key is not configured' });
+
+  const event = mapVapiWebhook(req.body || {});
+  if (!event.external_call_id) return json(res, 200, { ok: true, ignored: true });
+
+  const existing = await sbGet(
+    `voice_calls?provider=eq.vapi&external_call_id=eq.${encodeURIComponent(event.external_call_id)}&select=*&limit=1`
+  );
+  const row = Array.isArray(existing) ? existing[0] : null;
+
+  const patch = {
+    ...(event.status ? { status: event.status } : {}),
+    ...(event.duration_seconds != null ? { duration_seconds: event.duration_seconds } : {}),
+    ...(event.ended_reason ? { ended_reason: String(event.ended_reason).slice(0, 200) } : {}),
+    ...(event.summary ? { summary: String(event.summary).slice(0, 2000) } : {}),
+    ...(event.status === 'in_progress' && !row?.started_at ? { started_at: new Date().toISOString() } : {}),
+    ...(['completed','failed','cancelled'].includes(event.status) ? { ended_at: new Date().toISOString() } : {}),
+    updated_at: new Date().toISOString()
+  };
+
+  if (row?.id) {
+    await sbWrite(`voice_calls?id=eq.${encodeURIComponent(row.id)}`, {
+      method: 'PATCH',
+      body: patch,
+      prefer: 'return=minimal'
+    });
+  } else if (event.customer_number) {
+    const organizationId = await tiqnoraOrgId();
+    if (organizationId) {
+      await sbWrite('voice_calls', {
+        method: 'POST',
+        body: {
+          organization_id: organizationId,
+          provider: 'vapi',
+          external_call_id: event.external_call_id,
+          direction: 'inbound',
+          purpose: 'support',
+          destination_phone: String(event.customer_number),
+          status: event.status || 'in_progress',
+          duration_seconds: event.duration_seconds,
+          ended_reason: event.ended_reason ? String(event.ended_reason).slice(0, 200) : null,
+          summary: event.summary ? String(event.summary).slice(0, 2000) : null,
+          metadata: { inbound_discovered_by_webhook: true },
+          started_at: new Date().toISOString()
+        },
+        prefer: 'return=minimal'
+      });
+    }
+  }
+
+  return json(res, 200, { ok: true });
+}
+
+async function handleVoiceCalls(req, res, auth) {
+  const organizationId = await tiqnoraOrgId(auth.token);
+  if (!organizationId) return json(res, 500, { error: 'Organization missing' });
+  const op = String(req.query?.op || req.body?.op || 'status').toLowerCase();
+
+  if (op === 'status' && req.method === 'GET') {
+    const status = vapiStatus();
+    await syncVapiIntegration(status, auth.token);
+    return json(res, 200, {
+      ok: true,
+      ...status,
+      consent_required: true,
+      recording_default: false,
+      transcript_storage_default: false
+    });
+  }
+
+  if (op === 'candidates' && req.method === 'GET') {
+    const [leadRows, customerRows, permissionRows] = await Promise.all([
+      sbUserGet(
+        `leads?organization_id=eq.${encodeURIComponent(organizationId)}&phone=not.is.null&select=id,name,contact_name,company_name,phone,whatsapp,status,pipeline_stage,industry,city,updated_at&order=updated_at.desc.nullslast,created_at.desc&limit=80`,
+        auth.token
+      ).catch(() => []),
+      sbUserGet(
+        'customers?phone=not.is.null&select=id,full_name,phone,city,created_at&order=created_at.desc&limit=80',
+        auth.token
+      ).catch(() => []),
+      sbUserGet(
+        `voice_call_permissions?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=updated_at.desc&limit=300`,
+        auth.token
+      ).catch(() => [])
+    ]);
+    const permissions = Array.isArray(permissionRows) ? permissionRows : [];
+    const permissionFor = (entityType, entityId, phone) =>
+      permissions.find(p => p.entity_type === entityType && p.entity_id === entityId && p.phone === phone && p.scope === 'outbound_ai_call') || null;
+
+    return json(res, 200, {
+      leads: (Array.isArray(leadRows) ? leadRows : []).map(row => ({
+        ...row,
+        voice_permission: permissionFor('lead', row.id, row.phone)
+      })),
+      customers: (Array.isArray(customerRows) ? customerRows : []).map(row => ({
+        ...row,
+        voice_permission: permissionFor('customer', row.id, row.phone)
+      }))
+    });
+  }
+
+  if (op === 'record_consent' && req.method === 'POST') {
+    const entityType = String(req.body?.entity_type || '').trim();
+    const entityId = String(req.body?.entity_id || '').trim();
+    const source = String(req.body?.source || '').trim();
+    const evidenceNote = String(req.body?.evidence_note || '').trim();
+    const confirmed = req.body?.confirmed === true;
+    const allowedSources = new Set([
+      'whatsapp_explicit',
+      'web_form_explicit',
+      'inbound_call_explicit',
+      'written_consent',
+      'other_explicit'
+    ]);
+    if (!['lead','customer'].includes(entityType) || !entityId) {
+      return json(res, 400, { error: 'entity_type and entity_id are required' });
+    }
+    if (!confirmed || !allowedSources.has(source)) {
+      return json(res, 400, {
+        error: 'Explicit customer consent evidence is required before enabling AI outbound calls.',
+        code: 'explicit_consent_required'
+      });
+    }
+
+    const table = entityType === 'lead' ? 'leads' : 'customers';
+    const select = entityType === 'lead' ? 'id,phone,whatsapp' : 'id,phone';
+    const rows = await sbUserGet(
+      `${table}?id=eq.${encodeURIComponent(entityId)}&select=${select}&limit=1`,
+      auth.token
+    );
+    const entity = Array.isArray(rows) ? rows[0] : null;
+    if (!entity) return json(res, 404, { error: 'Contact not found' });
+
+    const phone = normalizeE164(req.body?.phone || entity.phone || entity.whatsapp || '');
+    const knownPhones = [entity.phone, entity.whatsapp].filter(Boolean).map(value => {
+      try { return normalizeE164(value); } catch { return null; }
+    }).filter(Boolean);
+    if (!knownPhones.includes(phone)) {
+      return json(res, 409, { error: 'Consent phone must match the CRM contact phone.' });
+    }
+
+    const now = new Date().toISOString();
+    const inserted = await sbUserWrite(
+      'voice_call_permissions?on_conflict=organization_id,entity_type,entity_id,phone,scope',
+      {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=representation',
+        body: {
+          organization_id: organizationId,
+          entity_type: entityType,
+          entity_id: entityId,
+          phone,
+          scope: 'outbound_ai_call',
+          status: 'granted',
+          source,
+          evidence_note: evidenceNote ? evidenceNote.slice(0, 1000) : null,
+          granted_at: now,
+          revoked_at: null,
+          created_by: auth.profile.id,
+          updated_by: auth.profile.id,
+          updated_at: now
+        }
+      },
+      auth.token
+    );
+    const permission = Array.isArray(inserted) ? inserted[0] : inserted;
+    return json(res, 201, { permission });
+  }
+
+  if (op === 'revoke_consent' && req.method === 'POST') {
+    const permissionId = String(req.body?.permission_id || '').trim();
+    if (!permissionId) return json(res, 400, { error: 'permission_id required' });
+    const now = new Date().toISOString();
+    const updated = await sbUserWrite(
+      `voice_call_permissions?id=eq.${encodeURIComponent(permissionId)}&organization_id=eq.${encodeURIComponent(organizationId)}`,
+      {
+        method: 'PATCH',
+        body: {
+          status: 'revoked',
+          revoked_at: now,
+          updated_by: auth.profile.id,
+          updated_at: now
+        }
+      },
+      auth.token
+    );
+    return json(res, 200, { permission: Array.isArray(updated) ? updated[0] : updated });
+  }
+
+  if (op === 'create_action' && req.method === 'POST') {
+    const permissionId = String(req.body?.permission_id || '').trim();
+    const purpose = String(req.body?.purpose || 'followup').trim();
+    const allowedPurpose = new Set(['followup','support','appointment','sales','other']);
+    if (!permissionId || !allowedPurpose.has(purpose)) {
+      return json(res, 400, { error: 'permission_id and valid purpose are required' });
+    }
+
+    const permissionRows = await sbUserGet(
+      `voice_call_permissions?id=eq.${encodeURIComponent(permissionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.granted&select=*&limit=1`,
+      auth.token
+    );
+    const permission = Array.isArray(permissionRows) ? permissionRows[0] : null;
+    if (!permission) {
+      return json(res, 409, { error: 'Explicit outbound-call consent is required.', code: 'voice_call_consent_required' });
+    }
+
+    const table = permission.entity_type === 'lead' ? 'leads' : 'customers';
+    const select = permission.entity_type === 'lead'
+      ? 'id,name,contact_name,company_name,phone,whatsapp'
+      : 'id,full_name,phone';
+    const rows = await sbUserGet(
+      `${table}?id=eq.${encodeURIComponent(permission.entity_id)}&select=${select}&limit=1`,
+      auth.token
+    );
+    const entity = Array.isArray(rows) ? rows[0] : null;
+    if (!entity) return json(res, 404, { error: 'Contact not found' });
+
+    const action = await createAction({
+      organizationId,
+      actionType: 'place_voice_call',
+      payload: {
+        consent_id: permission.id,
+        destination_phone: permission.phone,
+        purpose,
+        customer_name: entity.contact_name || entity.name || entity.full_name || null,
+        company_name: entity.company_name || null,
+        recording_enabled: false,
+        transcript_persistence: false
+      },
+      relatedEntityType: permission.entity_type,
+      relatedEntityId: permission.entity_id,
+      leadId: permission.entity_type === 'lead' ? permission.entity_id : null,
+      createdBy: auth.profile.id,
+      requiresApproval: true,
+      accessToken: auth.token
+    });
+    return json(res, 201, { action });
+  }
+
+  if (op === 'approve_and_call' && req.method === 'POST') {
+    const actionId = String(req.body?.action_id || '').trim();
+    if (!actionId) return json(res, 400, { error: 'action_id required' });
+    let action = await getAction(actionId, auth.token);
+    if (!action || action.organization_id !== organizationId || action.action_type !== 'place_voice_call') {
+      return json(res, 404, { error: 'Voice-call action not found' });
+    }
+    if (['draft','pending_approval'].includes(action.status)) {
+      action = await approveAction({
+        actionId,
+        approvedBy: auth.profile.id,
+        autoExecute: false,
+        accessToken: auth.token
+      });
+    }
+    if (action.status === 'completed') return json(res, 200, { action, already_completed: true });
+    const executed = await executeAction({ actionId, accessToken: auth.token });
+    return json(res, 200, { action: executed });
+  }
+
+  if (op === 'history' && req.method === 'GET') {
+    const rows = await sbUserGet(
+      `voice_calls?organization_id=eq.${encodeURIComponent(organizationId)}&select=*&order=created_at.desc&limit=100`,
+      auth.token
+    );
+    return json(res, 200, { calls: Array.isArray(rows) ? rows : [] });
+  }
+
+  return json(res, 404, {
+    error: 'Unknown voice operation',
+    ops: ['status','candidates','record_consent','revoke_consent','create_action','approve_and_call','history']
+  });
+}
+
+
 async function handleMcpSocial(req, res) {
   if (req.method === 'GET') {
     return json(res, 200, {
@@ -2602,6 +2923,10 @@ export default async function handler(req, res) {
     return handleSocialPublishWorker(req, res);
   }
 
+  if (route === 'voice_calls' && String(req.query?.op || '').toLowerCase() === 'webhook') {
+    return handleVoiceWebhook(req, res);
+  }
+
   const auth = await requireAdmin(req);
   if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
@@ -2616,6 +2941,7 @@ export default async function handler(req, res) {
     if (route === 'reputation') return await handleReputation(req, res, auth);
     if (route === 'seo') return await handleSeo(req, res, auth);
     if (route === 'workforce') return await handleWorkforce(req, res, auth);
+    if (route === 'voice_calls') return await handleVoiceCalls(req, res, auth);
     if (route === 'apify') return await handleApify(req, res, auth);
     if (route === 'actions') return await handleActions(req, res, auth);
     if (route === 'action') return await handleAction(req, res, auth);

@@ -187,6 +187,21 @@ button:hover { filter: brightness(1.1); }
   animation: voicePulse 1.1s ease-in-out infinite alternate;
 }
 .voice-stop { white-space: nowrap; }
+.voice-status-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.voice-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.voice-checks span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.voice-ready { color: var(--ok) !important; border-color: rgba(118,230,161,.3) !important; }
+.voice-ok { color: var(--ok); border-color: rgba(118,230,161,.25); background: rgba(118,230,161,.07); }
+.voice-no { color: var(--danger); border-color: rgba(255,128,146,.25); background: rgba(255,128,146,.07); }
+.consent-check { display:flex; gap:8px; align-items:flex-start; color:var(--text); }
+.consent-check input { width:auto; margin-top:6px; }
+.ltr { direction:ltr; text-align:left; }
 @keyframes voicePulse {
   from { transform: scale(1); }
   to { transform: scale(1.03); }

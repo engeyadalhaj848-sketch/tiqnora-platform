@@ -204,6 +204,14 @@
       "destination": "/proposal"
     },
     {
+      "source": "/api/voice/webhook",
+      "destination": "/api/v6?route=voice_calls&op=webhook"
+    },
+    {
+      "source": "/api/voice/status",
+      "destination": "/api/v6?route=voice_calls&op=status"
+    },
+    {
       "source": "/api/ai-sales/draft-reply",
       "destination": "/api/v6?route=draft_reply"
     },

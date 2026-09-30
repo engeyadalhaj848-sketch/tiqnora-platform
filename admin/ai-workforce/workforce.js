@@ -6,7 +6,7 @@
   const app = $('#workforce-app');
   let db, me, org, agents = [], selectedAgent = null;
   let activeRecognition = null;
-  const state = { counts: {}, conversations: [], tasks: [], memory: [] };
+  const state = { counts: {}, conversations: [], tasks: [], memory: [], voiceCandidates: [], voiceCalls: [] };
   const labels = {
     manager: ['إدارة الوكلاء', 'MG', '#8bc6ff'],
     assistant: ['مساعد تنفيذي', 'AI', '#6de8dc'],
@@ -167,7 +167,7 @@
     app.className = 'app-shell';
     app.innerHTML = `<header class="topbar"><div class="brand"><img src="/assets/tiqnora-logo.png" alt="Tiqnora AI"><div><strong>Tiqnora AI Workforce</strong><small>INTERNAL OPERATIONS</small></div></div><div class="top-actions"><span class="user-chip">${esc(me.full_name || me.email)}</span><a class="btn btn-sm" href="/admin.html"><span class="back-label">لوحة الإدارة</span> ←</a><button class="btn btn-sm" id="logout">خروج</button></div></header>
     <main class="main"><section class="hero"><div><span class="eyebrow">فريقك التنفيذي الذكي</span><h1>إدارة Tiqnora بقدرات AI متخصصة</h1><p>وجّه الموظفين، تابع المهام، واحتفظ بمعرفة الشركة داخل مساحة إدارية آمنة وقابلة للتوسع.</p></div><span class="secure-badge">● مساحة إدارية محمية</span></section>
-    <nav class="tabs" aria-label="أقسام فريق العمل"><button class="tab active" data-view="overview">نظرة عامة</button><button class="tab" data-view="chat">المحادثات</button><button class="tab" data-view="tasks">المهام</button><button class="tab" data-view="memory">الذاكرة</button></nav><section class="view" id="view"></section></main>
+    <nav class="tabs" aria-label="أقسام فريق العمل"><button class="tab active" data-view="overview">نظرة عامة</button><button class="tab" data-view="chat">المحادثات</button><button class="tab" data-view="calls">المكالمات</button><button class="tab" data-view="tasks">المهام</button><button class="tab" data-view="memory">الذاكرة</button></nav><section class="view" id="view"></section></main>
     <dialog class="dialog" id="dialog"><div class="dialog-body" id="dialog-body"></div></dialog>`;
     $('#logout').onclick = async () => { await db.auth.signOut(); location.href = '/admin.html'; };
     $$('.tab').forEach(btn => btn.onclick = () => switchView(btn.dataset.view));
@@ -176,7 +176,7 @@
     if (view !== 'chat') stopVoiceSession();
     if (agentId) selectedAgent = agents.find(a => a.id === agentId) || selectedAgent;
     $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.view === view));
-    ({ overview:renderOverview, chat:renderChat, tasks:renderTasks, memory:renderMemory }[view] || renderOverview)();
+    ({ overview:renderOverview, chat:renderChat, calls:renderCalls, tasks:renderTasks, memory:renderMemory }[view] || renderOverview)();
   }
   function renderOverview() {
     const openTasks = state.tasks.filter(x => !['done','cancelled'].includes(x.status)).length;
@@ -225,6 +225,193 @@
       if (shouldSpeak && reply) setTimeout(() => speakArabic(reply), 60);
     } catch (error) { toast(error.message, false); button.disabled = false; input.disabled = false; button.textContent = 'إرسال'; }
   }
+  async function voiceApi(op, init = {}) {
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+    const method = init.method || 'GET';
+    const response = await fetch(`/api/v6?route=voice_calls&op=${encodeURIComponent(op)}`, {
+      ...init,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+        ...(init.headers || {})
+      },
+      ...(init.body && typeof init.body !== 'string' ? { body: JSON.stringify(init.body) } : {})
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Voice API failed (${response.status})`);
+    return payload;
+  }
+
+  function voicePermissionLabel(permission) {
+    if (permission?.status === 'granted') return '<span class="pill voice-ok">موافقة مسجلة</span>';
+    if (permission?.status === 'revoked') return '<span class="pill voice-no">موقوفة</span>';
+    return '<span class="pill">لا توجد موافقة</span>';
+  }
+
+  async function renderCalls() {
+    $('#view').innerHTML = '<div class="panel empty">جارٍ تحميل مركز المكالمات…</div>';
+    try {
+      const [statusPayload, candidatesPayload, historyPayload] = await Promise.all([
+        voiceApi('status'),
+        voiceApi('candidates'),
+        voiceApi('history')
+      ]);
+      const status = statusPayload || {};
+      const candidates = [
+        ...(candidatesPayload.leads || []).map(x => ({ ...x, _type:'lead', _label:x.contact_name || x.name || x.company_name || 'Lead' })),
+        ...(candidatesPayload.customers || []).map(x => ({ ...x, _type:'customer', _label:x.full_name || 'عميل' }))
+      ];
+      state.voiceCandidates = candidates;
+      state.voiceCalls = historyPayload.calls || [];
+
+      const configured = Boolean(status.configured);
+      const rows = candidates.length ? candidates.map(item => {
+        const p = item.voice_permission;
+        const canCall = configured && p?.status === 'granted';
+        return `<tr>
+          <td><strong>${esc(item._label)}</strong>${item.company_name ? `<br><small>${esc(item.company_name)}</small>` : ''}</td>
+          <td class="ltr">${esc(item.phone || '—')}</td>
+          <td>${item._type === 'lead' ? 'Lead' : 'عميل'}</td>
+          <td>${voicePermissionLabel(p)}</td>
+          <td class="actions">
+            ${p?.status === 'granted'
+              ? `<button class="btn btn-sm btn-primary" data-voice-draft="${item._type}:${item.id}" ${canCall ? '' : 'disabled'}>طلب اتصال</button><button class="btn btn-sm" data-voice-revoke="${p.id}">إلغاء الموافقة</button>`
+              : `<button class="btn btn-sm" data-voice-consent="${item._type}:${item.id}">تسجيل موافقة العميل</button>`}
+          </td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="5" class="empty">لا توجد جهات اتصال برقم هاتف.</td></tr>';
+
+      const calls = state.voiceCalls.slice(0,20);
+      $('#view').innerHTML = `
+        <div class="voice-status-grid">
+          <div class="panel"><div class="panel-head"><div><h2>الوكيل الهاتفي</h2><span class="hint">Vapi + رقم هاتف خارجي + Tiqnora CRM</span></div><span class="status ${configured ? 'voice-ready' : ''}">${configured ? 'جاهز للاتصال' : 'بانتظار إعداد الهاتف'}</span></div>
+            <div class="voice-checks">
+              <span>${status.api_key ? '✓' : '○'} Vapi API</span>
+              <span>${status.assistant_id ? '✓' : '○'} Assistant</span>
+              <span>${status.phone_number_id ? '✓' : '○'} Phone Number</span>
+              <span>${status.webhook_secret ? '✓' : '○'} Webhook</span>
+            </div>
+            <p class="hint" style="margin:10px 0 0">المكالمات الصادرة تتطلب موافقة عميل مسجلة ثم اعتمادًا منفصلًا قبل بدء الاتصال. التسجيل الصوتي وحفظ النص معطلان افتراضيًا.</p>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:14px"><div class="panel-head"><div><h2>جهات الاتصال</h2><span class="hint">لن يظهر زر الاتصال الفعلي قبل تسجيل موافقة صريحة.</span></div></div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>الجهة</th><th>الهاتف</th><th>النوع</th><th>الموافقة</th><th>الإجراء</th></tr></thead><tbody>${rows}</tbody></table></div>
+        </div>
+        <div class="panel" style="margin-top:14px"><div class="panel-head"><div><h2>آخر المكالمات</h2><span class="hint">سجل تشغيلي مختصر بدون تخزين تسجيل صوتي أو نص المحادثة.</span></div></div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>الوقت</th><th>الرقم</th><th>الغرض</th><th>الحالة</th><th>المدة</th></tr></thead><tbody>
+            ${calls.length ? calls.map(call => `<tr><td>${new Date(call.created_at).toLocaleString('ar-SA')}</td><td class="ltr">${esc(call.destination_phone)}</td><td>${esc(call.purpose)}</td><td><span class="pill">${esc(call.status)}</span></td><td>${call.duration_seconds != null ? esc(call.duration_seconds) + ' ث' : '—'}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">لا توجد مكالمات بعد.</td></tr>'}
+          </tbody></table></div>
+        </div>`;
+
+      $('[data-voice-consent]').forEach(btn => btn.onclick = () => {
+        const [type,id] = btn.dataset.voiceConsent.split(':');
+        const item = state.voiceCandidates.find(x => x._type === type && x.id === id);
+        if (item) openVoiceConsentDialog(item);
+      });
+      $('[data-voice-revoke]').forEach(btn => btn.onclick = async () => {
+        if (!confirm('إلغاء موافقة الاتصال لهذا العميل؟')) return;
+        btn.disabled = true;
+        try {
+          await voiceApi('revoke_consent', { method:'POST', body:{ permission_id:btn.dataset.voiceRevoke } });
+          toast('تم إلغاء موافقة الاتصال');
+          renderCalls();
+        } catch (error) { toast(error.message, false); btn.disabled = false; }
+      });
+      $('[data-voice-draft]').forEach(btn => btn.onclick = async () => {
+        const [type,id] = btn.dataset.voiceDraft.split(':');
+        const item = state.voiceCandidates.find(x => x._type === type && x.id === id);
+        if (!item?.voice_permission?.id) return;
+        openVoiceCallDialog(item);
+      });
+    } catch (error) {
+      $('#view').innerHTML = `<div class="panel"><h2>تعذر تحميل المكالمات</h2><p class="hint">${esc(error.message)}</p></div>`;
+    }
+  }
+
+  function openVoiceConsentDialog(item) {
+    const dialog = $('#dialog'), body = $('#dialog-body');
+    body.innerHTML = `<h2>تسجيل موافقة صريحة على الاتصال</h2>
+      <p class="hint">سجّل الموافقة فقط إذا طلب العميل أو وافق بوضوح على أن تتصل به Tiqnora. لا تعتبر سياسة الخصوصية أو العقد العام موافقة اتصال تسويقي.</p>
+      <form id="voice-consent-form"><div class="form-row">
+        <div class="full"><label>العميل</label><input value="${esc(item._label)}" disabled></div>
+        <div class="full"><label>الهاتف</label><input name="phone" dir="ltr" value="${esc(item.phone || '')}" required></div>
+        <div class="full"><label>مصدر الموافقة</label><select name="source" required>
+          <option value="whatsapp_explicit">موافقة صريحة عبر واتساب</option>
+          <option value="web_form_explicit">نموذج مستقل للموافقة</option>
+          <option value="inbound_call_explicit">العميل طلب الاتصال في مكالمة واردة</option>
+          <option value="written_consent">موافقة مكتوبة مستقلة</option>
+          <option value="other_explicit">موافقة صريحة أخرى</option>
+        </select></div>
+        <div class="full"><label>ملاحظة إثبات (اختياري)</label><textarea name="evidence_note" rows="3" placeholder="مثال: وافق في واتساب بتاريخ ..."></textarea></div>
+        <div class="full"><label class="consent-check"><input name="confirmed" type="checkbox" required> أؤكد أن العميل وافق صراحة على الاتصال به.</label></div>
+      </div><div class="dialog-actions"><button type="button" class="btn" data-close>إلغاء</button><button class="btn btn-primary">حفظ الموافقة</button></div></form>`;
+    $('[data-close]', body).onclick = () => dialog.close();
+    $('#voice-consent-form').onsubmit = async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try {
+        await voiceApi('record_consent', {
+          method:'POST',
+          body:{
+            entity_type:item._type,
+            entity_id:item.id,
+            phone:String(fd.get('phone') || '').trim(),
+            source:fd.get('source'),
+            evidence_note:String(fd.get('evidence_note') || '').trim(),
+            confirmed:Boolean(fd.get('confirmed'))
+          }
+        });
+        dialog.close(); toast('تم تسجيل موافقة العميل'); renderCalls();
+      } catch (error) { toast(error.message, false); }
+    };
+    dialog.showModal();
+  }
+
+  function openVoiceCallDialog(item) {
+    const dialog = $('#dialog'), body = $('#dialog-body');
+    body.innerHTML = `<h2>إنشاء طلب اتصال بالوكيل الصوتي</h2>
+      <p class="hint">هذه الخطوة تنشئ طلبًا فقط. ستظهر خطوة اعتماد ثانية قبل بدء المكالمة فعليًا.</p>
+      <form id="voice-call-form"><div class="form-row">
+        <div class="full"><label>العميل</label><input value="${esc(item._label)}" disabled></div>
+        <div class="full"><label>الهاتف</label><input value="${esc(item.phone || '')}" dir="ltr" disabled></div>
+        <div class="full"><label>غرض الاتصال</label><select name="purpose">
+          <option value="followup">متابعة طلب/اهتمام سابق</option>
+          <option value="support">خدمة ودعم</option>
+          <option value="appointment">موعد</option>
+          <option value="sales">مبيعات بموافقة العميل</option>
+          <option value="other">أخرى</option>
+        </select></div>
+      </div><div class="dialog-actions"><button type="button" class="btn" data-close>إلغاء</button><button class="btn btn-primary">إنشاء طلب الاتصال</button></div></form>`;
+    $('[data-close]', body).onclick = () => dialog.close();
+    $('#voice-call-form').onsubmit = async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try {
+        const created = await voiceApi('create_action', {
+          method:'POST',
+          body:{ permission_id:item.voice_permission.id, purpose:fd.get('purpose') }
+        });
+        const action = created.action;
+        body.innerHTML = `<h2>اعتماد المكالمة</h2><p>سيبدأ الوكيل الصوتي اتصالًا فعليًا إلى <bdi dir="ltr">${esc(item.phone)}</bdi> بعد الضغط على الزر التالي.</p>
+          <p class="hint">لن يتم تسجيل الصوت أو تخزين نص المحادثة افتراضيًا.</p>
+          <div class="dialog-actions"><button type="button" class="btn" data-close>إلغاء</button><button class="btn btn-primary" id="voice-approve-call">اعتماد وبدء الاتصال</button></div>`;
+        $('[data-close]', body).onclick = () => dialog.close();
+        $('#voice-approve-call').onclick = async () => {
+          const btn = $('#voice-approve-call'); btn.disabled = true; btn.textContent = 'جاري بدء الاتصال…';
+          try {
+            const result = await voiceApi('approve_and_call', { method:'POST', body:{ action_id:action.id } });
+            dialog.close();
+            toast(result.action?.result?.call_id ? 'بدأ اتصال الوكيل الصوتي' : 'تم اعتماد طلب الاتصال');
+            renderCalls();
+          } catch (error) { toast(error.message, false); btn.disabled = false; btn.textContent = 'اعتماد وبدء الاتصال'; }
+        };
+      } catch (error) { toast(error.message, false); }
+    };
+    dialog.showModal();
+  }
+
   function renderTasks() {
     $('#view').innerHTML = `<div class="panel"><div class="panel-head"><div><h2>مهام الموظفين</h2><span class="hint">توزيع الأولويات ومتابعة التنفيذ</span></div><button class="btn btn-primary" id="new-task">+ مهمة جديدة</button></div><div class="table-wrap"><table class="table"><thead><tr><th>المهمة</th><th>الموظف</th><th>الأولوية</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>${state.tasks.length ? state.tasks.map(taskRow).join('') : '<tr><td colspan="5" class="empty">لا توجد مهام بعد</td></tr>'}</tbody></table></div></div>`;
     $('#new-task').onclick = () => openTaskDialog(selectedAgent?.id);
