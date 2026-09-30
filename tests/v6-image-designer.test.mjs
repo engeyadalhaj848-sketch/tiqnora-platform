@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeImageSize } from '../lib/ai/image-provider.js';
+
 import {
   DESIGN_FORMATS,
   VISUAL_GUIDELINES,
@@ -51,7 +53,15 @@ describe('image-designer core', () => {
     assert.match(art.prompt, /do not render any text/i);
     assert.ok(art.overlay.headline_ar);
     assert.ok(art.overlay.cta_ar);
-    assert.equal(art.prompt_version, 'tiqnora-art-v3');
+    assert.equal(art.prompt_version, 'tiqnora-art-v4');
+    assert.match(art.prompt, /Headline/);
+    assert.match(art.prompt, /zero readable text/i);
+  });
+
+  it('normalizes story generation to a supported portrait canvas', () => {
+    const size = normalizeImageSize(1080, 1920);
+    assert.equal(size.openai, '1024x1536');
+    assert.equal(size.label, '9:16');
   });
 
   it('quality gate fails without image bytes', () => {
