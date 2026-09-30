@@ -7,7 +7,8 @@ import {
   runQualityGate,
   isImageDesignRequest,
   buildDesignReviewCaption,
-  designReviewKeyboard
+  designReviewKeyboard,
+  wrapOverlayText
 } from '../lib/v6/image-designer.js';
 
 describe('image-designer core', () => {
@@ -50,7 +51,7 @@ describe('image-designer core', () => {
     assert.match(art.prompt, /do not render any text/i);
     assert.ok(art.overlay.headline_ar);
     assert.ok(art.overlay.cta_ar);
-    assert.equal(art.prompt_version, 'tiqnora-art-v2');
+    assert.equal(art.prompt_version, 'tiqnora-art-v3');
   });
 
   it('quality gate fails without image bytes', () => {
@@ -77,5 +78,21 @@ describe('image-designer core', () => {
     assert.match(caption, /pending_approval/);
     const kb = designReviewKeyboard('img_test');
     assert.equal(kb.inline_keyboard[0].length, 3);
+    assert.match(kb.inline_keyboard[0][0].callback_data, /^design_ok:/);
+  });
+
+  it('wraps long Arabic headlines', () => {
+    const lines = wrapOverlayText('حوّل حضورك الرقمي إلى منظومة تعمل لأجلك', 20, 3);
+    assert.ok(lines.length >= 2);
+    assert.ok(lines.every((l) => l.length <= 24));
+  });
+
+  it('image-designer chat hook is not under api/', async () => {
+    const { existsSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { join } = await import('node:path');
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    assert.equal(existsSync(join(root, 'api/ai-workforce/image-designer-chat-hook.js')), false);
+    assert.equal(existsSync(join(root, 'lib/v6/image-designer-chat-hook.js')), true);
   });
 });
