@@ -180,6 +180,17 @@ button:hover { filter: brightness(1.1); }
   background: rgba(5, 17, 31, 0.8); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
 }
 .chat-form textarea:focus { outline: 2px solid rgba(0, 229, 255, 0.3); }
+.voice-mic { min-width: 104px; white-space: nowrap; }
+.voice-mic[data-listening="true"] {
+  border-color: rgba(0, 229, 255, 0.55);
+  box-shadow: 0 0 0 4px rgba(0, 229, 255, 0.08);
+  animation: voicePulse 1.1s ease-in-out infinite alternate;
+}
+.voice-stop { white-space: nowrap; }
+@keyframes voicePulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.03); }
+}
 
 .table-wrap { overflow: auto; }
 .table { width: 100%; border-collapse: collapse; }
@@ -236,6 +247,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(0, 229, 255,
   .agent-actions { flex-direction: column; }
   .agent-picker { grid-template-columns: 1fr 1fr; }
   .message { max-width: 92%; }
+  .chat-form { flex-wrap: wrap; }
+  .chat-form textarea { flex-basis: 100%; }
+  .voice-mic, .voice-stop, .chat-form #send { flex: 1; }
   .form-row { grid-template-columns: 1fr; }
   .top-actions .back-label { display: none; }
 }
