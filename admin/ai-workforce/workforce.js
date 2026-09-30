@@ -5,10 +5,12 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const app = $('#workforce-app');
   let db, me, org, agents = [], selectedAgent = null;
+  let activeRecognition = null;
   const state = { counts: {}, conversations: [], tasks: [], memory: [] };
   const labels = {
     manager: ['إدارة الوكلاء', 'MG', '#8bc6ff'],
     assistant: ['مساعد تنفيذي', 'AI', '#6de8dc'],
+    'voice-agent': ['وكيل صوتي', 'VO', '#00d2ff'],
     marketing: ['تسويق ونمو', 'MA', '#6de8dc'],
     sales: ['مبيعات', 'SA', '#efc875'],
     ads: ['إعلانات', 'AD', '#ff9d76'],
@@ -26,6 +28,104 @@
   function toast(message, ok = true) {
     const el = $('#toast'); el.textContent = message; el.style.borderColor = ok ? 'var(--accent)' : 'var(--danger)';
     el.classList.add('show'); clearTimeout(el._timer); el._timer = setTimeout(() => el.classList.remove('show'), 3200);
+  }
+  function isVoiceAgent() {
+    return String(selectedAgent?.slug || '') === 'voice-agent';
+  }
+  function recognitionCtor() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  }
+  function stopVoiceOutput() {
+    try { window.speechSynthesis?.cancel(); } catch {}
+  }
+  function stopVoiceSession() {
+    if (activeRecognition) {
+      try { activeRecognition.abort(); } catch {}
+      activeRecognition = null;
+    }
+    stopVoiceOutput();
+  }
+  function speakArabic(value) {
+    if (!isVoiceAgent() || !('speechSynthesis' in window)) return;
+    const text = String(value || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/[\*_#`>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 4000);
+    if (!text) return;
+    stopVoiceOutput();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ar-SA';
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    const voices = window.speechSynthesis.getVoices?.() || [];
+    utterance.voice = voices.find(v => /^ar[-_]?SA$/i.test(v.lang || ''))
+      || voices.find(v => /^ar/i.test(v.lang || ''))
+      || null;
+    window.speechSynthesis.speak(utterance);
+  }
+  function startVoiceInput() {
+    if (!isVoiceAgent()) return;
+    const Ctor = recognitionCtor();
+    const input = $('#chat-input');
+    const button = $('#voice-mic');
+    if (!Ctor || !input || !button) {
+      toast('التعرّف الصوتي غير مدعوم في هذا المتصفح. استخدم Chrome أو Edge محدثًا.', false);
+      return;
+    }
+    if (activeRecognition) {
+      try { activeRecognition.stop(); } catch {}
+      return;
+    }
+    stopVoiceOutput();
+    const recognition = new Ctor();
+    activeRecognition = recognition;
+    recognition.lang = 'ar-SA';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    let finalText = '';
+    const originalPlaceholder = input.placeholder;
+    const reset = () => {
+      activeRecognition = null;
+      if (button) {
+        button.dataset.listening = 'false';
+        button.textContent = '🎙 تحدث';
+        button.setAttribute('aria-pressed', 'false');
+      }
+      if (input) input.placeholder = originalPlaceholder;
+    };
+    recognition.onstart = () => {
+      button.dataset.listening = 'true';
+      button.textContent = '⏹ إيقاف';
+      button.setAttribute('aria-pressed', 'true');
+      input.placeholder = 'أسمعك الآن…';
+    };
+    recognition.onresult = event => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i]?.[0]?.transcript || '';
+        if (event.results[i].isFinal) finalText += transcript + ' ';
+        else interim += transcript;
+      }
+      input.value = (finalText + interim).trim();
+    };
+    recognition.onerror = event => {
+      if (!['aborted', 'no-speech'].includes(event.error)) {
+        const msg = event.error === 'not-allowed'
+          ? 'اسمح للمتصفح باستخدام الميكروفون ثم جرّب مرة أخرى.'
+          : 'تعذر التقاط الصوت: ' + event.error;
+        toast(msg, false);
+      }
+    };
+    recognition.onend = () => {
+      const shouldSend = Boolean(finalText.trim() && input.value.trim());
+      reset();
+      if (shouldSend) $('#chat-form')?.requestSubmit();
+    };
+    try { recognition.start(); }
+    catch (error) { reset(); toast(error.message || 'تعذر تشغيل الميكروفون', false); }
   }
   function showError(title, message, action = '') {
     app.className = 'boot-screen';
@@ -73,6 +173,7 @@
     $$('.tab').forEach(btn => btn.onclick = () => switchView(btn.dataset.view));
   }
   function switchView(view, agentId) {
+    if (view !== 'chat') stopVoiceSession();
     if (agentId) selectedAgent = agents.find(a => a.id === agentId) || selectedAgent;
     $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.view === view));
     ({ overview:renderOverview, chat:renderChat, tasks:renderTasks, memory:renderMemory }[view] || renderOverview)();
@@ -95,12 +196,16 @@
   function renderChat() {
     if (!selectedAgent) return $('#view').innerHTML = '<div class="panel empty">لا يوجد موظفون. نفّذ migration قاعدة البيانات.</div>';
     const history = state.conversations.filter(x => x.agent_id === selectedAgent.id).sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
-    $('#view').innerHTML = `<div class="chat-layout"><aside class="panel agent-picker">${pickerHtml()}</aside><section class="panel chat-panel"><div class="panel-head"><div><h2>${esc(selectedAgent.name_ar || selectedAgent.name)}</h2><span class="hint">${esc(selectedAgent.provider || '—')} · ${esc(selectedAgent.model || '—')}</span></div><span class="status">جاهز</span></div><div class="messages" id="messages">${history.length ? history.map(messagePair).join('') : '<div class="empty">ابدأ بإرسال أول توجيه لهذا الموظف.</div>'}</div><form class="chat-form" id="chat-form"><textarea id="chat-input" maxlength="20000" required placeholder="اكتب توجيهًا واضحًا… (Enter للإرسال، Shift+Enter لسطر جديد)"></textarea><button class="btn btn-primary" id="send" type="submit">إرسال</button></form></section></div>`;
-    $$('[data-pick]').forEach(b => b.onclick = () => { selectedAgent = agents.find(a => a.id === b.dataset.pick); renderChat(); });
+    const voiceAgent = isVoiceAgent();
+    const voiceSupported = Boolean(recognitionCtor());
+    $('#view').innerHTML = `<div class="chat-layout"><aside class="panel agent-picker">${pickerHtml()}</aside><section class="panel chat-panel"><div class="panel-head"><div><h2>${esc(selectedAgent.name_ar || selectedAgent.name)}</h2><span class="hint">${esc(selectedAgent.provider || '—')} · ${esc(selectedAgent.model || '—')}${voiceAgent ? ' · ar-SA' : ''}</span></div><span class="status">${voiceAgent ? '🎙 صوتي جاهز' : 'جاهز'}</span></div><div class="messages" id="messages">${history.length ? history.map(messagePair).join('') : '<div class="empty">ابدأ بإرسال أول توجيه لهذا الموظف.</div>'}</div><form class="chat-form" id="chat-form"><textarea id="chat-input" maxlength="20000" required placeholder="${voiceAgent ? 'اضغط «تحدث» وابدأ الكلام، أو اكتب رسالتك…' : 'اكتب توجيهًا واضحًا… (Enter للإرسال، Shift+Enter لسطر جديد)'}"></textarea>${voiceAgent ? `<button class="btn voice-mic" id="voice-mic" type="button" aria-pressed="false" ${voiceSupported ? '' : 'disabled'}>${voiceSupported ? '🎙 تحدث' : 'الميكروفون غير مدعوم'}</button><button class="btn btn-sm voice-stop" id="voice-stop" type="button">🔇 إيقاف الصوت</button>` : ''}<button class="btn btn-primary" id="send" type="submit">إرسال</button></form></section></div>`;
+    $('[data-pick]').forEach(b => b.onclick = () => { stopVoiceSession(); selectedAgent = agents.find(a => a.id === b.dataset.pick); renderChat(); });
     $('#chat-form').onsubmit = sendMessage;
     $('#chat-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#chat-form').requestSubmit(); } };
+    if ($('#voice-mic')) $('#voice-mic').onclick = startVoiceInput;
+    if ($('#voice-stop')) $('#voice-stop').onclick = stopVoiceOutput;
     const messages = $('#messages'); messages.scrollTop = messages.scrollHeight;
-    $$('[data-memory-response]').forEach(b => b.onclick = () => openMemoryDialog(b.dataset.memoryResponse));
+    $('[data-memory-response]').forEach(b => b.onclick = () => openMemoryDialog(b.dataset.memoryResponse));
   }
   function messagePair(row) {
     const time = new Date(row.created_at).toLocaleString('ar-SA', { dateStyle:'short', timeStyle:'short' });
@@ -114,7 +219,10 @@
       const response = await fetch('/api/ai-workforce/chat', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${session.access_token}` }, body:JSON.stringify({ agentId:selectedAgent.id, message }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'تعذر الحصول على رد');
+      const reply = payload.conversation?.response || '';
+      const shouldSpeak = isVoiceAgent();
       state.conversations.unshift(payload.conversation); input.value = ''; renderChat();
+      if (shouldSpeak && reply) setTimeout(() => speakArabic(reply), 60);
     } catch (error) { toast(error.message, false); button.disabled = false; input.disabled = false; button.textContent = 'إرسال'; }
   }
   function renderTasks() {
