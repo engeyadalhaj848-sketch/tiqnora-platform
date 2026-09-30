@@ -88,7 +88,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
    LOGIN / BOOT
    ============================================================ */
 function renderLogin(msg = '') {
-  if (!window.TiqnoraDB?.isConfigured) {
+  if (!window.TiqnoraDB?.isEnabled?.()) {
     $('#app-root').innerHTML = `<div class="login-wrap"><div class="login-card">
       <img src="assets/tiqnora-logo.png" alt="Tiqnora"><h1>لوحة تحكم Tiqnora AI</h1>
       <p style="color:var(--muted);font-size:.85rem;line-height:1.8">لوحة التحكم تحتاج ربط Supabase.<br>افتح ملف <bdi dir="ltr"><code>js/config.js</code></bdi> وأضف <bdi dir="ltr"><code>supabaseUrl</code></bdi> و<bdi dir="ltr"><code>supabaseAnonKey</code></bdi> من إعدادات مشروعك في Supabase، ثم نفّذ ملفي <bdi dir="ltr"><code>supabase/schema.sql</code></bdi> و<bdi dir="ltr"><code>supabase/seed.sql</code></bdi> من <bdi dir="ltr"><code>SQL Editor</code></bdi>.</p>
@@ -139,7 +139,7 @@ function renderLogin(msg = '') {
 }
 
 async function boot() {
-  const ready = await window.TiqnoraDB.ready();
+  const ready = await window.TiqnoraDB.ready;
   db = window.TiqnoraDB.raw;
   if (ready && !db) {
     await new Promise(resolve => {
@@ -4360,5 +4360,17 @@ VIEWS.logs = async v => {
 /* ============================================================
    START
    ============================================================ */
-window.addEventListener('DOMContentLoaded', boot);
+window.addEventListener('DOMContentLoaded', () => {
+  boot().catch(err => {
+    console.error('[tiqnora] admin boot failed:', err);
+    const root = document.querySelector('#app-root');
+    if (root) {
+      root.innerHTML = `<div class="login-wrap"><div class="login-card" style="text-align:center">
+        <h1>تعذر تحميل لوحة التحكم</h1>
+        <p style="color:var(--muted);line-height:1.8">حدث خطأ أثناء تهيئة لوحة الإدارة. أعد المحاولة، وإذا استمرت المشكلة افتح الصفحة بتحديث كامل.</p>
+        <button class="btn-primary" style="width:100%" onclick="location.reload()">إعادة المحاولة</button>
+      </div></div>`;
+    }
+  });
+});
 })();
