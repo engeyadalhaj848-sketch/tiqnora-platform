@@ -12,7 +12,7 @@
   <header class="store-header">
     <div class="container store-nav">
       <a class="brand" href="index.html"><img src="assets/tiqnora-logo.png" alt="Tiqnora AI" /><span>Tiqnora AI</span></a>
-      <nav class="store-links"><a href="shop.html">المتجر</a><a href="track.html">تتبع الطلب</a></nav>
+      <nav class="store-links"><a href="shop.html">المتجر</a><a href="cart.html">السلة</a><a href="track.html">تتبع الطلب</a></nav>
     </div>
   </header>
   <main class="store-main"><div class="container" style="max-width:560px">
@@ -25,6 +25,8 @@
     </p>
     <p style="margin-top:16px"><a href="shop.html">العودة للمتجر</a> · <a href="track.html" id="track-link">تتبع الطلب</a></p>
   </div></main>
+  <script src="script.js" defer></script>
+  <script src="js/analytics.js" defer></script>
   <script>
   document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(location.search);
@@ -36,6 +38,22 @@
       box.innerHTML = '<p>لا يوجد رقم طلب. إن أتممت الدفع، تحقق من بريدك أو صفحة التتبع.</p>';
       return;
     }
+
+    function trackPurchaseOnce(d) {
+      const key = 'tiqnora-purchase-tracked-' + String(d.order_number || order);
+      try {
+        if (localStorage.getItem(key) === '1') return;
+        localStorage.setItem(key, '1');
+      } catch (_) {}
+      try {
+        if (window.TiqnoraStore?.saveCart) window.TiqnoraStore.saveCart([]);
+        else localStorage.setItem('tiqnora-store-cart-v1', '[]');
+      } catch (_) {}
+      try {
+        window.TiqnoraAnalytics?.purchase?.(d.order_number, d.total, []);
+      } catch (_) {}
+    }
+
     async function poll() {
       try {
         const r = await fetch('/api/payments/order-status?order=' + encodeURIComponent(order));
@@ -45,6 +63,7 @@
           return false;
         }
         if (d.paid) {
+          trackPurchaseOnce(d);
           box.innerHTML = `<p><strong>تم تأكيد الدفع</strong></p>
             <p>رقم الطلب: <b dir="ltr">${d.order_number}</b></p>
             <p>المبلغ: ${d.total} ${d.currency || 'SAR'}</p>
