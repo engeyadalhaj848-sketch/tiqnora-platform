@@ -177,19 +177,33 @@ async function boot() {
    SHELL + ROUTING
    ============================================================ */
 const NAV = [
-  { group: 'عام' },
+  { group: 'الرئيسية' },
   { id: 'dashboard', ic: '◈', label: 'نظرة عامة' },
   { id: 'analytics', ic: '▦', label: 'التحليلات' },
-  { id: 'growth', ic: '↗', label: 'النمو والسوق' },
-  { id: 'sales-v6', ic: '⌁', label: 'مركز المبيعات V6' },
-  { id: 'blog', ic: '✎', label: 'المدونة SEO' },
   { id: 'notifications', ic: '◉', label: 'الإشعارات' },
+
+  { group: 'المبيعات والعملاء' },
+  { id: 'sales-v6', ic: '⌁', label: 'مركز المبيعات V6' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
   { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
   { id: 'customers', ic: '◉', label: 'العملاء' },
-  { id: 'saas', ic: '◈', label: 'اشتراكات SaaS' },
   { id: 'service-requests', ic: '✉', label: 'طلبات الخدمات' },
-  { group: 'الكتالوج' },
+  { id: 'saas', ic: '◈', label: 'اشتراكات SaaS' },
+
+  { group: 'التسويق والمحتوى' },
+  { id: 'growth', ic: '↗', label: 'النمو والسوق' },
+  { id: 'blog', ic: '✎', label: 'المدونة SEO' },
+  { id: 'cms', ic: '✎', label: 'المحتوى والإعدادات' },
+  { id: 'pages', ic: '☰', label: 'الصفحات' },
+  { id: 'media', ic: '▣', label: 'مكتبة الصور' },
+  { id: 'seo', ic: '⌕', label: 'SEO وGEO' },
+  { id: 'social-inbox', ic: '◎', label: 'صندوق التواصل الموحد' },
+
+  { group: 'الذكاء الاصطناعي' },
+  { id: 'workforce', ic: '✣', label: 'فريق الموظفين بالذكاء الاصطناعي' },
+  { id: 'ai', ic: '✺', label: 'وحدات الذكاء الاصطناعي' },
+
+  { group: 'المتجر والتجارة' },
   { id: 'services', ic: '✦', label: 'الخدمات' },
   { id: 'categories', ic: '▤', label: 'الأقسام' },
   { id: 'products', ic: '▣', label: 'المنتجات' },
@@ -197,19 +211,89 @@ const NAV = [
   { id: 'brands', ic: '⬢', label: 'الماركات' },
   { id: 'packages', ic: '◈', label: 'الباقات والأسعار' },
   { id: 'coupons', ic: '%', label: 'كوبونات الخصم' },
-  { group: 'الموقع' },
-  { id: 'cms', ic: '✎', label: 'المحتوى والإعدادات' },
-  { id: 'pages', ic: '☰', label: 'الصفحات' },
-  { id: 'media', ic: '▣', label: 'مكتبة الصور' },
-  { id: 'seo', ic: '⌕', label: 'SEO وGEO' },
-  { group: 'الأنظمة' },
-  { id: 'workforce', ic: '✣', label: 'فريق الموظفين بالذكاء الاصطناعي' },
-  { id: 'social-inbox', ic: '◎', label: 'صندوق التواصل الموحد' },
   { id: 'shipping', ic: '⇄', label: 'الشحن والتتبع' },
-  { id: 'ai', ic: '✺', label: 'وحدات الذكاء الاصطناعي' },
+
+  { group: 'النظام' },
   { id: 'users', ic: '◉', label: 'المستخدمون والصلاحيات' },
   { id: 'logs', ic: '≡', label: 'سجل النشاط' },
-];
+]
+
+function setupAdminAccordion() {
+  const side = $('#admin-side');
+  const logoutWrap = $('#logout')?.parentElement;
+  const brand = side?.querySelector('.side-brand');
+  if (!side || !logoutWrap || !brand || side.querySelector('.side-section')) return;
+
+  const nodes = Array.from(side.children).filter(el => el !== brand && el !== logoutWrap);
+  let section = null;
+
+  nodes.forEach(node => {
+    if (node.classList.contains('side-group')) {
+      section = document.createElement('div');
+      section.className = 'side-section';
+      section.dataset.section = node.textContent.trim();
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'side-section-toggle';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.innerHTML = '<span>' + esc(node.textContent.trim()) + '</span><span class="side-chevron">⌄</span>';
+
+      const sub = document.createElement('div');
+      sub.className = 'side-subnav';
+      const inner = document.createElement('div');
+      inner.className = 'side-subnav-inner';
+      sub.appendChild(inner);
+      section.append(toggle, sub);
+      side.insertBefore(section, logoutWrap);
+      node.remove();
+
+      toggle.addEventListener('click', () => {
+        const willOpen = !section.classList.contains('open');
+        side.querySelectorAll('.side-section.open').forEach(s => {
+          s.classList.remove('open');
+          s.querySelector('.side-section-toggle')?.setAttribute('aria-expanded', 'false');
+        });
+        if (willOpen) {
+          section.classList.add('open');
+          toggle.setAttribute('aria-expanded', 'true');
+          try { localStorage.setItem('tiqnora-admin-open-section', section.dataset.section); } catch {}
+        }
+      });
+    } else if (node.classList.contains('side-link') && section) {
+      section.querySelector('.side-subnav-inner').appendChild(node);
+    }
+  });
+
+  const activeId = (location.hash || '#dashboard').slice(1);
+  let saved = null;
+  try { saved = localStorage.getItem('tiqnora-admin-open-section'); } catch {}
+  const sections = Array.from(side.querySelectorAll('.side-section'));
+  const target = sections.find(s => s.querySelector('[data-nav="' + activeId + '"]'))
+    || sections.find(s => s.dataset.section === saved)
+    || sections[0];
+  if (target) {
+    target.classList.add('open');
+    target.querySelector('.side-section-toggle')?.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function openAdminSectionForNav(id) {
+  const side = $('#admin-side');
+  const link = side?.querySelector('[data-nav="' + id + '"]');
+  const section = link?.closest('.side-section');
+  if (!section) return;
+
+  side.querySelectorAll('.side-section.open').forEach(s => {
+    if (s !== section) {
+      s.classList.remove('open');
+      s.querySelector('.side-section-toggle')?.setAttribute('aria-expanded', 'false');
+    }
+  });
+  section.classList.add('open');
+  section.querySelector('.side-section-toggle')?.setAttribute('aria-expanded', 'true');
+  try { localStorage.setItem('tiqnora-admin-open-section', section.dataset.section); } catch {}
+}
 
 function renderShell() {
   $('#app-root').innerHTML = `
@@ -246,13 +330,15 @@ function renderShell() {
   $('#logout').onclick = async () => { await db.auth.signOut(); location.reload(); };
   $('#burger').onclick = () => { $('#admin-side').classList.toggle('open'); $('#side-bd').style.display = $('#admin-side').classList.contains('open') ? 'block' : 'none'; };
   $('#side-bd').onclick = () => { $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none'; };
+  setupAdminAccordion();
   window.addEventListener('hashchange', () => route(location.hash));
   setupAdminNotifications();
 }
 function route(hash) {
   const id = (hash || '#dashboard').slice(1);
   const item = NAV.find(n => n.id === id) || NAV[1];
-  $$('.side-link').forEach(a => a.classList.toggle('active', a.dataset.nav === item.id));
+  $('.side-link').forEach(a => a.classList.toggle('active', a.dataset.nav === item.id));
+  openAdminSectionForNav(item.id);
   $('#page-title').textContent = item.label;
   $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none';
   const fn = VIEWS[item.id] || VIEWS.dashboard;
