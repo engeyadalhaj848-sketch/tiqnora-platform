@@ -161,3 +161,25 @@ test('migration contains persistence for state, RAG, evals, learning and A2A', (
   assert.ok(sql.includes('search_agent_knowledge'));
   assert.ok(sql.includes("status in ('proposed','approved','rejected','applied')"));
 });
+
+
+test('Telegram collaboration room uses standardized A2A and multi-agent runtime', () => {
+  const src = readFileSync(new URL('../lib/telegram-agent-room.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('createA2AEnvelope'));
+  assert.ok(src.includes('planMultiAgentDelegation'));
+  assert.ok(src.includes('runAgentHarness'));
+  assert.ok(src.includes('ai_agent_messages'));
+  assert.ok(src.includes('ai_agent_evals'));
+  assert.ok(src.includes('buildSkillsPrompt'));
+  assert.ok(src.includes('allowedMcpTools'));
+});
+
+test('workforce chat loads state, RAG, skills, harness and eval persistence', () => {
+  const src = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('ai_agent_state'));
+  assert.ok(src.includes('ai_knowledge_chunks'));
+  assert.ok(src.includes('orchestrationContext'));
+  assert.ok(src.includes('runAgentHarness'));
+  assert.ok(src.includes('ai_agent_evals'));
+  assert.ok(src.includes('ai_agent_learning_events'));
+});
