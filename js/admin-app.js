@@ -139,7 +139,7 @@ function renderLogin(msg = '') {
 }
 
 async function boot() {
-  const ready = await window.TiqnoraDB.ready();
+  const ready = await window.TiqnoraDB.ready;
   db = window.TiqnoraDB.raw;
   if (ready && !db) {
     await new Promise(resolve => {
@@ -4454,7 +4454,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (root) {
       root.innerHTML = `<div class="login-wrap"><div class="login-card" style="text-align:center">
         <h1>تعذر تحميل لوحة التحكم</h1>
-        <p style="color:var(--muted);line-height:1.8">حدث خطأ أثناء تهيئة لوحة الإدارة. أعد المحاولة، وإذا استمرت المشكلة افتح الصفحة بتحديث كامل.</p>
+        <p style="color:var(--muted);line-height:1.8">حدث خطأ أثناء تهيئة لوحة الإدارة. أعد المحاولة، وإذا استمرت المشكلة افتح الصفحة بتحديث كامل.</p><p id="admin-boot-code" style="direction:ltr;font-size:.72rem;color:var(--muted);opacity:.75">${esc(err?.message || err || "unknown")}</p>
         <button class="btn-primary" style="width:100%" onclick="location.reload()">إعادة المحاولة</button>
       </div></div>`;
     }
