@@ -418,6 +418,30 @@ export default async function handler(req, res) {
       message, response: result.text, provider: result.provider, model: result.model, status: 'completed'
     });
 
+    await supabaseOptional('/rest/v1/ai_agent_state?on_conflict=agent_id', token, {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        agent_id: agent.id,
+        organization_id: agent.organization_id,
+        version: Number(runtime.state.version || 1) + 1,
+        mode: 'ready',
+        current_goal: String(message).slice(0, 500),
+        active_thread: conversation?.id || runtime.state.active_thread || null,
+        last_outcome: runtimeEvaluation?.pass === false ? 'completed_with_eval_feedback' : 'completed',
+        counters: {
+          ...(runtimeState.counters || {}),
+          conversations: Number(runtimeState.counters?.conversations || 0) + 1
+        },
+        state: {
+          ...(runtimeState || {}),
+          last_message_at: new Date().toISOString(),
+          last_eval_score: runtimeEvaluation?.score ?? null,
+          last_rag_chunks: knowledge.map(item => item.id)
+        }
+      })
+    }, []);
+
     if (runtimeEvaluation) {
       const evalRows = await supabaseOptional('/rest/v1/ai_agent_evals?select=id', token, {
         method: 'POST',
