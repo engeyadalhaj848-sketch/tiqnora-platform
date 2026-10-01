@@ -139,7 +139,7 @@ function renderLogin(msg = '') {
 }
 
 async function boot() {
-  const ready = await window.TiqnoraDB.ready;
+  const ready = await window.TiqnoraDB.ready();
   db = window.TiqnoraDB.raw;
   if (ready && !db) {
     await new Promise(resolve => {
@@ -248,16 +248,17 @@ function setupAdminAccordion() {
       side.insertBefore(section, logoutWrap);
       node.remove();
 
+      const currentSection = section;
       toggle.addEventListener('click', () => {
-        const willOpen = !section.classList.contains('open');
+        const willOpen = !currentSection.classList.contains('open');
         side.querySelectorAll('.side-section.open').forEach(s => {
           s.classList.remove('open');
           s.querySelector('.side-section-toggle')?.setAttribute('aria-expanded', 'false');
         });
         if (willOpen) {
-          section.classList.add('open');
+          currentSection.classList.add('open');
           toggle.setAttribute('aria-expanded', 'true');
-          try { localStorage.setItem('tiqnora-admin-open-section', section.dataset.section); } catch {}
+          try { localStorage.setItem('tiqnora-admin-open-section', currentSection.dataset.section); } catch {}
         }
       });
     } else if (node.classList.contains('side-link') && section) {
@@ -337,7 +338,7 @@ function renderShell() {
 function route(hash) {
   const id = (hash || '#dashboard').slice(1);
   const item = NAV.find(n => n.id === id) || NAV[1];
-  $('.side-link').forEach(a => a.classList.toggle('active', a.dataset.nav === item.id));
+  $$('.side-link').forEach(a => a.classList.toggle('active', a.dataset.nav === item.id));
   openAdminSectionForNav(item.id);
   $('#page-title').textContent = item.label;
   $('#admin-side').classList.remove('open'); $('#side-bd').style.display = 'none';
