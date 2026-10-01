@@ -1,3 +1,12 @@
+import {
+  orchestrationContext,
+  formatStateContext,
+  retrieveRagCandidates,
+  runAgentHarness,
+  evaluateAgentResponse,
+  buildLearningEvent
+} from '../../lib/v6/agent-runtime.js';
+
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
 
@@ -31,6 +40,16 @@ async function supabase(path, token, options = {}) {
     throw error;
   }
   return data;
+}
+
+async function supabaseOptional(path, token, options = {}, fallback = []) {
+  try {
+    return await supabase(path, token, options);
+  } catch (error) {
+    // Runtime v1 is additive. Keep workforce chat available during migration rollout.
+    if ([400, 404].includes(Number(error?.status || 0))) return fallback;
+    throw error;
+  }
 }
 
 function memoryContext(rows) {
@@ -302,17 +321,54 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [memory, recent, tasks] = await Promise.all([
+    const [memory, recent, tasks, stateRows, knowledgeRows, runtimeAgents] = await Promise.all([
       supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
-      supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token)
+      supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
+      supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
+      supabaseOptional(`/rest/v1/ai_knowledge_chunks?organization_id=eq.${encodeURIComponent(agent.organization_id)}&select=id,document_id,content,metadata&order=created_at.desc&limit=120`, token, {}, []),
+      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&select=id,slug,name,name_ar,description`, token)
     ]);
+    const stateRow = stateRows?.[0] || {};
+    const runtimeState = {
+      ...(stateRow.state || {}),
+      version: stateRow.version || stateRow.state?.version || 1,
+      mode: stateRow.mode || stateRow.state?.mode || 'ready',
+      current_goal: stateRow.current_goal || stateRow.state?.current_goal || null,
+      active_thread: stateRow.active_thread || stateRow.state?.active_thread || null,
+      last_outcome: stateRow.last_outcome || stateRow.state?.last_outcome || null,
+      counters: stateRow.counters || stateRow.state?.counters || {}
+    };
+    const knowledge = retrieveRagCandidates(message, (knowledgeRows || []).map(row => ({
+      ...row,
+      title: row.metadata?.title || row.metadata?.document_title || 'Tiqnora Knowledge',
+      source_uri: row.metadata?.source_uri || null
+    })), { limit: 8 });
+    const runtime = orchestrationContext({
+      agent,
+      message,
+      agents: runtimeAgents || [],
+      state: runtimeState,
+      memory,
+      tasks,
+      recent,
+      knowledge
+    });
+
     const history = (recent || []).reverse().flatMap(row => [
       { role: 'user', content: row.message },
       ...(row.response ? [{ role: 'assistant', content: row.response }] : [])
     ]);
+    const runtimePrompt = [
+      formatStateContext(runtime.state),
+      runtime.skills_prompt,
+      runtime.rag_prompt,
+      `Allowed MCP/tool scopes for this agent: ${runtime.tools.join(', ')}. Never call or claim tools outside these scopes.`,
+      runtime.delegation ? `Manager orchestration plan (delegate through Tiqnora A2A/multi-agent runtime where available):\n${JSON.stringify(runtime.delegation)}` : ''
+    ].filter(Boolean).join('\n\n');
+
     const messages = [
-      { role: 'system', content: expertSystemPrompt(agent, memory, tasks) },
+      { role: 'system', content: [expertSystemPrompt(agent, memory, tasks), runtimePrompt].filter(Boolean).join('\n\n') },
       ...history,
       { role: 'user', content: message }
     ];
@@ -327,15 +383,118 @@ export default async function handler(req, res) {
         console.error('image-designer-hook', hookErr?.message || hookErr);
       }
     }
+    let runtimeEvaluation = null;
+    let learningEvent = null;
+    let harnessMeta = null;
+
     if (!result) {
-      result = await callPreferredProvider(agent, messages);
+      const harnessRun = await runAgentHarness({
+        agent,
+        message,
+        knowledge,
+        invoke: async ({ attempt, feedback }) => {
+          const retryNote = attempt > 1 && feedback.length
+            ? { role: 'system', content: `Quality retry: improve these failed checks before answering: ${feedback.join(', ')}. Do not mention this retry to the user.` }
+            : null;
+          return callPreferredProvider(agent, retryNote ? [...messages, retryNote] : messages);
+        }
+      });
+      result = harnessRun.result;
+      runtimeEvaluation = harnessRun.evaluation;
+      learningEvent = harnessRun.learning_event;
+      harnessMeta = harnessRun.harness;
+    } else {
+      runtimeEvaluation = evaluateAgentResponse({
+        agentSlug: agent.slug,
+        message,
+        response: result.text,
+        knowledge
+      });
+      learningEvent = buildLearningEvent(runtimeEvaluation, { agent_slug: agent.slug });
     }
 
     const conversation = await saveConversation(token, {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,
       message, response: result.text, provider: result.provider, model: result.model, status: 'completed'
     });
-    return json(res, 200, { conversation, meta: result.meta || null });
+
+    await supabaseOptional('/rest/v1/ai_agent_state?on_conflict=agent_id', token, {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        agent_id: agent.id,
+        organization_id: agent.organization_id,
+        version: Number(runtime.state.version || 1) + 1,
+        mode: 'ready',
+        current_goal: String(message).slice(0, 500),
+        active_thread: conversation?.id || runtime.state.active_thread || null,
+        last_outcome: runtimeEvaluation?.pass === false ? 'completed_with_eval_feedback' : 'completed',
+        counters: {
+          ...(runtimeState.counters || {}),
+          conversations: Number(runtimeState.counters?.conversations || 0) + 1
+        },
+        state: {
+          ...(runtimeState || {}),
+          last_message_at: new Date().toISOString(),
+          last_eval_score: runtimeEvaluation?.score ?? null,
+          last_rag_chunks: knowledge.map(item => item.id)
+        }
+      })
+    }, []);
+
+    if (runtimeEvaluation) {
+      const evalRows = await supabaseOptional('/rest/v1/ai_agent_evals?select=id', token, {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          organization_id: agent.organization_id,
+          agent_id: agent.id,
+          conversation_id: conversation?.id || null,
+          rubric: runtimeEvaluation.rubric,
+          score: runtimeEvaluation.score,
+          passed: runtimeEvaluation.pass,
+          dimensions: runtimeEvaluation.dimensions,
+          failures: runtimeEvaluation.failures,
+          metadata: {
+            harness: harnessMeta,
+            rag_chunk_ids: knowledge.map(item => item.id),
+            skills: runtime.agent_card.skills,
+            allowed_tools: runtime.tools
+          }
+        })
+      }, []);
+
+      if (learningEvent) {
+        await supabaseOptional('/rest/v1/ai_agent_learning_events', token, {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            organization_id: agent.organization_id,
+            agent_id: agent.id,
+            source_eval_id: evalRows?.[0]?.id || null,
+            lesson_key: learningEvent.lesson_key,
+            lesson: learningEvent.lesson,
+            status: 'proposed',
+            auto_apply: false,
+            metadata: { score: learningEvent.source_score, requires_human_approval: true }
+          })
+        }, []);
+      }
+    }
+
+    return json(res, 200, {
+      conversation,
+      meta: {
+        ...(result.meta || {}),
+        runtime: {
+          concepts: ['memory_state','orchestration','rag','harness','evals','mcp','skills','a2a','multi_agent'],
+          eval: runtimeEvaluation ? { score: runtimeEvaluation.score, pass: runtimeEvaluation.pass } : null,
+          rag_chunks: knowledge.map(item => item.id),
+          skills: runtime.agent_card.skills,
+          delegation: runtime.delegation || null
+        }
+      }
+    });
   } catch (error) {
     if (agent && user) {
       await saveConversation(token, {
