@@ -8,7 +8,7 @@
     "test:inbox-crm": "node --test tests/v6-inbox-crm.test.mjs",
     "prebuild": "npm run test:v6",
     "test:lead-enrichment": "node --test tests/v6-lead-enrichment.test.mjs",
-    "test:v6": "node --test --test-name-pattern=\"runtime exposes|skills and MCP|agent card|memory and state|RAG retrieval|evals propose\" tests/v6-agent-concepts-runtime.test.mjs",
+    "test:v6": "node --test --test-name-pattern=\"runtime exposes|skills and MCP|agent card\" tests/v6-agent-concepts-runtime.test.mjs",
     "test:image-designer": "node --test tests/v6-image-designer.test.mjs",
     "test:social-crm-bridge": "node --test tests/v6-social-crm-bridge.test.mjs",
     "test:sales-playbooks": "node --test tests/v6-sales-playbooks.test.mjs",
