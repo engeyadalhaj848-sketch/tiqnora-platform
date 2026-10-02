@@ -22,9 +22,11 @@ describe('AI Workforce DOM handler wiring', () => {
   it('sendMessage always prevents native form navigation first', () => {
     const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
     const start = src.indexOf('async function sendMessage(e)');
-    const body = src.slice(start, start + 500);
+    const end = src.indexOf('async function voiceApi(', start);
+    const body = src.slice(start, end > start ? end : start + 5000);
     assert.ok(start >= 0);
     assert.match(body, /e\.preventDefault\(\)/);
+    assert.match(body, /fetch\('\/api\/ai-workforce\/chat'/);
     assert.ok(body.indexOf('e.preventDefault()') < body.indexOf("fetch('/api/ai-workforce/chat'"));
   });
 });
