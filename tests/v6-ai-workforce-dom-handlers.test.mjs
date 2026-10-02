@@ -57,7 +57,7 @@ describe('AI Workforce chat rendering resilience', () => {
 
   it('cache-busts the Workforce JavaScript asset on the page', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261002-3/);
+    assert.match(html, /workforce\.js\?v=20261002-4/);
   });
 
   it('chat API returns an explicit reply fallback in addition to the saved conversation', () => {
