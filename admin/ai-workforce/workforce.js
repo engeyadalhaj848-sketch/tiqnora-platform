@@ -512,7 +512,7 @@
           + '<table class="table"><thead><tr><th>Title</th><th>Source</th><th>Active</th><th>Created</th></tr></thead><tbody>'
           + rows(knowledgeDocs.data, ['title','source_type', r => r.is_active ? 'yes' : 'no', r => new Date(r.created_at).toLocaleString('ar-SA')]) + '</tbody></table></div>';
       } else if (viewName === 'approvals') {
-        const acts = await soft('workflow_actions', 'id,action_type,status,created_at', true);
+        const acts = await soft('actions', 'id,action_type,status,requires_approval,approved_at,created_at', true);
         body = '<div class="panel"><h2>Approvals</h2>'
           + (acts.error
             ? '<p class="empty">Not configured — no canonical approval/action table available (' + esc(acts.error.message || 'missing') + '). Open tasks are NOT approvals.</p>'
