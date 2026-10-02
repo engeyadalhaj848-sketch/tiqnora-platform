@@ -570,6 +570,130 @@ export default async function handler(req, res) {
         }, null);
 
         try {
+          if (
+            String(agent.slug || '').toLowerCase() === 'manager'
+            && Array.isArray(runtime.delegation?.tasks)
+            && runtime.delegation.tasks.length
+          ) {
+            liveCollaboration = await executeLiveDelegation({
+              manager: agent,
+              plan: runtime.delegation,
+              agents: runtimeAgents || [],
+              objective: message,
+              correlationId: v2TraceId,
+              invokeSpecialist: async ({ specialist, task: delegatedTask, objective }) => {
+                const specialistRuntime = buildV2RuntimeContext({
+                  agent: specialist,
+                  message: delegatedTask.task || objective,
+                  agents: runtimeAgents || [],
+                  state: {
+                    mode: 'delegated',
+                    current_goal: delegatedTask.task || objective,
+                    active_thread: v2TraceId,
+                    parent_agent: agent.slug || agent.id
+                  },
+                  memory,
+                  tasks,
+                  recent: [],
+                  knowledge
+                });
+                const specialistRuntimePrompt = [
+                  formatStateContext(specialistRuntime.state),
+                  specialistRuntime.skills_prompt,
+                  specialistRuntime.rag_prompt,
+                  `Allowed MCP/tool scopes for this specialist: ${specialistRuntime.tools.join(', ')}. Do not execute external actions.`,
+                  'This is a bounded A2A specialist task. Return analysis/artifact text only. Do not delegate again.'
+                ].filter(Boolean).join('\n\n');
+                const specialistMessages = [
+                  {
+                    role: 'system',
+                    content: [
+                      expertSystemPrompt(specialist, memory, tasks),
+                      specialistRuntimePrompt
+                    ].filter(Boolean).join('\n\n')
+                  },
+                  {
+                    role: 'user',
+                    content: [
+                      `Manager objective: ${objective}`,
+                      `Delegated task: ${delegatedTask.task || objective}`,
+                      `Acceptance: ${(delegatedTask.acceptance || []).join(', ') || 'specific, evidence-aware, actionable'}`
+                    ].join('\n')
+                  }
+                ];
+                const specialistTurn = await runV2AgentTurn({
+                  agent: specialist,
+                  message: delegatedTask.task || objective,
+                  knowledge,
+                  runtime: specialistRuntime,
+                  invoke: async ({ attempt, feedback }) => {
+                    const retryNote = attempt > 1 && feedback.length
+                      ? {
+                          role: 'system',
+                          content: `Quality retry for delegated specialist output: ${feedback.join(', ')}.`
+                        }
+                      : null;
+                    return callPreferredProvider(
+                      specialist,
+                      retryNote ? [...specialistMessages, retryNote] : specialistMessages
+                    );
+                  }
+                });
+                const providerResult = specialistTurn.result?.result || {};
+                return {
+                  text: specialistTurn.response,
+                  provider: providerResult.provider || null,
+                  model: providerResult.model || specialist.model || null,
+                  evaluation: specialistTurn.evaluation
+                };
+              },
+              persistMessage: async (row) => {
+                return supabase('/rest/v1/ai_agent_messages', token, {
+                  method: 'POST',
+                  headers: { Prefer: 'return=minimal' },
+                  body: JSON.stringify(row)
+                });
+              },
+              recordSpan: async (span) => {
+                return supabase('/rest/v1/agent_trace_spans', token, {
+                  method: 'POST',
+                  headers: { Prefer: 'return=minimal' },
+                  body: JSON.stringify(span)
+                });
+              }
+            });
+
+            providerMessages = [
+              ...messages.slice(0, -1),
+              { role: 'system', content: liveCollaboration.synthesis_context },
+              messages[messages.length - 1]
+            ];
+
+            await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+              method: 'POST',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                organization_id: agent.organization_id,
+                trace_id: v2TraceId,
+                span_id: `sp_synthesis_${Date.now().toString(36)}`,
+                agent_key: agent.slug || agent.id,
+                span_type: 'synthesis',
+                name: 'manager_synthesis_context',
+                status: 'completed',
+                input: {
+                  specialists: liveCollaboration.specialists_executed,
+                  failures: liveCollaboration.failures.length
+                },
+                output: {
+                  external_actions: 0,
+                  auto_send: false,
+                  auto_publish: false
+                },
+                completed_at: new Date().toISOString()
+              })
+            }, null);
+          }
+
           const v2Turn = await runV2AgentTurn({
             agent,
             message,
