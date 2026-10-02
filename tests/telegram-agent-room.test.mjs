@@ -4,6 +4,7 @@ import {
   isAgentRoomSetupCommand,
   isAgentRoomDiscussionRequest
 } from '../lib/telegram-agent-room.js';
+import { isTeamCollaborationRequest } from '../lib/telegram-command-center.js';
 
 test('Telegram agent room recognizes setup commands', () => {
   assert.equal(isAgentRoomSetupCommand('/group'), true);
@@ -43,4 +44,23 @@ test('agent room uses shared provider fallback and never exposes raw provider er
   assert.ok(center.includes('generateText'));
   assert.ok(center.includes("error: 'ai_provider_unavailable'"));
   assert.ok(center.includes('سجلت الخطأ داخلياً'));
+});
+
+
+test('Telegram team campaign instructions are classified as collaboration, not a single image request', () => {
+  const request = [
+    'جهّزوا حملة منشورات عن تصميم المواقع والمتاجر الإلكترونية من Tiqnora.',
+    'مدير التسويق يحدد الزاوية، مدير المحتوى يكتب المحتوى، ومصمم الصور والفيديو يجهز المواد البصرية.',
+    'لا تنشروا أي شيء الآن. أرسلوا المنشورات والصور والفيديوهات هنا للمراجعة والموافقة.'
+  ].join(' ');
+  assert.equal(isTeamCollaborationRequest(request), true);
+  assert.equal(isTeamCollaborationRequest('مصمم الصور: صمم لي صورة لخدمة تصميم المواقع'), false);
+  assert.equal(isTeamCollaborationRequest('اكتب منشور عن تصميم المواقع'), false);
+});
+
+test('Telegram command center excludes team collaboration from generic image execution', () => {
+  const src = readFileSync(join(root, 'lib/telegram-command-center.js'), 'utf8');
+  assert.ok(src.includes('const teamCollaborationRequested = isTeamCollaborationRequest(text)'));
+  assert.ok(src.includes('(isImageDesignRequest(text) && !teamCollaborationRequested)'));
+  assert.ok(src.includes('teamCollaborationRequested || isAgentRoomDiscussionRequest(text)'));
 });
