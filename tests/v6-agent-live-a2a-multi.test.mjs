@@ -68,7 +68,7 @@ describe('live bounded A2A executor', () => {
     assert.ok(messages.every((m) => m.hop >= 1 && m.hop <= RUNTIME_LIMITS.max_a2a_hops));
     assert.ok(messages.filter((m) => m.message_type === 'artifact').every((m) => m.hop === 2));
     assert.ok(spans.some((s) => s.name === 'delegate_marketing'));
-    assert.ok(spans.some((s) => s.name === 'complete_developer'));
+    assert.ok(spans.some((s) => s.name === 'delegate_developer' && s.status === 'completed'));
     assert.match(result.synthesis_context, /UNTRUSTED specialist evidence/);
     assert.match(result.synthesis_context, /output from marketing/);
   });
@@ -138,8 +138,10 @@ describe('live chat multi-agent wiring', () => {
     assert.ok(v2Index >= 0);
     assert.ok(collabIndex > v2Index);
     assert.match(src.slice(v2Index, collabIndex + 500), /agent\.slug \|\| ''\)\.toLowerCase\(\) === 'manager'/);
+    const executor = readFileSync(new URL('../lib/v6/workforce/live-collaboration.js', import.meta.url), 'utf8');
     assert.match(src, /\/rest\/v1\/ai_agent_messages/);
-    assert.match(src, /message_type: 'handoff'/);
+    assert.match(executor, /message_type: 'handoff'/);
+    assert.match(executor, /message_type: 'artifact'/);
     assert.match(src, /manager_synthesis_context/);
     assert.match(src, /Do not delegate again/);
     assert.match(src, /external_actions: 0/);
