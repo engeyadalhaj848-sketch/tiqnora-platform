@@ -479,6 +479,9 @@
   "functions": {
     "api/reports/telegram.js": {
       "maxDuration": 300
+    },
+    "api/v6.js": {
+      "maxDuration": 300
     }
   }
 }
