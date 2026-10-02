@@ -447,73 +447,109 @@ export default async function handler(req, res) {
           })
         }, null);
 
-        const v2Turn = await runV2AgentTurn({
-          agent,
-          message,
-          knowledge,
-          runtime,
-          invoke
-        });
-        // Consume full V2 turn — do not discard evaluation/learning/meta
-        result = v2Turn.result?.result ?? v2Turn.result;
-        runtimeEvaluation = v2Turn.evaluation;
-        learningEvent = v2Turn.learning;
-        harnessMeta = {
-          ...(v2Turn.meta || {}),
-          trace_id: v2TraceId,
-          duration_ms: Date.now() - v2Started
-        };
+        try {
+          const v2Turn = await runV2AgentTurn({
+            agent,
+            message,
+            knowledge,
+            runtime,
+            invoke
+          });
+          // Consume full V2 turn — do not discard evaluation/learning/meta
+          result = v2Turn.result?.result ?? v2Turn.result;
+          runtimeEvaluation = v2Turn.evaluation;
+          learningEvent = v2Turn.learning;
+          harnessMeta = {
+            ...(v2Turn.meta || {}),
+            trace_id: v2TraceId,
+            duration_ms: Date.now() - v2Started
+          };
 
-        await supabaseOptional('/rest/v1/agent_trace_spans', token, {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            organization_id: agent.organization_id,
-            trace_id: v2TraceId,
-            span_id: `sp_harness_${Date.now().toString(36)}`,
-            agent_key: agent.slug || agent.id,
-            span_type: 'step',
-            name: 'provider_harness',
-            status: 'completed',
-            output: { has_result: Boolean(result) }
-          })
-        }, null);
-        await supabaseOptional('/rest/v1/agent_trace_spans', token, {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            organization_id: agent.organization_id,
-            trace_id: v2TraceId,
-            span_id: `sp_eval_${Date.now().toString(36)}`,
-            agent_key: agent.slug || agent.id,
-            span_type: 'step',
-            name: 'eval',
-            status: runtimeEvaluation?.pass || runtimeEvaluation?.passed ? 'completed' : 'failed',
-            output: {
-              score: runtimeEvaluation?.score ?? null,
-              pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null
-            }
-          })
-        }, null);
-        // Finish same trace (PATCH by trace_id filter)
-        await supabaseOptional(
-          `/rest/v1/agent_traces?trace_id=eq.${encodeURIComponent(v2TraceId)}`,
-          token,
-          {
-            method: 'PATCH',
+          await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+            method: 'POST',
             headers: { Prefer: 'return=minimal' },
             body: JSON.stringify({
+              organization_id: agent.organization_id,
+              trace_id: v2TraceId,
+              span_id: `sp_harness_${Date.now().toString(36)}`,
+              agent_key: agent.slug || agent.id,
+              span_type: 'step',
+              name: 'provider_harness',
               status: 'completed',
-              completed_at: new Date().toISOString(),
-              duration_ms: Date.now() - v2Started,
-              summary: {
-                eval_pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null,
-                score: runtimeEvaluation?.score ?? null
+              output: { has_result: Boolean(result) }
+            })
+          }, null);
+          await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              organization_id: agent.organization_id,
+              trace_id: v2TraceId,
+              span_id: `sp_eval_${Date.now().toString(36)}`,
+              agent_key: agent.slug || agent.id,
+              span_type: 'step',
+              name: 'eval',
+              status: runtimeEvaluation?.pass || runtimeEvaluation?.passed ? 'completed' : 'failed',
+              output: {
+                score: runtimeEvaluation?.score ?? null,
+                pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null
               }
             })
-          },
-          null
-        );
+          }, null);
+          // Finish same trace (PATCH by trace_id filter)
+          await supabaseOptional(
+            `/rest/v1/agent_traces?trace_id=eq.${encodeURIComponent(v2TraceId)}`,
+            token,
+            {
+              method: 'PATCH',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+                duration_ms: Date.now() - v2Started,
+                summary: {
+                  eval_pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null,
+                  score: runtimeEvaluation?.score ?? null
+                }
+              })
+            },
+            null
+          );
+        } catch (error) {
+          const failure = String(error?.code || error?.message || 'v2_runtime_failed').slice(0, 500);
+          await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              organization_id: agent.organization_id,
+              trace_id: v2TraceId,
+              span_id: `sp_error_${Date.now().toString(36)}`,
+              agent_key: agent.slug || agent.id,
+              span_type: 'error',
+              name: 'runtime_error',
+              status: 'failed',
+              error_code: String(error?.code || 'v2_runtime_error').slice(0, 120),
+              error_message: failure,
+              duration_ms: Date.now() - v2Started
+            })
+          }, null);
+          await supabaseOptional(
+            `/rest/v1/agent_traces?trace_id=eq.${encodeURIComponent(v2TraceId)}`,
+            token,
+            {
+              method: 'PATCH',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                status: 'failed',
+                completed_at: new Date().toISOString(),
+                duration_ms: Date.now() - v2Started,
+                summary: { error_code: String(error?.code || 'v2_runtime_error').slice(0, 120) }
+              })
+            },
+            null
+          );
+          throw error;
+        }
       } else {
         const harnessRun = await runAgentHarness({
           agent,
