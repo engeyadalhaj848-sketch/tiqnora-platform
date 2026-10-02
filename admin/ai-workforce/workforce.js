@@ -200,13 +200,13 @@
     const voiceAgent = isVoiceAgent();
     const voiceSupported = Boolean(recognitionCtor());
     $('#view').innerHTML = `<div class="chat-layout"><aside class="panel agent-picker">${pickerHtml()}</aside><section class="panel chat-panel"><div class="panel-head"><div><h2>${esc(selectedAgent.name_ar || selectedAgent.name)}</h2><span class="hint">${esc(selectedAgent.provider || '—')} · ${esc(selectedAgent.model || '—')}${voiceAgent ? ' · ar-SA' : ''}</span></div><span class="status">${voiceAgent ? '🎙 صوتي جاهز' : 'جاهز'}</span></div><div class="messages" id="messages">${history.length ? history.map(messagePair).join('') : '<div class="empty">ابدأ بإرسال أول توجيه لهذا الموظف.</div>'}</div><form class="chat-form" id="chat-form"><textarea id="chat-input" maxlength="20000" required placeholder="${voiceAgent ? 'اضغط «تحدث» وابدأ الكلام، أو اكتب رسالتك…' : 'اكتب توجيهًا واضحًا… (Enter للإرسال، Shift+Enter لسطر جديد)'}"></textarea>${voiceAgent ? `<button class="btn voice-mic" id="voice-mic" type="button" aria-pressed="false" ${voiceSupported ? '' : 'disabled'}>${voiceSupported ? '🎙 تحدث' : 'الميكروفون غير مدعوم'}</button><button class="btn btn-sm voice-stop" id="voice-stop" type="button">🔇 إيقاف الصوت</button>` : ''}<button class="btn btn-primary" id="send" type="submit">إرسال</button></form></section></div>`;
-    $('[data-pick]').forEach(b => b.onclick = () => { stopVoiceSession(); selectedAgent = agents.find(a => a.id === b.dataset.pick); renderChat(); });
+    $$('[data-pick]').forEach(b => b.onclick = () => { stopVoiceSession(); selectedAgent = agents.find(a => a.id === b.dataset.pick); renderChat(); });
     $('#chat-form').onsubmit = sendMessage;
     $('#chat-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#chat-form').requestSubmit(); } };
     if ($('#voice-mic')) $('#voice-mic').onclick = startVoiceInput;
     if ($('#voice-stop')) $('#voice-stop').onclick = stopVoiceOutput;
     const messages = $('#messages'); messages.scrollTop = messages.scrollHeight;
-    $('[data-memory-response]').forEach(b => b.onclick = () => openMemoryDialog(b.dataset.memoryResponse));
+    $$('[data-memory-response]').forEach(b => b.onclick = () => openMemoryDialog(b.dataset.memoryResponse));
   }
   function messagePair(row) {
     const time = new Date(row.created_at).toLocaleString('ar-SA', { dateStyle:'short', timeStyle:'short' });
@@ -306,12 +306,12 @@
           </tbody></table></div>
         </div>`;
 
-      $('[data-voice-consent]').forEach(btn => btn.onclick = () => {
+      $$('[data-voice-consent]').forEach(btn => btn.onclick = () => {
         const [type,id] = btn.dataset.voiceConsent.split(':');
         const item = state.voiceCandidates.find(x => x._type === type && x.id === id);
         if (item) openVoiceConsentDialog(item);
       });
-      $('[data-voice-revoke]').forEach(btn => btn.onclick = async () => {
+      $$('[data-voice-revoke]').forEach(btn => btn.onclick = async () => {
         if (!confirm('إلغاء موافقة الاتصال لهذا العميل؟')) return;
         btn.disabled = true;
         try {
@@ -320,7 +320,7 @@
           renderCalls();
         } catch (error) { toast(error.message, false); btn.disabled = false; }
       });
-      $('[data-voice-draft]').forEach(btn => btn.onclick = async () => {
+      $$('[data-voice-draft]').forEach(btn => btn.onclick = async () => {
         const [type,id] = btn.dataset.voiceDraft.split(':');
         const item = state.voiceCandidates.find(x => x._type === type && x.id === id);
         if (!item?.voice_permission?.id) return;
