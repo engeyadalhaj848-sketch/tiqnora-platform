@@ -592,14 +592,39 @@
         const found = agentsList.find(agent => agent.id === id);
         return found?.name_ar || found?.name || found?.slug || fallback || '—';
       };
-      const a2aTypeLabel = type => ({ handoff:'تفويض', artifact:'ناتج', message:'رسالة', task:'مهمة' }[type] || type || '—');
+      const a2aTypeLabel = type => ({ handoff:'تفويض', artifact:'ناتج', message:'رسالة', task:'مهمة' }[type] || 'غير معروف');
+      const a2aStatusLabel = status => ({
+        completed:'مكتمل',
+        failed:'فشل',
+        queued:'بانتظار التنفيذ',
+        running:'قيد التنفيذ',
+        pending:'قيد الانتظار',
+        cancelled:'ملغي'
+      }[status] || status || '—');
       const a2aSummary = row => {
-        if (row.message_type === 'handoff') return row.task || row.message || 'تفويض بدون وصف';
-        if (row.message_type === 'artifact') {
-          if (row.artifact && typeof row.artifact === 'object') return row.artifact.text || row.artifact.kind || 'Artifact';
-          return row.artifact || row.message || 'Artifact';
+        if (row.message_type === 'handoff') {
+          const raw = String(row.task || row.message || '').trim();
+          const target = agentLabel(row.to_agent_id, row.metadata?.to_agent);
+          if (!raw) return { display: `تفويض إلى ${target} لمعالجة جزء من المهمة وإرجاع ناتج واضح.`, original: '' };
+          const genericEnglish = /^Analyze the request from the .+ specialty and return a concrete artifact or recommendation\.?$/i.test(raw);
+          if (genericEnglish) {
+            return {
+              display: `تفويض إلى ${target}: حلّل الطلب ضمن اختصاصك وأعد ناتجًا عمليًا أو توصية واضحة.`,
+              original: raw
+            };
+          }
+          return { display: raw, original: '' };
         }
-        return row.message || row.task || (row.artifact && typeof row.artifact === 'object' ? (row.artifact.text || row.artifact.kind) : row.artifact) || '—';
+        if (row.message_type === 'artifact') {
+          const raw = row.artifact && typeof row.artifact === 'object'
+            ? (row.artifact.text || row.artifact.kind || 'ناتج الوكيل')
+            : (row.artifact || row.message || 'ناتج الوكيل');
+          return { display: String(raw), original: '' };
+        }
+        const raw = row.message || row.task || (row.artifact && typeof row.artifact === 'object'
+          ? (row.artifact.text || row.artifact.kind)
+          : row.artifact) || '—';
+        return { display: String(raw), original: '' };
       };
       const mcpStatus = 'MCP_NATIVE — official @modelcontextprotocol/server v2 on /api/v6?route=mcp. Legacy mcp_social bridge retained for compatibility.';
       const ragStatus = knowledgeDocs.error
@@ -645,23 +670,27 @@
         const a2aRows = (a2a.data || []).map(r => {
           const from = agentLabel(r.from_agent_id, r.metadata?.from_agent);
           const to = agentLabel(r.to_agent_id, r.metadata?.to_agent);
-          const summary = String(a2aSummary(r) || '').trim();
-          const preview = summary.length > 170 ? summary.slice(0, 170) + '…' : summary;
-          const full = summary.length > 170
-            ? '<details><summary>' + esc(preview) + '</summary><div class="hint" style="margin-top:8px;white-space:pre-wrap">' + esc(summary) + '</div></details>'
+          const summary = a2aSummary(r);
+          const display = String(summary.display || '').trim();
+          const preview = display.length > 170 ? display.slice(0, 170) + '…' : display;
+          let full = display.length > 170
+            ? '<details><summary>' + esc(preview) + '</summary><div class="hint" style="margin-top:8px;white-space:pre-wrap">' + esc(display) + '</div></details>'
             : esc(preview || '—');
+          if (summary.original) {
+            full += '<details class="hint" style="margin-top:8px"><summary>عرض النص الأصلي</summary><div dir="ltr" style="margin-top:6px;white-space:pre-wrap;text-align:left">' + esc(summary.original) + '</div></details>';
+          }
           return '<tr>'
             + '<td><strong>' + esc(from) + '</strong><br><span class="hint">→ ' + esc(to) + '</span></td>'
-            + '<td><span class="pill">' + esc(a2aTypeLabel(r.message_type)) + '</span><br><span class="hint" dir="ltr">' + esc(r.message_type || '—') + '</span></td>'
+            + '<td><span class="pill">' + esc(a2aTypeLabel(r.message_type)) + '</span></td>'
             + '<td class="desc">' + full + '</td>'
             + '<td><span dir="ltr">' + esc(r.hop ?? '—') + '</span></td>'
-            + '<td>' + esc(r.status || '—') + '</td>'
+            + '<td><span class="pill">' + esc(a2aStatusLabel(r.status)) + '</span></td>'
             + '<td><span dir="ltr">' + esc(new Date(r.created_at).toLocaleString('ar-SA')) + '</span></td>'
             + '</tr>';
         }).join('');
         body = '<div class="panel"><div class="panel-head"><div><h2>A2A</h2><p class="muted">تتبّع التفويض من المدير إلى الوكيل ثم رجوع الناتج للمدير.</p></div><span class="pill">' + esc(String(a2a.count ?? (a2a.data || []).length)) + ' سجل</span></div>'
-          + (a2a.error ? '<p class="empty">' + esc(a2a.error.message || 'unavailable') + '</p>' : '')
-          + '<div class="table-wrap"><table class="table"><thead><tr><th>من ← إلى</th><th>النوع</th><th>المهمة / الناتج</th><th>Hop</th><th>الحالة</th><th>الوقت</th></tr></thead><tbody>'
+          + (a2a.error ? '<p class="empty">' + esc(a2a.error.message || 'تعذر تحميل سجلات A2A') + '</p>' : '')
+          + '<div class="table-wrap"><table class="table"><thead><tr><th>من ← إلى</th><th>النوع</th><th>المهمة / الناتج</th><th>الخطوة</th><th>الحالة</th><th>الوقت</th></tr></thead><tbody>'
           + (a2aRows || '<tr><td colspan="6" class="empty">لا توجد رسائل A2A بعد</td></tr>')
           + '</tbody></table></div></div>';
       } else if (viewName === 'evals') {
