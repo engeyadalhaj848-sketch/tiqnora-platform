@@ -26,9 +26,9 @@ describe('live typed Memory wiring', () => {
   it('chat loads typed memory, injects it, and persists episodic turns', () => {
     const src = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
     assert.match(src, /agent_memory_entries\?organization_id=eq/);
-    assert.match(src, /const runtimeMemory = \[/);
-    assert.match(src, /memory: runtimeMemory/);
-    assert.match(src, /expertSystemPrompt\(agent, runtimeMemory, tasks\)/);
+    assert.match(src, /const memory = \[/);
+    assert.match(src, /legacyMemory/);
+    assert.match(src, /expertSystemPrompt\(agent, memory, tasks\)/);
     assert.match(src, /memory_type: 'episodic'/);
     assert.match(src, /scope: 'agent'/);
     assert.match(src, /source: 'ai-workforce-chat'/);
