@@ -62,3 +62,13 @@ describe('live chat V2 consumes full turn', () => {
     assert.match(src, /throw error/);
   });
 });
+
+
+describe('admin approvals source', () => {
+  it('uses canonical actions table and not workflow_actions', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /soft\('actions'/);
+    assert.doesNotMatch(src, /soft\('workflow_actions'/);
+    assert.match(src, /requires_approval === true/);
+  });
+});
