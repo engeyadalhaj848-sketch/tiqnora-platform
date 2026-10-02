@@ -1657,7 +1657,7 @@ export default async function handler(req, res) {
   }
   const adapter = getAdapter(platform);
   const verified = ['meta', 'whatsapp'].includes(platform) ? validMetaSignature(req, rawBody, platform)
-    : platform === 'ycloud' ? validYCloudSignature(req, rawBody) : adapter.verify(req);
+    : platform === 'ycloud' ? validYCloudSignature(req, rawBody) : adapter.verify(req, rawBody);
   if (!verified) {
     if (['meta', 'whatsapp'].includes(platform)) {
       const signature = String(req.headers['x-hub-signature-256'] || '');
