@@ -57,7 +57,7 @@ describe('AI Workforce chat rendering resilience', () => {
 
   it('cache-busts the Workforce JavaScript asset on the page', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261002-4/);
+    assert.match(html, /workforce\.js\?v=20261002-5/);
   });
 
   it('chat API returns an explicit reply fallback in addition to the saved conversation', () => {
@@ -93,6 +93,28 @@ describe('AI Workforce A2A visibility and DAILY dates', () => {
 
   it('cache-busts the updated Workforce UI asset', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261002-4/);
+    assert.match(html, /workforce\.js\?v=20261002-5/);
+  });
+});
+
+
+describe('AI Workforce A2A Arabic polish', () => {
+  it('fully localizes protocol type/status labels in the visible table', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /completed:'مكتمل'/);
+    assert.match(src, /failed:'فشل'/);
+    assert.match(src, /handoff:'تفويض'/);
+    assert.match(src, /artifact:'ناتج'/);
+    assert.match(src, /<th>الخطوة<\/th>/);
+    assert.doesNotMatch(src, /<span class="hint" dir="ltr">' \+ esc\(r\.message_type/);
+    assert.match(src, /a2aStatusLabel\(r\.status\)/);
+  });
+
+  it('localizes the known English handoff boilerplate and hides the original behind details', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /genericEnglish/);
+    assert.match(src, /تفويض إلى \$\{target\}: حلّل الطلب ضمن اختصاصك/);
+    assert.match(src, /عرض النص الأصلي/);
+    assert.match(src, /summary\.original/);
   });
 });
