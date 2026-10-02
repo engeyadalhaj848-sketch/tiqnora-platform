@@ -493,7 +493,7 @@
       const a2a = await soft('ai_agent_messages', 'id,message_type,status,hop,created_at', true);
       const learning = await soft('ai_agent_learning_events', 'id,lesson_key,status,lesson,created_at', true);
       const agentsList = qAgents.data || agents || [];
-      const mcpStatus = 'Partial — Compatibility Layer (mcp_social JSON-RPC). Not MCP_NATIVE.';
+      const mcpStatus = 'MCP_NATIVE — official @modelcontextprotocol/server v2 on /api/v6?route=mcp. Legacy mcp_social bridge retained for compatibility.';
       const ragStatus = knowledgeDocs.error
         ? ('Not configured: ' + (knowledgeDocs.error.message || 'missing'))
         : ('Documents: ' + (knowledgeDocs.count ?? knowledgeDocs.data.length));
@@ -521,7 +521,7 @@
       } else if (viewName === 'skills') {
         body = '<div class="panel"><h2>Skills</h2><p class="empty">Not configured — no runtime status endpoint exposing the Skill Registry yet. Skills are code-defined in lib/v6/agent-runtime.js and are not listed as a hard-coded subset here.</p></div>';
       } else if (viewName === 'tools') {
-        body = '<div class="panel"><h2>Tools / MCP</h2><p><strong>Status:</strong> ' + esc(mcpStatus) + '</p><p>MCP_NATIVE handshake: Not configured</p></div>';
+        body = '<div class="panel"><h2>Tools / MCP</h2><p><strong>Status:</strong> ' + esc(mcpStatus) + '</p><p>Native endpoint: <code>/api/v6?route=mcp</code> · Tools + resources · admin-gated tool calls</p></div>';
       } else if (viewName === 'a2a') {
         body = '<div class="panel"><h2>A2A</h2>' + (a2a.error ? '<p class="empty">' + esc(a2a.error.message || 'unavailable') + '</p>' : '')
           + '<table class="table"><thead><tr><th>Type</th><th>Status</th><th>Hop</th><th>Created</th></tr></thead><tbody>'
