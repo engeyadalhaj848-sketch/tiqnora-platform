@@ -493,7 +493,16 @@
     $$('[data-task-status]').forEach(s => s.onchange = async () => { const { error } = await db.from('ai_tasks').update({ status:s.value, updated_at:new Date().toISOString() }).eq('id', s.dataset.taskStatus); if (error) return toast(error.message,false); await loadData(); renderTasks(); });
     $$('[data-task-delete]').forEach(b => b.onclick = async () => { if (!confirm('حذف هذه المهمة؟')) return; const { error } = await db.from('ai_tasks').delete().eq('id', b.dataset.taskDelete); if (error) return toast(error.message,false); await loadData(); renderTasks(); toast('تم حذف المهمة'); });
   }
-  function taskRow(t) { const a = agents.find(x => x.id === t.agent_id); return `<tr><td class="desc"><strong>${esc(t.title)}</strong><br><small>${esc(t.description || '')}</small></td><td>${esc(a?.name_ar || '—')}</td><td><span class="pill">${priorityAr[t.priority] || esc(t.priority)}</span></td><td><select data-task-status="${t.id}">${Object.entries(statusAr).map(([k,v]) => `<option value="${k}" ${t.status === k ? 'selected':''}>${v}</option>`).join('')}</select></td><td><button class="btn btn-danger btn-sm" data-task-delete="${t.id}">حذف</button></td></tr>`; }
+  function taskTitleHtml(t) {
+    const raw = String(t?.title || '');
+    const match = raw.match(/^\[DAILY\s+(\d{4}-\d{2}-\d{2})\]\s*(.*)$/i);
+    const contextDay = String(t?.context?.launch_day || '');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(contextDay) ? contextDay : (match?.[1] || '');
+    const title = match?.[2] || raw;
+    if (!day) return `<strong>${esc(title)}</strong>`;
+    return `<div class="task-title"><span class="pill" dir="ltr">DAILY ${esc(day)}</span> <strong>${esc(title)}</strong></div>`;
+  }
+  function taskRow(t) { const a = agents.find(x => x.id === t.agent_id); return `<tr><td class="desc">${taskTitleHtml(t)}<br><small>${esc(t.description || '')}</small></td><td>${esc(a?.name_ar || '—')}</td><td><span class="pill">${priorityAr[t.priority] || esc(t.priority)}</span></td><td><select data-task-status="${t.id}">${Object.entries(statusAr).map(([k,v]) => `<option value="${k}" ${t.status === k ? 'selected':''}>${v}</option>`).join('')}</select></td><td><button class="btn btn-danger btn-sm" data-task-delete="${t.id}">حذف</button></td></tr>`; }
   function openTaskDialog(agentId) {
     const dialog = $('#dialog'), body = $('#dialog-body');
     body.innerHTML = `<h2>إضافة مهمة</h2><form id="task-form"><div class="form-row"><div class="full"><label>الموظف</label><select name="agent_id" required>${agents.map(a => `<option value="${a.id}" ${a.id === agentId ? 'selected':''}>${esc(a.name_ar || a.name)}</option>`).join('')}</select></div><div class="full"><label>عنوان المهمة</label><input name="title" maxlength="240" required></div><div class="full"><label>الوصف</label><textarea name="description" rows="4"></textarea></div><div><label>الأولوية</label><select name="priority"><option value="medium">متوسطة</option><option value="high">عالية</option><option value="urgent">عاجلة</option><option value="low">منخفضة</option></select></div><div><label>الحالة</label><select name="status"><option value="todo">جديدة</option><option value="in_progress">قيد التنفيذ</option></select></div></div><div class="dialog-actions"><button type="button" class="btn" data-close>إلغاء</button><button class="btn btn-primary">حفظ المهمة</button></div></form>`;
@@ -576,9 +585,22 @@
       }
       const knowledgeDocs = await soft('ai_knowledge_documents', 'id,title,source_type,is_active,created_at', true);
       const evals = await soft('ai_agent_evals', 'id,score,passed,rubric,created_at,agent_id', true);
-      const a2a = await soft('ai_agent_messages', 'id,message_type,status,hop,created_at', true);
+      const a2a = await soft('ai_agent_messages', 'id,correlation_id,message_id,from_agent_id,to_agent_id,message_type,task,message,artifact,hop,status,metadata,created_at', true);
       const learning = await soft('ai_agent_learning_events', 'id,lesson_key,status,lesson,created_at', true);
       const agentsList = qAgents.data || agents || [];
+      const agentLabel = (id, fallback) => {
+        const found = agentsList.find(agent => agent.id === id);
+        return found?.name_ar || found?.name || found?.slug || fallback || '—';
+      };
+      const a2aTypeLabel = type => ({ handoff:'تفويض', artifact:'ناتج', message:'رسالة', task:'مهمة' }[type] || type || '—');
+      const a2aSummary = row => {
+        if (row.message_type === 'handoff') return row.task || row.message || 'تفويض بدون وصف';
+        if (row.message_type === 'artifact') {
+          if (row.artifact && typeof row.artifact === 'object') return row.artifact.text || row.artifact.kind || 'Artifact';
+          return row.artifact || row.message || 'Artifact';
+        }
+        return row.message || row.task || (row.artifact && typeof row.artifact === 'object' ? (row.artifact.text || row.artifact.kind) : row.artifact) || '—';
+      };
       const mcpStatus = 'MCP_NATIVE — official @modelcontextprotocol/server v2 on /api/v6?route=mcp. Legacy mcp_social bridge retained for compatibility.';
       const ragStatus = knowledgeDocs.error
         ? ('Not configured: ' + (knowledgeDocs.error.message || 'missing'))
@@ -620,9 +642,28 @@
       } else if (viewName === 'tools') {
         body = '<div class="panel"><h2>Tools / MCP</h2><p><strong>Status:</strong> ' + esc(mcpStatus) + '</p><p>Native endpoint: <code>/api/v6?route=mcp</code> · Tools + resources · admin-gated tool calls</p></div>';
       } else if (viewName === 'a2a') {
-        body = '<div class="panel"><h2>A2A</h2>' + (a2a.error ? '<p class="empty">' + esc(a2a.error.message || 'unavailable') + '</p>' : '')
-          + '<table class="table"><thead><tr><th>Type</th><th>Status</th><th>Hop</th><th>Created</th></tr></thead><tbody>'
-          + rows(a2a.data, ['message_type','status','hop', r => new Date(r.created_at).toLocaleString('ar-SA')]) + '</tbody></table></div>';
+        const a2aRows = (a2a.data || []).map(r => {
+          const from = agentLabel(r.from_agent_id, r.metadata?.from_agent);
+          const to = agentLabel(r.to_agent_id, r.metadata?.to_agent);
+          const summary = String(a2aSummary(r) || '').trim();
+          const preview = summary.length > 170 ? summary.slice(0, 170) + '…' : summary;
+          const full = summary.length > 170
+            ? '<details><summary>' + esc(preview) + '</summary><div class="hint" style="margin-top:8px;white-space:pre-wrap">' + esc(summary) + '</div></details>'
+            : esc(preview || '—');
+          return '<tr>'
+            + '<td><strong>' + esc(from) + '</strong><br><span class="hint">→ ' + esc(to) + '</span></td>'
+            + '<td><span class="pill">' + esc(a2aTypeLabel(r.message_type)) + '</span><br><span class="hint" dir="ltr">' + esc(r.message_type || '—') + '</span></td>'
+            + '<td class="desc">' + full + '</td>'
+            + '<td><span dir="ltr">' + esc(r.hop ?? '—') + '</span></td>'
+            + '<td>' + esc(r.status || '—') + '</td>'
+            + '<td><span dir="ltr">' + esc(new Date(r.created_at).toLocaleString('ar-SA')) + '</span></td>'
+            + '</tr>';
+        }).join('');
+        body = '<div class="panel"><div class="panel-head"><div><h2>A2A</h2><p class="muted">تتبّع التفويض من المدير إلى الوكيل ثم رجوع الناتج للمدير.</p></div><span class="pill">' + esc(String(a2a.count ?? (a2a.data || []).length)) + ' سجل</span></div>'
+          + (a2a.error ? '<p class="empty">' + esc(a2a.error.message || 'unavailable') + '</p>' : '')
+          + '<div class="table-wrap"><table class="table"><thead><tr><th>من ← إلى</th><th>النوع</th><th>المهمة / الناتج</th><th>Hop</th><th>الحالة</th><th>الوقت</th></tr></thead><tbody>'
+          + (a2aRows || '<tr><td colspan="6" class="empty">لا توجد رسائل A2A بعد</td></tr>')
+          + '</tbody></table></div></div>';
       } else if (viewName === 'evals') {
         body = '<div class="panel"><h2>Evals</h2>' + (evals.error ? '<p class="empty">unavailable</p>' : '')
           + '<table class="table"><thead><tr><th>Score</th><th>Passed</th><th>Rubric</th><th>Created</th></tr></thead><tbody>'
