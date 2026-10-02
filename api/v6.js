@@ -114,6 +114,7 @@ import {
   executeMcpSocialTool,
   processPublishingQueue
 } from '../lib/v6/social-runtime.js';
+import { handleTiqnoraNativeMcp } from '../lib/v6/workforce/mcp-native.js';
 import {
   isApifyConfigured,
   testConnection as testApifyConnection,
@@ -2913,6 +2914,10 @@ export default async function handler(req, res) {
 
   if (route === 'proposal_public') {
     return handleProposalPublic(req, res);
+  }
+
+  if (route === 'mcp') {
+    return handleTiqnoraNativeMcp(req, res);
   }
 
   if (route === 'mcp_social') {
