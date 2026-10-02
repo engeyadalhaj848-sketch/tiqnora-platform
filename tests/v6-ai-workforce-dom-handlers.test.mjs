@@ -67,3 +67,32 @@ describe('AI Workforce chat rendering resilience', () => {
     assert.match(api, /provider: result\.provider \|\| null/);
   });
 });
+
+
+describe('AI Workforce A2A visibility and DAILY dates', () => {
+  it('loads real A2A routing fields and renders from/to plus task or artifact summary', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /ai_agent_messages', 'id,correlation_id,message_id,from_agent_id,to_agent_id,message_type,task,message,artifact,hop,status,metadata,created_at/);
+    assert.match(src, /const agentLabel = \(id, fallback\)/);
+    assert.match(src, /a2aTypeLabel/);
+    assert.match(src, /a2aSummary/);
+    assert.match(src, /تتبّع التفويض من المدير إلى الوكيل ثم رجوع الناتج للمدير/);
+    assert.match(src, /من ← إلى/);
+    assert.match(src, /المهمة \/ الناتج/);
+    assert.match(src, /r\.metadata\?\.from_agent/);
+    assert.match(src, /r\.metadata\?\.to_agent/);
+  });
+
+  it('renders DAILY task dates as isolated LTR badges using launch_day when available', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /function taskTitleHtml\(t\)/);
+    assert.match(src, /t\?\.context\?\.launch_day/);
+    assert.match(src, /dir="ltr">DAILY/);
+    assert.match(src, /\^\\\[DAILY\\s\+\(\\d\{4\}-\\d\{2\}-\\d\{2\}\)\\\]/);
+  });
+
+  it('cache-busts the updated Workforce UI asset', () => {
+    const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
+    assert.match(html, /workforce\.js\?v=20261002-4/);
+  });
+});
