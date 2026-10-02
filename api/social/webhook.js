@@ -1,5 +1,6 @@
 import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
+import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -48,6 +49,127 @@ function validGenericSignature(req) {
   const expected = process.env.SOCIAL_WEBHOOK_SHARED_SECRET || process.env.META_WEBHOOK_VERIFY_TOKEN;
   if (!expected) return false;
   return safeEqualText(req.headers['x-tiqnora-webhook-secret'], expected);
+}
+
+function validTikTokSignature(req, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const secret = String(process.env.TIKTOK_BUSINESS_APP_SECRET || '').trim();
+  const header = String(req.headers?.['tiktok-signature'] || '').trim();
+  if (!secret || !header) return false;
+
+  const fields = new Map();
+  for (const part of header.split(',')) {
+    const [key, ...rest] = part.trim().split('=');
+    const value = rest.join('=').trim();
+    if (!key || !value || fields.has(key)) return false;
+    fields.set(key, value);
+  }
+
+  const timestamp = fields.get('t');
+  const signature = fields.get('s');
+  if (!/^\d{10,16}$/.test(timestamp || '') || !/^[a-f0-9]{64}$/i.test(signature || '')) return false;
+  if (Math.abs(nowSeconds - Number(timestamp)) > 300) return false;
+
+  const expected = createHmac('sha256', secret)
+    .update(`${timestamp}.`)
+    .update(rawBody)
+    .digest('hex');
+  return safeEqualText(signature.toLowerCase(), expected);
+}
+
+function parseTikTokWebhookContent(value) {
+  const source = String(value || '{}');
+  // TikTok serializes comment/video IDs as JSON numbers that exceed JS safe
+  // integer precision. Quote only these known identifier fields before parse.
+  const safe = source.replace(/("(?:comment_id|video_id|parent_comment_id)"\s*:\s*)(\d{16,})/g, '$1"$2"');
+  return JSON.parse(safe);
+}
+
+function normalizeTikTok(payload) {
+  if (String(payload?.event || '') !== 'comment.update') return [];
+
+  let content;
+  try {
+    content = parseTikTokWebhookContent(payload?.content);
+  } catch (_) {
+    return [];
+  }
+
+  const commentId = String(content?.comment_id || '');
+  const videoId = String(content?.video_id || '');
+  const action = String(content?.comment_action || '').toLowerCase();
+  if (!commentId || !videoId || !action) return [];
+
+  const isInsert = action === 'insert';
+  const eventType = isInsert
+    ? 'comment.created'
+    : action === 'delete'
+      ? 'comment.deleted'
+      : 'comment.updated';
+
+  return [{
+    platform: 'tiktok',
+    event_type: eventType,
+    external_event_id: isInsert
+      ? commentId
+      : `${action}:${commentId}:${String(content?.timestamp || payload?.create_time || Date.now())}`,
+    external_parent_id: content?.parent_comment_id ? String(content.parent_comment_id) : videoId,
+    author_external_id: content?.unique_identifier ? String(content.unique_identifier) : null,
+    author_name: null,
+    content: null,
+    permalink: null,
+    occurred_at: toIso(content?.timestamp || (Number(payload?.create_time || 0) * 1000)),
+    account_external_id: String(payload?.user_openid || ''),
+    detected_intent: null,
+    detected_intent_confidence: null,
+    raw_payload: {
+      adapter: 'tiktok_business',
+      event: 'comment.update',
+      comment_id: commentId,
+      video_id: videoId,
+      parent_comment_id: content?.parent_comment_id ? String(content.parent_comment_id) : null,
+      comment_type: content?.comment_type || 'comment',
+      comment_action: action,
+      unique_identifier: content?.unique_identifier || null,
+      owner: false
+    }
+  }];
+}
+
+async function hydrateTikTokCommentEvent(event, organizationId) {
+  if (event.platform !== 'tiktok'
+    || event.event_type !== 'comment.created'
+    || event.raw_payload?.adapter !== 'tiktok_business') return event;
+
+  const access = await getTikTokBusinessAccess(organizationId);
+  const commentId = String(event.raw_payload?.comment_id || event.external_event_id || '');
+  const videoId = String(event.raw_payload?.video_id || event.external_parent_id || '');
+  if (!commentId || !videoId) throw new Error('TikTok comment webhook is missing comment/video ID');
+
+  const response = await tiktokBusinessGet('business/comment/list/', access.accessToken, {
+    business_id: access.businessId,
+    video_id: videoId,
+    comment_ids: JSON.stringify([commentId]),
+    include_replies: false,
+    status: 'ALL',
+    max_count: 30
+  });
+  const comments = Array.isArray(response?.data?.comments) ? response.data.comments : [];
+  const item = comments.find(row => String(row?.comment_id || '') === commentId) || comments[0];
+  if (!item) throw new Error('TikTok comment details were not available yet');
+
+  event.content = String(item.text || '').trim() || '[comment]';
+  event.author_external_id = String(item.unique_identifier || event.author_external_id || '') || null;
+  event.author_name = item.display_name || item.username || null;
+  event.account_external_id = access.businessId || event.account_external_id;
+  if (item.create_time != null) event.occurred_at = toIso(Number(item.create_time));
+  event.raw_payload = {
+    ...(event.raw_payload || {}),
+    owner: item.owner === true,
+    username: item.username || null,
+    display_name: item.display_name || null,
+    status: item.status || null
+  };
+  return event;
 }
 
 export function validYCloudSignature(req, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
@@ -489,7 +611,7 @@ const ADAPTERS = {
   facebook: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('facebook', payload) },
   instagram: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('instagram', payload) },
   linkedin: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('linkedin', payload) },
-  tiktok: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('tiktok', payload) },
+  tiktok: { verify: validTikTokSignature, normalize: normalizeTikTok },
   snapchat: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('snapchat', payload) },
   x: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('x', payload) },
   whatsapp: { verify: validGenericSignature, normalize: (payload) => normalizeGeneric('whatsapp', payload) },
@@ -998,7 +1120,41 @@ async function sendAutomaticReply(event, storedEvent, organizationId, text) {
   if (event.platform === 'whatsapp' && event.raw_payload?.adapter === 'ycloud') {
     return sendYCloudAutoReply(event, storedEvent, organizationId, text);
   }
+  if (event.platform === 'tiktok' && event.raw_payload?.adapter === 'tiktok_business') {
+    return sendTikTokAutoReply(event, storedEvent, organizationId, text);
+  }
   return sendMetaAutoReply(event, storedEvent, organizationId, text);
+}
+
+async function sendTikTokAutoReply(event, storedEvent, organizationId, text) {
+  if (event.event_type !== 'comment.created') {
+    return { sent: false, reason: 'unsupported_tiktok_auto_reply_event' };
+  }
+
+  const commentId = String(event.raw_payload?.comment_id || event.external_event_id || '');
+  const videoId = String(event.raw_payload?.video_id || event.external_parent_id || '');
+  if (!commentId || !videoId) throw new Error('TikTok reply is missing comment/video ID');
+
+  const access = await getTikTokBusinessAccess(organizationId);
+  const replyText = [...String(text || '').trim()].slice(0, 150).join('');
+  if (!replyText) throw new Error('TikTok automatic reply text is empty');
+
+  const result = await tiktokBusinessPost('business/comment/reply/create/', access.accessToken, {
+    business_id: access.businessId,
+    video_id: videoId,
+    comment_id: commentId,
+    text: replyText
+  });
+
+  const replyId = String(result?.data?.comment_id || '').trim();
+  if (!replyId) throw new Error('TikTok accepted reply without comment ID');
+
+  return {
+    sent: true,
+    provider: 'tiktok_business',
+    connection_id: storedEvent.connection_id || null,
+    external_reply_id: replyId
+  };
 }
 
 async function sendMetaAutoReply(event, storedEvent, organizationId, text) {
@@ -1291,9 +1447,11 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   // Meta echoes comments authored by the connected Page/Instagram account
   // back through the webhook. Treat those as outbound echoes so they never
   // re-enter the customer inbox or trigger an auto-reply loop.
-  const ownAuthor = event.author_external_id
+  const ownAuthor = event.raw_payload?.owner === true || (
+    event.author_external_id
     && event.account_external_id
-    && String(event.author_external_id) === String(event.account_external_id);
+    && String(event.author_external_id) === String(event.account_external_id)
+  );
   if (ownAuthor) {
     if (storedEvent.processing_status === 'new') {
       await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
@@ -1532,6 +1690,12 @@ export default async function handler(req, res) {
     const organizations = await rest('organizations?slug=eq.tiqnora&select=id&limit=1');
     const organizationId = organizations?.[0]?.id;
     if (!organizationId) throw new Error('Tiqnora organization is missing');
+
+    if (platform === 'tiktok') {
+      for (const event of normalized) {
+        await hydrateTikTokCommentEvent(event, organizationId);
+      }
+    }
 
     const rules = await rest(`social_automation_rules?organization_id=eq.${encodeURIComponent(organizationId)}&is_active=eq.true&select=*`);
     let matched = 0;
