@@ -22,9 +22,48 @@ describe('AI Workforce DOM handler wiring', () => {
   it('sendMessage always prevents native form navigation first', () => {
     const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
     const start = src.indexOf('async function sendMessage(e)');
-    const body = src.slice(start, start + 500);
+    const end = src.indexOf('async function voiceApi(', start);
+    const body = src.slice(start, end > start ? end : start + 5000);
     assert.ok(start >= 0);
     assert.match(body, /e\.preventDefault\(\)/);
+    assert.match(body, /fetch\('\/api\/ai-workforce\/chat'/);
     assert.ok(body.indexOf('e.preventDefault()') < body.indexOf("fetch('/api/ai-workforce/chat'"));
+  });
+});
+
+
+describe('AI Workforce chat rendering resilience', () => {
+  it('renders the user message immediately and keeps a processing bubble while the API runs', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /function showPendingMessage\(message, tempId\)/);
+    assert.match(src, /data-temp-user=/);
+    assert.match(src, /data-temp-ai=/);
+    assert.match(src, /جارٍ المعالجة/);
+
+    const start = src.indexOf('async function sendMessage(e)');
+    const body = src.slice(start, start + 2600);
+    assert.ok(body.indexOf('showPendingMessage(message, tempId)') < body.indexOf("fetch('/api/ai-workforce/chat'"));
+  });
+
+  it('resyncs saved history from Supabase after a successful response and has an API reply fallback', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /async function refreshAgentConversations\(agentId\)/);
+    assert.match(src, /from\('ai_conversations'\)/);
+    assert.match(src, /await refreshAgentConversations\(agentId\)/);
+    assert.match(src, /payload\.conversation \|\| fallbackConversation/);
+    assert.match(src, /payload\.reply \|\| ''/);
+    assert.match(src, /filter\(Boolean\)/);
+  });
+
+  it('cache-busts the Workforce JavaScript asset on the page', () => {
+    const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
+    assert.match(html, /workforce\.js\?v=20261002-3/);
+  });
+
+  it('chat API returns an explicit reply fallback in addition to the saved conversation', () => {
+    const api = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
+    assert.match(api, /conversation_id: conversation\?\.id \|\| null/);
+    assert.match(api, /reply: result\.text/);
+    assert.match(api, /provider: result\.provider \|\| null/);
   });
 });

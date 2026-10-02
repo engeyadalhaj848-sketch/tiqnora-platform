@@ -196,7 +196,7 @@
   function pickerHtml() { return agents.map(a => `<button class="picker-item ${a.id === selectedAgent?.id ? 'active' : ''}" data-pick="${a.id}">${esc(a.name_ar || a.name)}<small>${esc(labels[a.slug]?.[0] || a.department)}</small></button>`).join(''); }
   function renderChat() {
     if (!selectedAgent) return $('#view').innerHTML = '<div class="panel empty">لا يوجد موظفون. نفّذ migration قاعدة البيانات.</div>';
-    const history = state.conversations.filter(x => x.agent_id === selectedAgent.id).sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
+    const history = state.conversations.filter(Boolean).filter(x => x.agent_id === selectedAgent.id).sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
     const voiceAgent = isVoiceAgent();
     const voiceSupported = Boolean(recognitionCtor());
     $('#view').innerHTML = `<div class="chat-layout"><aside class="panel agent-picker">${pickerHtml()}</aside><section class="panel chat-panel"><div class="panel-head"><div><h2>${esc(selectedAgent.name_ar || selectedAgent.name)}</h2><span class="hint">${esc(selectedAgent.provider || '—')} · ${esc(selectedAgent.model || '—')}${voiceAgent ? ' · ar-SA' : ''}</span></div><span class="status">${voiceAgent ? '🎙 صوتي جاهز' : 'جاهز'}</span></div><div class="messages" id="messages">${history.length ? history.map(messagePair).join('') : '<div class="empty">ابدأ بإرسال أول توجيه لهذا الموظف.</div>'}</div><form class="chat-form" id="chat-form"><textarea id="chat-input" maxlength="20000" required placeholder="${voiceAgent ? 'اضغط «تحدث» وابدأ الكلام، أو اكتب رسالتك…' : 'اكتب توجيهًا واضحًا… (Enter للإرسال، Shift+Enter لسطر جديد)'}"></textarea>${voiceAgent ? `<button class="btn voice-mic" id="voice-mic" type="button" aria-pressed="false" ${voiceSupported ? '' : 'disabled'}>${voiceSupported ? '🎙 تحدث' : 'الميكروفون غير مدعوم'}</button><button class="btn btn-sm voice-stop" id="voice-stop" type="button">🔇 إيقاف الصوت</button>` : ''}<button class="btn btn-primary" id="send" type="submit">إرسال</button></form></section></div>`;
@@ -212,19 +212,93 @@
     const time = new Date(row.created_at).toLocaleString('ar-SA', { dateStyle:'short', timeStyle:'short' });
     return `<div class="message user">${esc(row.message)}<div class="meta"><span>أنت</span><span>${time}</span></div></div><div class="message ai">${esc(row.response || (row.status === 'failed' ? row.error_message : 'جارٍ المعالجة…'))}<div class="meta"><button class="memory-action" data-memory-response="${row.id}">حفظ في الذاكرة</button><span>${esc(row.model || '')}</span></div></div>`;
   }
+  function showPendingMessage(message, tempId) {
+    const box = $('#messages');
+    if (!box) return;
+    const empty = box.querySelector('.empty');
+    if (empty) empty.remove();
+    const time = new Date().toLocaleString('ar-SA', { dateStyle:'short', timeStyle:'short' });
+    box.insertAdjacentHTML('beforeend',
+      `<div class="message user" data-temp-user="${tempId}">${esc(message)}<div class="meta"><span>أنت</span><span>${time}</span></div></div>`
+      + `<div class="message ai" data-temp-ai="${tempId}">جارٍ المعالجة…<div class="meta"><span>V2</span></div></div>`
+    );
+    box.scrollTop = box.scrollHeight;
+  }
+
+  async function refreshAgentConversations(agentId) {
+    const { data, error } = await db.from('ai_conversations')
+      .select('*')
+      .eq('organization_id', org.id)
+      .eq('agent_id', agentId)
+      .order('created_at', { ascending:false })
+      .limit(80);
+    if (error) throw error;
+    state.conversations = [
+      ...(data || []),
+      ...state.conversations.filter(row => row && row.agent_id !== agentId)
+    ];
+    return data || [];
+  }
+
   async function sendMessage(e) {
-    e.preventDefault(); const input = $('#chat-input'), button = $('#send'), message = input.value.trim(); if (!message) return;
-    button.disabled = true; input.disabled = true; button.textContent = 'يفكر…';
+    e.preventDefault();
+    const input = $('#chat-input'), button = $('#send'), message = input.value.trim();
+    if (!message || !selectedAgent) return;
+
+    const agentId = selectedAgent.id;
+    const shouldSpeak = isVoiceAgent();
+    const tempId = `pending_${Date.now().toString(36)}`;
+    button.disabled = true;
+    input.disabled = true;
+    button.textContent = 'يفكر…';
+    input.value = '';
+    showPendingMessage(message, tempId);
+
     try {
       const { data: { session } } = await db.auth.getSession();
-      const response = await fetch('/api/ai-workforce/chat', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${session.access_token}` }, body:JSON.stringify({ agentId:selectedAgent.id, message }) });
+      if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+      const response = await fetch('/api/ai-workforce/chat', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${session.access_token}` },
+        body:JSON.stringify({ agentId, message })
+      });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'تعذر الحصول على رد');
-      const reply = payload.conversation?.response || '';
-      const shouldSpeak = isVoiceAgent();
-      state.conversations.unshift(payload.conversation); input.value = ''; renderChat();
+
+      const fallbackConversation = {
+        id: payload.conversation_id || tempId,
+        organization_id: org.id,
+        agent_id: agentId,
+        message,
+        response: payload.reply || '',
+        provider: payload.provider || '',
+        model: payload.model || '',
+        status: 'completed',
+        created_at: new Date().toISOString()
+      };
+      const conversation = payload.conversation || fallbackConversation;
+      const reply = conversation.response || payload.reply || '';
+
+      state.conversations = state.conversations.filter(row => row && row.id !== conversation.id);
+      state.conversations.unshift(conversation);
+
+      try {
+        await refreshAgentConversations(agentId);
+      } catch (syncError) {
+        console.warn('AI Workforce conversation sync fallback:', syncError);
+      }
+
+      if (selectedAgent?.id === agentId) renderChat();
       if (shouldSpeak && reply) setTimeout(() => speakArabic(reply), 60);
-    } catch (error) { toast(error.message, false); button.disabled = false; input.disabled = false; button.textContent = 'إرسال'; }
+    } catch (error) {
+      const ai = document.querySelector(`[data-temp-ai="${tempId}"]`);
+      if (ai) ai.innerHTML = `${esc(error.message || 'تعذر الحصول على رد')}<div class="meta"><span>فشل</span></div>`;
+      toast(error.message || 'تعذر الحصول على رد', false);
+      const currentInput = $('#chat-input');
+      const currentButton = $('#send');
+      if (currentInput) currentInput.disabled = false;
+      if (currentButton) { currentButton.disabled = false; currentButton.textContent = 'إرسال'; }
+    }
   }
   async function voiceApi(op, init = {}) {
     const { data: { session } } = await db.auth.getSession();

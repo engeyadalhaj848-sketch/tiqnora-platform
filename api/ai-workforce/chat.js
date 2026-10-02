@@ -929,6 +929,10 @@ export default async function handler(req, res) {
 
     return json(res, 200, {
       conversation,
+      conversation_id: conversation?.id || null,
+      reply: result.text,
+      provider: result.provider || null,
+      model: result.model || null,
       meta: {
         ...(result.meta || {}),
         runtime: {
