@@ -440,6 +440,36 @@
     dialog.showModal();
   }
 
+  async function runRagBackfill() {
+    const button = $('#rag-backfill');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'جارٍ تجهيز Vector RAG…';
+    }
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+      const response = await fetch('/api/ai-workforce/chat?route=rag-backfill', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ limit: 25 })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'تعذر تجهيز Vector RAG');
+      toast(`Vector RAG: تم ${payload.succeeded || 0}، فشل ${payload.failed || 0}`);
+      await renderArchitecture();
+    } catch (error) {
+      toast(error.message || 'تعذر تجهيز Vector RAG', false);
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'تهيئة Vector RAG';
+      }
+    }
+  }
+
   async function renderArchitecture() {
     const viewName = $$('.tab.active')[0]?.dataset.view || 'architecture';
     $('#view').innerHTML = '<div class="panel empty">جارٍ تحميل حالة البنية من قاعدة البيانات…</div>';
@@ -508,7 +538,8 @@
           + rows(arts.data || [], ['artifact_id','artifact_type','creator_agent_key','verification_status'])
           + '</tbody></table></div>';
       } else if (viewName === 'knowledge') {
-        body = '<div class="panel"><h2>Knowledge / RAG</h2>' + (knowledgeDocs.error ? '<p class="empty">' + esc(knowledgeDocs.error.message || 'Not configured') + '</p>' : '')
+        body = '<div class="panel"><div class="panel-head"><div><h2>Knowledge / RAG</h2><p class="muted">Hybrid Vector + Lexical retrieval. Existing chunks without embeddings continue on lexical fallback.</p></div><button class="btn btn-sm" id="rag-backfill" type="button">تهيئة Vector RAG</button></div>'
+          + (knowledgeDocs.error ? '<p class="empty">' + esc(knowledgeDocs.error.message || 'Not configured') + '</p>' : '')
           + '<table class="table"><thead><tr><th>Title</th><th>Source</th><th>Active</th><th>Created</th></tr></thead><tbody>'
           + rows(knowledgeDocs.data, ['title','source_type', r => r.is_active ? 'yes' : 'no', r => new Date(r.created_at).toLocaleString('ar-SA')]) + '</tbody></table></div>';
       } else if (viewName === 'approvals') {
@@ -536,6 +567,9 @@
           + rows(agentsList, [r => r.name_ar || r.name, 'slug', r => r.status, r => r.provider || '—']) + '</tbody></table></div>';
       }
       $('#view').innerHTML = body;
+      if (viewName === 'knowledge' && $('#rag-backfill')) {
+        $('#rag-backfill').onclick = runRagBackfill;
+      }
     } catch (error) {
       $('#view').innerHTML = '<div class="panel empty">' + esc(error.message || 'تعذر التحميل') + '</div>';
     }
