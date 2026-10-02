@@ -91,3 +91,20 @@ test('Telegram collaboration keeps explicit participant priority ahead of generi
   assert.ok(body.includes('const explicitParticipants = selectExplicitParticipants(topic, agents)'));
   assert.ok(body.indexOf('explicitParticipants.forEach(addParticipant)') < body.indexOf('plannedParticipants.forEach(addParticipant)'));
 });
+
+
+test('Telegram collaboration expands combined image/video designer wording into both explicit agents', () => {
+  const agents = [
+    { slug:'marketing' },
+    { slug:'content' },
+    { slug:'image-designer' },
+    { slug:'video-designer' },
+    { slug:'sales' },
+    { slug:'manager' }
+  ];
+  const request = 'مدير التسويق يحدد الزاوية، مدير المحتوى يكتب المحتوى، ومصمم الصور/الفيديو يجهز المواد البصرية.';
+  assert.deepEqual(
+    selectExplicitParticipants(request, agents).map(agent => agent.slug),
+    ['marketing','content','image-designer','video-designer']
+  );
+});
