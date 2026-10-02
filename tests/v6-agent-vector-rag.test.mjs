@@ -130,11 +130,12 @@ describe('vector migration and backfill wiring', () => {
 
   it('chat uses live retrieval and backfill endpoint writes embeddings', () => {
     const chat = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
-    const backfill = readFileSync(new URL('../api/ai-workforce/rag-backfill.js', import.meta.url), 'utf8');
     assert.match(chat, /retrieveLiveKnowledge/);
     assert.match(chat, /rag_retrieval_mode/);
-    assert.match(backfill, /embedding=is\.null/);
-    assert.match(backfill, /RETRIEVAL_DOCUMENT/);
-    assert.match(backfill, /embedding_updated_at/);
+    assert.match(chat, /rag-backfill/);
+    assert.match(chat, /embedding=is\.null/);
+    assert.match(chat, /RETRIEVAL_DOCUMENT/);
+    assert.match(chat, /embedding_updated_at/);
+    assert.match(chat, /ai_knowledge_chunks/);
   });
 });
