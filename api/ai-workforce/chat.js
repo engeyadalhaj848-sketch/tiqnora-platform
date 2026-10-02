@@ -506,7 +506,7 @@ export default async function handler(req, res) {
     ].filter(Boolean).join('\n\n');
 
     const messages = [
-      { role: 'system', content: [expertSystemPrompt(agent, memory, tasks), runtimePrompt].filter(Boolean).join('\n\n') },
+      { role: 'system', content: [expertSystemPrompt(agent, runtimeMemory, tasks), runtimePrompt].filter(Boolean).join('\n\n') },
       ...history,
       { role: 'user', content: message }
     ];
