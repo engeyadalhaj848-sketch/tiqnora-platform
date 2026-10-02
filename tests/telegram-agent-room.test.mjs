@@ -108,3 +108,13 @@ test('Telegram collaboration expands combined image/video designer wording into 
     ['marketing','content','image-designer','video-designer']
   );
 });
+
+
+test('Telegram agent room receives approved Tiqnora brand context and does not re-request known assets', () => {
+  const src = readFileSync(join(root, 'lib/telegram-agent-room.js'), 'utf8');
+  assert.ok(src.includes("buildBrandContext"));
+  assert.ok(src.includes("getDefaultBrandProfile"));
+  assert.ok(src.includes("approved_logo_asset: '/assets/tiqnora-logo.png'"));
+  assert.ok(src.includes('لا تطلب من المالك إعادة تزويدك بالشعار أو الألوان أو قواعد الاستخدام'));
+  assert.ok(src.includes('استخدم CTA من مكتبة الهوية المعتمدة'));
+});
