@@ -517,7 +517,7 @@
           + (acts.error
             ? '<p class="empty">Not configured — no canonical approval/action table available (' + esc(acts.error.message || 'missing') + '). Open tasks are NOT approvals.</p>'
             : '<table class="table"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Created</th></tr></thead><tbody>'
-              + rows(acts.data || [], ['id','action_type','status', r => new Date(r.created_at).toLocaleString('ar-SA')])
+              + rows((acts.data || []).filter(a => a.requires_approval === true), ['id','action_type','status', r => new Date(r.created_at).toLocaleString('ar-SA')])
               + '</tbody></table>')
           + '</div>';
       } else if (viewName === 'logs') {
