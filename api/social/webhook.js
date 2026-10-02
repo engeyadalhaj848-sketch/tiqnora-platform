@@ -667,6 +667,59 @@ function decryptVault(enc) {
   return Buffer.concat([d.update(Buffer.from(enc.ciphertext, 'base64url')), d.final()]).toString();
 }
 
+async function syncTikTokCommentWebhook(callbackUrl) {
+  const appId = String(process.env.TIKTOK_BUSINESS_APP_ID || '').trim();
+  const secret = String(process.env.TIKTOK_BUSINESS_APP_SECRET || '').trim();
+  if (!appId || !secret) throw new Error('TikTok Business app credentials are missing');
+
+  const response = await fetch('https://business-api.tiktok.com/open_api/v1.3/business/webhook/update/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+    body: JSON.stringify({
+      app_id: appId,
+      secret,
+      event_type: 'COMMENT',
+      callback_url: callbackUrl
+    }),
+    signal: AbortSignal.timeout(15000)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || Number(body?.code || 0) !== 0) {
+    throw new Error(body?.message || `TikTok webhook update failed (${response.status})`);
+  }
+
+  const orgs = await rest('organizations?slug=eq.tiqnora&select=id&limit=1');
+  const organizationId = orgs?.[0]?.id;
+  if (!organizationId) throw new Error('Tiqnora organization is missing');
+
+  const connections = await rest(
+    `social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.tiktok&status=eq.active&select=id,settings,capabilities`
+  );
+  for (const connection of connections || []) {
+    await rest(`social_connections?id=eq.${encodeURIComponent(connection.id)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        settings: {
+          ...(connection.settings || {}),
+          comment_webhook_subscribed: true,
+          comment_webhook_callback: callbackUrl,
+          comment_webhook_synced_at: new Date().toISOString()
+        },
+        capabilities: {
+          ...(connection.capabilities || {}),
+          comments: true,
+          replies: true,
+          comment_moderation: true
+        },
+        updated_at: new Date().toISOString()
+      })
+    });
+  }
+
+  return { ok: true, provider: 'tiktok_business', event_type: 'COMMENT', callback_url: callbackUrl };
+}
+
 async function metaGraphPost(path, accessToken, payload) {
   const url = new URL(`https://graph.facebook.com/v22.0/${String(path || '').replace(/^\//, '')}`);
   url.searchParams.set('access_token', accessToken);
@@ -1625,6 +1678,21 @@ export { normalizeMeta, validMetaSignature };
 export default async function handler(req, res) {
   const query = getQuery(req);
   const platform = String(query.platform || 'meta').toLowerCase();
+
+  // One-time server-side bootstrap for the TikTok COMMENT webhook. The caller
+  // must know a high-entropy token whose SHA-256 digest is pinned here. The
+  // bootstrap is removed immediately after successful registration.
+  if (req.method === 'GET' && platform === 'tiktok' && query.setup_token) {
+    const suppliedHash = createHash('sha256').update(String(query.setup_token)).digest('hex');
+    const expectedHash = '94d073e750158c459769ed500f3e0aa6d2a0465894f3860e42da87602be1b758';
+    if (!safeEqualText(suppliedHash, expectedHash)) return send(res, 403, { error: 'Forbidden' });
+    try {
+      const result = await syncTikTokCommentWebhook('https://tiqnora.com/api/social/webhook?platform=tiktok');
+      return send(res, 200, result);
+    } catch (error) {
+      return send(res, 502, { error: error.message || 'TikTok webhook setup failed' });
+    }
+  }
 
   if (req.method === 'GET' && ['meta', 'whatsapp'].includes(platform)) {
     const mode = String(query['hub.mode'] || '');
