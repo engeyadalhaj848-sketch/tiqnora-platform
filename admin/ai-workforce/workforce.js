@@ -440,6 +440,17 @@
     dialog.showModal();
   }
 
+  async function loadRuntimeStatus() {
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.access_token) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مرة أخرى.');
+    const response = await fetch('/api/ai-workforce/chat?route=runtime-status', {
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'تعذر تحميل Runtime Status');
+    return payload;
+  }
+
   async function runRagBackfill() {
     const button = $('#rag-backfill');
     if (button) {
@@ -519,7 +530,18 @@
           + '<div class="panel"><h2>RAG</h2><p>' + esc(ragStatus) + '</p></div>'
           + '<div class="panel"><h2>Guards</h2><p>no_auto_send / no_auto_publish — orchestrator enforced</p></div>';
       } else if (viewName === 'skills') {
-        body = '<div class="panel"><h2>Skills</h2><p class="empty">Not configured — no runtime status endpoint exposing the Skill Registry yet. Skills are code-defined in lib/v6/agent-runtime.js and are not listed as a hard-coded subset here.</p></div>';
+        let runtimeStatus = null;
+        try { runtimeStatus = await loadRuntimeStatus(); } catch (error) {
+          body = '<div class="panel"><h2>Skills</h2><p class="empty">' + esc(error.message || 'Runtime status unavailable') + '</p></div>';
+        }
+        if (runtimeStatus) {
+          const bindings = runtimeStatus.agent_skill_bindings || [];
+          const skillUsers = (skillId) => bindings.filter(b => (b.skill_ids || []).includes(skillId)).map(b => b.agent_slug).join(', ') || '—';
+          body = '<div class="panel"><h2>Skills Registry</h2><p class="muted">Runtime source: <code>lib/v6/agent-runtime.js</code> · Mode: ' + esc(runtimeStatus.runtime?.mode || 'unknown') + '</p>'
+            + '<table class="table"><thead><tr><th>ID</th><th>Title</th><th>Agents</th></tr></thead><tbody>'
+            + rows(runtimeStatus.skills || [], ['id','title', r => skillUsers(r.id)])
+            + '</tbody></table></div>';
+        }
       } else if (viewName === 'tools') {
         body = '<div class="panel"><h2>Tools / MCP</h2><p><strong>Status:</strong> ' + esc(mcpStatus) + '</p><p>Native endpoint: <code>/api/v6?route=mcp</code> · Tools + resources · admin-gated tool calls</p></div>';
       } else if (viewName === 'a2a') {
