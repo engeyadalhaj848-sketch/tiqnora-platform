@@ -167,7 +167,7 @@
     app.className = 'app-shell';
     app.innerHTML = `<header class="topbar"><div class="brand"><img src="/assets/tiqnora-logo.png" alt="Tiqnora AI"><div><strong>Tiqnora AI Workforce</strong><small>INTERNAL OPERATIONS</small></div></div><div class="top-actions"><span class="user-chip">${esc(me.full_name || me.email)}</span><a class="btn btn-sm" href="/admin.html"><span class="back-label">لوحة الإدارة</span> ←</a><button class="btn btn-sm" id="logout">خروج</button></div></header>
     <main class="main"><section class="hero"><div><span class="eyebrow">فريقك التنفيذي الذكي</span><h1>إدارة Tiqnora بقدرات AI متخصصة</h1><p>وجّه الموظفين، تابع المهام، واحتفظ بمعرفة الشركة داخل مساحة إدارية آمنة وقابلة للتوسع.</p></div><span class="secure-badge">● مساحة إدارية محمية</span></section>
-    <nav class="tabs" aria-label="أقسام فريق العمل"><button class="tab active" data-view="overview">نظرة عامة</button><button class="tab" data-view="chat">المحادثات</button><button class="tab" data-view="calls">المكالمات</button><button class="tab" data-view="tasks">المهام</button><button class="tab" data-view="memory">الذاكرة</button></nav><section class="view" id="view"></section></main>
+    <nav class="tabs" aria-label="أقسام فريق العمل"><button class="tab active" data-view="overview">نظرة عامة</button><button class="tab" data-view="chat">المحادثات</button><button class="tab" data-view="calls">المكالمات</button><button class="tab" data-view="tasks">المهام</button><button class="tab" data-view="memory">الذاكرة</button><button class="tab" data-view="architecture">البنية</button><button class="tab" data-view="runs">التشغيل</button><button class="tab" data-view="skills">المهارات</button><button class="tab" data-view="tools">الأدوات/MCP</button><button class="tab" data-view="a2a">A2A</button><button class="tab" data-view="evals">التقييم</button><button class="tab" data-view="artifacts">Artifacts</button><button class="tab" data-view="knowledge">المعرفة/RAG</button><button class="tab" data-view="approvals">الموافقات</button><button class="tab" data-view="logs">السجلات</button></nav><section class="view" id="view"></section></main>
     <dialog class="dialog" id="dialog"><div class="dialog-body" id="dialog-body"></div></dialog>`;
     $('#logout').onclick = async () => { await db.auth.signOut(); location.href = '/admin.html'; };
     $$('.tab').forEach(btn => btn.onclick = () => switchView(btn.dataset.view));
@@ -176,7 +176,7 @@
     if (view !== 'chat') stopVoiceSession();
     if (agentId) selectedAgent = agents.find(a => a.id === agentId) || selectedAgent;
     $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.view === view));
-    ({ overview:renderOverview, chat:renderChat, calls:renderCalls, tasks:renderTasks, memory:renderMemory }[view] || renderOverview)();
+    ({ overview:renderOverview, chat:renderChat, calls:renderCalls, tasks:renderTasks, memory:renderMemory, architecture:renderArchitecture, runs:renderArchitecture, skills:renderArchitecture, tools:renderArchitecture, a2a:renderArchitecture, evals:renderArchitecture, artifacts:renderArchitecture, knowledge:renderArchitecture, approvals:renderArchitecture, logs:renderArchitecture }[view] || renderOverview)();
   }
   function renderOverview() {
     const openTasks = state.tasks.filter(x => !['done','cancelled'].includes(x.status)).length;
@@ -439,5 +439,107 @@
     $('#memory-form').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target); const payload = { organization_id:org.id, agent_id:f.get('agent_id'), memory_key:f.get('memory_key').trim(), memory_value:f.get('memory_value').trim(), created_by:me.id }; const { error } = await db.from('ai_memory').upsert(payload, { onConflict:'agent_id,memory_key' }); if (error) return toast(error.message,false); dialog.close(); await loadData(); switchView('memory'); toast('تم حفظ المعلومة في الذاكرة'); };
     dialog.showModal();
   }
+
+  async function renderArchitecture() {
+    const viewName = $$('.tab.active')[0]?.dataset.view || 'architecture';
+    $('#view').innerHTML = '<div class="panel empty">جارٍ تحميل حالة البنية من قاعدة البيانات…</div>';
+    try {
+      const qTasks = await db.from('ai_tasks').select('id,status,title,agent_id,created_at', { count: 'exact' }).eq('organization_id', org.id).order('created_at', { ascending: false }).limit(30);
+      const qMem = await db.from('ai_memory').select('id,memory_key,agent_id,created_at', { count: 'exact' }).eq('organization_id', org.id).order('created_at', { ascending: false }).limit(30);
+      const qConv = await db.from('ai_conversations').select('id,agent_id,status,created_at', { count: 'exact' }).eq('organization_id', org.id).order('created_at', { ascending: false }).limit(20);
+      const qAgents = await db.from('ai_agents').select('id,slug,name,name_ar,status,is_enabled,provider,model').eq('organization_id', org.id);
+      async function soft(table, sel, orgScoped = true) {
+        try {
+          let q = db.from(table).select(sel, { count: 'exact' });
+          if (orgScoped && org?.id) q = q.eq('organization_id', org.id);
+          const r = await q.order('created_at', { ascending: false }).limit(20);
+          return { data: r.data || [], count: r.count, error: r.error };
+        } catch (e) {
+          return { data: [], count: 0, error: e };
+        }
+      }
+      const knowledgeDocs = await soft('ai_knowledge_documents', 'id,title,source_type,is_active,created_at', true);
+      const evals = await soft('ai_agent_evals', 'id,score,passed,rubric,created_at,agent_id', true);
+      const a2a = await soft('ai_agent_messages', 'id,message_type,status,hop,created_at', true);
+      const learning = await soft('ai_agent_learning_events', 'id,lesson_key,status,lesson,created_at', true);
+      const agentsList = qAgents.data || agents || [];
+      const mcpStatus = 'Partial — Compatibility Layer (mcp_social JSON-RPC). Not MCP_NATIVE.';
+      const ragStatus = knowledgeDocs.error
+        ? ('Not configured: ' + (knowledgeDocs.error.message || 'missing'))
+        : ('Documents: ' + (knowledgeDocs.count ?? knowledgeDocs.data.length));
+      const rows = (list, cols) => {
+        if (!list.length) return '<tr><td colspan="6" class="empty">لا توجد بيانات حقيقية بعد</td></tr>';
+        return list.map(r => '<tr>' + cols.map(c => '<td>' + esc(typeof c === 'function' ? c(r) : (r[c] ?? '—')) + '</td>').join('') + '</tr>').join('');
+      };
+      let body = '';
+      if (viewName === 'runs') {
+        const tr = await soft('agent_traces', 'trace_id,status,root_agent_key,trigger,created_at,completed_at', true);
+        body = '<div class="panel"><h2>Runs / Traces</h2>'
+          + (tr.error ? '<p class="empty">agent_traces: Not configured (' + esc(tr.error.message || 'missing') + ')</p>' : '')
+          + '<table class="table"><thead><tr><th>Trace</th><th>Status</th><th>Agent</th><th>Trigger</th><th>Created</th></tr></thead><tbody>'
+          + rows(tr.data || [], ['trace_id','status','root_agent_key','trigger', r => new Date(r.created_at).toLocaleString('ar-SA')])
+          + '</tbody></table></div>';
+      } else if (viewName === 'architecture') {
+        body = '<div class="stats">'
+          + '<div class="stat"><span>Agents</span><strong>' + agentsList.length + '</strong></div>'
+          + '<div class="stat"><span>Tasks</span><strong>' + (qTasks.count ?? (qTasks.data||[]).length) + '</strong></div>'
+          + '<div class="stat"><span>Memory</span><strong>' + (qMem.count ?? (qMem.data||[]).length) + '</strong></div>'
+          + '<div class="stat"><span>Conversations</span><strong>' + (qConv.count ?? (qConv.data||[]).length) + '</strong></div></div>'
+          + '<div class="panel"><h2>MCP</h2><p>' + esc(mcpStatus) + '</p></div>'
+          + '<div class="panel"><h2>RAG</h2><p>' + esc(ragStatus) + '</p></div>'
+          + '<div class="panel"><h2>Guards</h2><p>no_auto_send / no_auto_publish — orchestrator enforced</p></div>';
+      } else if (viewName === 'skills') {
+        body = '<div class="panel"><h2>Skills</h2><p class="empty">Not configured — no runtime status endpoint exposing the Skill Registry yet. Skills are code-defined in lib/v6/agent-runtime.js and are not listed as a hard-coded subset here.</p></div>';
+      } else if (viewName === 'tools') {
+        body = '<div class="panel"><h2>Tools / MCP</h2><p><strong>Status:</strong> ' + esc(mcpStatus) + '</p><p>MCP_NATIVE handshake: Not configured</p></div>';
+      } else if (viewName === 'a2a') {
+        body = '<div class="panel"><h2>A2A</h2>' + (a2a.error ? '<p class="empty">' + esc(a2a.error.message || 'unavailable') + '</p>' : '')
+          + '<table class="table"><thead><tr><th>Type</th><th>Status</th><th>Hop</th><th>Created</th></tr></thead><tbody>'
+          + rows(a2a.data, ['message_type','status','hop', r => new Date(r.created_at).toLocaleString('ar-SA')]) + '</tbody></table></div>';
+      } else if (viewName === 'evals') {
+        body = '<div class="panel"><h2>Evals</h2>' + (evals.error ? '<p class="empty">unavailable</p>' : '')
+          + '<table class="table"><thead><tr><th>Score</th><th>Passed</th><th>Rubric</th><th>Created</th></tr></thead><tbody>'
+          + rows(evals.data, ['score', r => r.passed ? 'yes' : 'no', 'rubric', r => new Date(r.created_at).toLocaleString('ar-SA')]) + '</tbody></table></div>';
+      } else if (viewName === 'artifacts') {
+        const arts = await soft('agent_artifacts', 'artifact_id,artifact_type,creator_agent_key,verification_status,created_at', true);
+        body = '<div class="panel"><h2>Artifacts</h2>'
+          + (arts.error ? '<p class="empty">agent_artifacts: Not configured (' + esc(arts.error.message || 'missing') + ')</p>' : '')
+          + '<table class="table"><thead><tr><th>ID</th><th>Type</th><th>Creator</th><th>Verify</th></tr></thead><tbody>'
+          + rows(arts.data || [], ['artifact_id','artifact_type','creator_agent_key','verification_status'])
+          + '</tbody></table></div>';
+      } else if (viewName === 'knowledge') {
+        body = '<div class="panel"><h2>Knowledge / RAG</h2>' + (knowledgeDocs.error ? '<p class="empty">' + esc(knowledgeDocs.error.message || 'Not configured') + '</p>' : '')
+          + '<table class="table"><thead><tr><th>Title</th><th>Source</th><th>Active</th><th>Created</th></tr></thead><tbody>'
+          + rows(knowledgeDocs.data, ['title','source_type', r => r.is_active ? 'yes' : 'no', r => new Date(r.created_at).toLocaleString('ar-SA')]) + '</tbody></table></div>';
+      } else if (viewName === 'approvals') {
+        const acts = await soft('actions', 'id,action_type,status,requires_approval,approved_at,created_at', true);
+        body = '<div class="panel"><h2>Approvals</h2>'
+          + (acts.error
+            ? '<p class="empty">Not configured — no canonical approval/action table available (' + esc(acts.error.message || 'missing') + '). Open tasks are NOT approvals.</p>'
+            : '<table class="table"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Created</th></tr></thead><tbody>'
+              + rows((acts.data || []).filter(a => a.requires_approval === true), ['id','action_type','status', r => new Date(r.created_at).toLocaleString('ar-SA')])
+              + '</tbody></table>')
+          + '</div>';
+      } else if (viewName === 'logs') {
+        const tr = await soft('agent_traces', 'trace_id,status,root_agent_key,trigger,created_at', true);
+        const sp = await soft('agent_trace_spans', 'span_id,trace_id,name,status,created_at', true);
+        body = '<div class="panel"><h2>Logs (Traces / Spans)</h2>'
+          + (tr.error ? '<p class="empty">agent_traces: Not configured</p>' : '')
+          + '<table class="table"><thead><tr><th>Trace</th><th>Status</th><th>Agent</th><th>Trigger</th></tr></thead><tbody>'
+          + rows(tr.data || [], ['trace_id','status','root_agent_key','trigger'])
+          + '</tbody></table>'
+          + (sp.error ? '' : ('<h3>Spans</h3><table class="table"><thead><tr><th>Span</th><th>Trace</th><th>Name</th><th>Status</th></tr></thead><tbody>'
+            + rows(sp.data || [], ['span_id','trace_id','name','status']) + '</tbody></table>'))
+          + '</div>';
+      } else {
+        body = '<div class="panel"><h2>Agents</h2><table class="table"><thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Provider</th></tr></thead><tbody>'
+          + rows(agentsList, [r => r.name_ar || r.name, 'slug', r => r.status, r => r.provider || '—']) + '</tbody></table></div>';
+      }
+      $('#view').innerHTML = body;
+    } catch (error) {
+      $('#view').innerHTML = '<div class="panel empty">' + esc(error.message || 'تعذر التحميل') + '</div>';
+    }
+  }
+
   window.addEventListener('DOMContentLoaded', () => boot().catch(error => showError('حدث خطأ', error.message)));
 })();

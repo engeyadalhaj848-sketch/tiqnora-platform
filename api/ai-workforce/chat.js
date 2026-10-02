@@ -6,6 +6,13 @@ import {
   evaluateAgentResponse,
   buildLearningEvent
 } from '../../lib/v6/agent-runtime.js';
+import {
+  selectRuntimeMode,
+  buildV2RuntimeContext,
+  runV2AgentTurn,
+  buildEvalInsert,
+  buildLearningInsert
+} from '../../lib/v6/workforce/production-runtime.js';
 
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -344,16 +351,28 @@ export default async function handler(req, res) {
       title: row.metadata?.title || row.metadata?.document_title || 'Tiqnora Knowledge',
       source_uri: row.metadata?.source_uri || null
     })), { limit: 8 });
-    const runtime = orchestrationContext({
-      agent,
-      message,
-      agents: runtimeAgents || [],
-      state: runtimeState,
-      memory,
-      tasks,
-      recent,
-      knowledge
-    });
+    const runtimeMode = selectRuntimeMode(process.env);
+    const runtime = runtimeMode.v2
+      ? buildV2RuntimeContext({
+          agent,
+          message,
+          agents: runtimeAgents || [],
+          state: runtimeState,
+          memory,
+          tasks,
+          recent,
+          knowledge
+        })
+      : orchestrationContext({
+          agent,
+          message,
+          agents: runtimeAgents || [],
+          state: runtimeState,
+          memory,
+          tasks,
+          recent,
+          knowledge
+        });
 
     const history = (recent || []).reverse().flatMap(row => [
       { role: 'user', content: row.message },
@@ -388,21 +407,161 @@ export default async function handler(req, res) {
     let harnessMeta = null;
 
     if (!result) {
-      const harnessRun = await runAgentHarness({
-        agent,
-        message,
-        knowledge,
-        invoke: async ({ attempt, feedback }) => {
+      const invoke = async ({ attempt, feedback }) => {
           const retryNote = attempt > 1 && feedback.length
             ? { role: 'system', content: `Quality retry: improve these failed checks before answering: ${feedback.join(', ')}. Do not mention this retry to the user.` }
             : null;
           return callPreferredProvider(agent, retryNote ? [...messages, retryNote] : messages);
+        };
+
+      if (runtimeMode.v2) {
+        const v2Started = Date.now();
+        const v2TraceId = `tr_chat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        // One logical trace for the live V2 turn (best-effort; never blocks response)
+        await supabaseOptional('/rest/v1/agent_traces', token, {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            organization_id: agent.organization_id,
+            trace_id: v2TraceId,
+            root_agent_key: agent.slug || agent.id,
+            trigger: 'chat_v2',
+            status: 'running',
+            metadata: { agent_id: agent.id, agent_key: agent.slug, mode: 'v2' },
+            started_at: new Date().toISOString()
+          })
+        }, null);
+        await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            organization_id: agent.organization_id,
+            trace_id: v2TraceId,
+            span_id: `sp_req_${Date.now().toString(36)}`,
+            agent_key: agent.slug || agent.id,
+            span_type: 'step',
+            name: 'request_runtime',
+            status: 'completed',
+            input: { message_len: message.length },
+            output: { path: runtimeMode.path }
+          })
+        }, null);
+
+        try {
+          const v2Turn = await runV2AgentTurn({
+            agent,
+            message,
+            knowledge,
+            runtime,
+            invoke
+          });
+          // Consume full V2 turn — do not discard evaluation/learning/meta
+          result = v2Turn.result?.result ?? v2Turn.result;
+          runtimeEvaluation = v2Turn.evaluation;
+          learningEvent = v2Turn.learning;
+          harnessMeta = {
+            ...(v2Turn.meta || {}),
+            trace_id: v2TraceId,
+            duration_ms: Date.now() - v2Started
+          };
+
+          await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              organization_id: agent.organization_id,
+              trace_id: v2TraceId,
+              span_id: `sp_harness_${Date.now().toString(36)}`,
+              agent_key: agent.slug || agent.id,
+              span_type: 'step',
+              name: 'provider_harness',
+              status: 'completed',
+              output: { has_result: Boolean(result) }
+            })
+          }, null);
+          await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              organization_id: agent.organization_id,
+              trace_id: v2TraceId,
+              span_id: `sp_eval_${Date.now().toString(36)}`,
+              agent_key: agent.slug || agent.id,
+              span_type: 'step',
+              name: 'eval',
+              status: runtimeEvaluation?.pass || runtimeEvaluation?.passed ? 'completed' : 'failed',
+              output: {
+                score: runtimeEvaluation?.score ?? null,
+                pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null
+              }
+            })
+          }, null);
+          // Finish same trace (PATCH by trace_id filter)
+          await supabaseOptional(
+            `/rest/v1/agent_traces?trace_id=eq.${encodeURIComponent(v2TraceId)}`,
+            token,
+            {
+              method: 'PATCH',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+                duration_ms: Date.now() - v2Started,
+                summary: {
+                  eval_pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null,
+                  score: runtimeEvaluation?.score ?? null
+                }
+              })
+            },
+            null
+          );
+        } catch (error) {
+          const failure = String(error?.code || error?.message || 'v2_runtime_failed').slice(0, 500);
+          await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              organization_id: agent.organization_id,
+              trace_id: v2TraceId,
+              span_id: `sp_error_${Date.now().toString(36)}`,
+              agent_key: agent.slug || agent.id,
+              span_type: 'error',
+              name: 'runtime_error',
+              status: 'failed',
+              error_code: String(error?.code || 'v2_runtime_error').slice(0, 120),
+              error_message: failure,
+              duration_ms: Date.now() - v2Started
+            })
+          }, null);
+          await supabaseOptional(
+            `/rest/v1/agent_traces?trace_id=eq.${encodeURIComponent(v2TraceId)}`,
+            token,
+            {
+              method: 'PATCH',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                status: 'failed',
+                completed_at: new Date().toISOString(),
+                duration_ms: Date.now() - v2Started,
+                summary: { error_code: String(error?.code || 'v2_runtime_error').slice(0, 120) }
+              })
+            },
+            null
+          );
+          throw error;
         }
-      });
-      result = harnessRun.result;
-      runtimeEvaluation = harnessRun.evaluation;
-      learningEvent = harnessRun.learning_event;
-      harnessMeta = harnessRun.harness;
+      } else {
+        const harnessRun = await runAgentHarness({
+          agent,
+          message,
+          knowledge,
+          invoke
+        });
+        result = harnessRun.result;
+        runtimeEvaluation = harnessRun.evaluation;
+        learningEvent = harnessRun.learning_event;
+        harnessMeta = harnessRun.harness;
+      }
     } else {
       runtimeEvaluation = evaluateAgentResponse({
         agentSlug: agent.slug,
@@ -446,38 +605,38 @@ export default async function handler(req, res) {
       const evalRows = await supabaseOptional('/rest/v1/ai_agent_evals?select=id', token, {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({
+        body: JSON.stringify(buildEvalInsert({
           organization_id: agent.organization_id,
           agent_id: agent.id,
           conversation_id: conversation?.id || null,
-          rubric: runtimeEvaluation.rubric,
-          score: runtimeEvaluation.score,
-          passed: runtimeEvaluation.pass,
-          dimensions: runtimeEvaluation.dimensions,
-          failures: runtimeEvaluation.failures,
-          metadata: {
+          evaluation: {
+            rubric: runtimeEvaluation.rubric,
+            score: runtimeEvaluation.score,
+            pass: runtimeEvaluation.pass,
+            dimensions: runtimeEvaluation.dimensions,
+            failures: runtimeEvaluation.failures
+          },
+          meta: {
+            mode: runtimeMode.mode,
+            path: runtimeMode.path,
             harness: harnessMeta,
             rag_chunk_ids: knowledge.map(item => item.id),
             skills: runtime.agent_card.skills,
             allowed_tools: runtime.tools
           }
-        })
+        }))
       }, []);
 
       if (learningEvent) {
         await supabaseOptional('/rest/v1/ai_agent_learning_events', token, {
           method: 'POST',
           headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
+          body: JSON.stringify(buildLearningInsert({
             organization_id: agent.organization_id,
             agent_id: agent.id,
             source_eval_id: evalRows?.[0]?.id || null,
-            lesson_key: learningEvent.lesson_key,
-            lesson: learningEvent.lesson,
-            status: 'proposed',
-            auto_apply: false,
-            metadata: { score: learningEvent.source_score, requires_human_approval: true }
-          })
+            learning: learningEvent
+          }))
         }, []);
       }
     }
@@ -488,6 +647,8 @@ export default async function handler(req, res) {
         ...(result.meta || {}),
         runtime: {
           concepts: ['memory_state','orchestration','rag','harness','evals','mcp','skills','a2a','multi_agent'],
+          mode: (typeof runtimeMode !== 'undefined' ? runtimeMode.mode : 'legacy'),
+          path: (typeof runtimeMode !== 'undefined' ? runtimeMode.path : 'legacy.chat'),
           eval: runtimeEvaluation ? { score: runtimeEvaluation.score, pass: runtimeEvaluation.pass } : null,
           rag_chunks: knowledge.map(item => item.id),
           skills: runtime.agent_card.skills,
