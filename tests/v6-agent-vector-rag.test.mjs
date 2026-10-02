@@ -138,4 +138,12 @@ describe('vector migration and backfill wiring', () => {
     assert.match(chat, /embedding_updated_at/);
     assert.match(chat, /ai_knowledge_chunks/);
   });
+
+  it('admin Knowledge tab exposes consolidated Vector RAG backfill without a new API function', () => {
+    const admin = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(admin, /id="rag-backfill"/);
+    assert.match(admin, /\/api\/ai-workforce\/chat\?route=rag-backfill/);
+    assert.match(admin, /Authorization:/);
+    assert.match(admin, /body: JSON\.stringify\(\{ limit: 25 \}\)/);
+  });
 });
