@@ -13,9 +13,12 @@ import {
   buildEvalInsert,
   buildLearningInsert
 } from '../../lib/v6/workforce/production-runtime.js';
+import { retrieveLiveKnowledge } from '../../lib/v6/workforce/live-rag.js';
+import { embedText, toPgVectorLiteral } from '../../lib/v6/workforce/embeddings.js';
 
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
+const KNOWLEDGE_SOURCE_TABLE = 'ai_knowledge_chunks';
 
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -285,6 +288,65 @@ async function saveConversation(token, row) {
   return data?.[0];
 }
 
+async function backfillKnowledgeEmbeddings(token, userId, limitRaw = 10) {
+  const profiles = await supabase(
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,is_active,default_organization_id`,
+    token
+  );
+  const profile = profiles?.[0];
+  if (!profile || !profile.is_active || !['admin', 'super_admin'].includes(profile.role)) {
+    const error = new Error('صلاحية أدمن مطلوبة.');
+    error.status = 403;
+    throw error;
+  }
+  if (!profile.default_organization_id) {
+    const error = new Error('لا توجد مؤسسة افتراضية مرتبطة بالحساب.');
+    error.status = 400;
+    throw error;
+  }
+
+  const limit = Math.max(1, Math.min(Number(limitRaw || 10), 25));
+  const rows = await supabase(
+    `/rest/v1/${KNOWLEDGE_SOURCE_TABLE}?organization_id=eq.${encodeURIComponent(profile.default_organization_id)}&embedding=is.null&select=id,content&order=created_at.asc&limit=${limit}`,
+    token
+  );
+
+  const results = [];
+  for (const row of rows || []) {
+    try {
+      const embedded = await embedText(row.content, {
+        env: process.env,
+        taskType: 'RETRIEVAL_DOCUMENT'
+      });
+      await supabase(
+        `/rest/v1/${KNOWLEDGE_SOURCE_TABLE}?id=eq.${encodeURIComponent(row.id)}`,
+        token,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            embedding: toPgVectorLiteral(embedded.vector),
+            embedding_model: embedded.model,
+            embedding_updated_at: new Date().toISOString()
+          })
+        }
+      );
+      results.push({ id: row.id, ok: true, provider: embedded.provider, model: embedded.model });
+    } catch (error) {
+      results.push({ id: row.id, ok: false, error: String(error?.message || error).slice(0, 300) });
+    }
+  }
+
+  return {
+    organization_id: profile.default_organization_id,
+    requested: limit,
+    processed: results.length,
+    succeeded: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results
+  };
+}
+
 function providerStatusPayload() {
   const providers = [
     { id: 'google_ai', name: 'Google Gemini', configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY), defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash', envVars: ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GEMINI_MODEL'] },
@@ -312,6 +374,18 @@ export default async function handler(req, res) {
     }
   }
 
+  if (req.method === 'POST' && String(req.query?.route || '').toLowerCase() === 'rag-backfill') {
+    try {
+      const user = await supabase('/auth/v1/user', token);
+      const result = await backfillKnowledgeEmbeddings(token, user.id, req.body?.limit);
+      return json(res, 200, result);
+    } catch (error) {
+      return json(res, error.status && error.status < 600 ? error.status : 500, {
+        error: error.message || 'تعذر تجهيز embeddings.'
+      });
+    }
+  }
+
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const agentId = String(req.body?.agentId || '');
   const message = String(req.body?.message || '').trim();
@@ -328,12 +402,11 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [memory, recent, tasks, stateRows, knowledgeRows, runtimeAgents] = await Promise.all([
+    const [memory, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
       supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
       supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
       supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
-      supabaseOptional(`/rest/v1/ai_knowledge_chunks?organization_id=eq.${encodeURIComponent(agent.organization_id)}&select=id,document_id,content,metadata&order=created_at.desc&limit=120`, token, {}, []),
       supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&select=id,slug,name,name_ar,description`, token)
     ]);
     const stateRow = stateRows?.[0] || {};
@@ -346,11 +419,15 @@ export default async function handler(req, res) {
       last_outcome: stateRow.last_outcome || stateRow.state?.last_outcome || null,
       counters: stateRow.counters || stateRow.state?.counters || {}
     };
-    const knowledge = retrieveRagCandidates(message, (knowledgeRows || []).map(row => ({
-      ...row,
-      title: row.metadata?.title || row.metadata?.document_title || 'Tiqnora Knowledge',
-      source_uri: row.metadata?.source_uri || null
-    })), { limit: 8 });
+    const knowledgeRetrieval = await retrieveLiveKnowledge({
+      query: message,
+      organization_id: agent.organization_id,
+      token,
+      supabaseCall: supabase,
+      env: process.env,
+      limit: 8
+    });
+    const knowledge = knowledgeRetrieval.chunks;
     const runtimeMode = selectRuntimeMode(process.env);
     const runtime = runtimeMode.v2
       ? buildV2RuntimeContext({
@@ -621,6 +698,9 @@ export default async function handler(req, res) {
             path: runtimeMode.path,
             harness: harnessMeta,
             rag_chunk_ids: knowledge.map(item => item.id),
+            rag_retrieval_mode: knowledgeRetrieval.mode,
+            rag_source_table: KNOWLEDGE_SOURCE_TABLE,
+            rag_vector_error: knowledgeRetrieval.diagnostics?.vector_error || null,
             skills: runtime.agent_card.skills,
             allowed_tools: runtime.tools
           }
@@ -651,6 +731,8 @@ export default async function handler(req, res) {
           path: (typeof runtimeMode !== 'undefined' ? runtimeMode.path : 'legacy.chat'),
           eval: runtimeEvaluation ? { score: runtimeEvaluation.score, pass: runtimeEvaluation.pass } : null,
           rag_chunks: knowledge.map(item => item.id),
+          rag_mode: knowledgeRetrieval.mode,
+          rag_source_table: KNOWLEDGE_SOURCE_TABLE,
           skills: runtime.agent_card.skills,
           delegation: runtime.delegation || null
         }
