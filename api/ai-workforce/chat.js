@@ -18,6 +18,7 @@ import {
 } from '../../lib/v6/workforce/production-runtime.js';
 import { retrieveLiveKnowledge } from '../../lib/v6/workforce/live-rag.js';
 import { embedText, embeddingStatus, toPgVectorLiteral } from '../../lib/v6/workforce/embeddings.js';
+import { executeLiveDelegation } from '../../lib/v6/workforce/live-collaboration.js';
 
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -438,7 +439,7 @@ export default async function handler(req, res) {
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
       supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
       supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
-      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&select=id,slug,name,name_ar,description`, token)
+      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&status=eq.active&select=id,organization_id,slug,name,name_ar,description,system_prompt,model,temperature,provider,status,is_enabled`, token)
     ]);
     const typedMemory = (typedMemoryRows || []).filter(row =>
       ['shared','organization'].includes(row.scope) || !row.agent_key || row.agent_key === agent.slug
@@ -524,13 +525,15 @@ export default async function handler(req, res) {
     let runtimeEvaluation = null;
     let learningEvent = null;
     let harnessMeta = null;
+    let liveCollaboration = null;
+    let providerMessages = messages;
 
     if (!result) {
       const invoke = async ({ attempt, feedback }) => {
           const retryNote = attempt > 1 && feedback.length
             ? { role: 'system', content: `Quality retry: improve these failed checks before answering: ${feedback.join(', ')}. Do not mention this retry to the user.` }
             : null;
-          return callPreferredProvider(agent, retryNote ? [...messages, retryNote] : messages);
+          return callPreferredProvider(agent, retryNote ? [...providerMessages, retryNote] : providerMessages);
         };
 
       if (runtimeMode.v2) {
@@ -567,6 +570,130 @@ export default async function handler(req, res) {
         }, null);
 
         try {
+          if (
+            String(agent.slug || '').toLowerCase() === 'manager'
+            && Array.isArray(runtime.delegation?.tasks)
+            && runtime.delegation.tasks.length
+          ) {
+            liveCollaboration = await executeLiveDelegation({
+              manager: agent,
+              plan: runtime.delegation,
+              agents: runtimeAgents || [],
+              objective: message,
+              correlationId: v2TraceId,
+              invokeSpecialist: async ({ specialist, task: delegatedTask, objective }) => {
+                const specialistRuntime = buildV2RuntimeContext({
+                  agent: specialist,
+                  message: delegatedTask.task || objective,
+                  agents: runtimeAgents || [],
+                  state: {
+                    mode: 'delegated',
+                    current_goal: delegatedTask.task || objective,
+                    active_thread: v2TraceId,
+                    parent_agent: agent.slug || agent.id
+                  },
+                  memory,
+                  tasks,
+                  recent: [],
+                  knowledge
+                });
+                const specialistRuntimePrompt = [
+                  formatStateContext(specialistRuntime.state),
+                  specialistRuntime.skills_prompt,
+                  specialistRuntime.rag_prompt,
+                  `Allowed MCP/tool scopes for this specialist: ${specialistRuntime.tools.join(', ')}. Do not execute external actions.`,
+                  'This is a bounded A2A specialist task. Return analysis/artifact text only. Do not delegate again.'
+                ].filter(Boolean).join('\n\n');
+                const specialistMessages = [
+                  {
+                    role: 'system',
+                    content: [
+                      expertSystemPrompt(specialist, memory, tasks),
+                      specialistRuntimePrompt
+                    ].filter(Boolean).join('\n\n')
+                  },
+                  {
+                    role: 'user',
+                    content: [
+                      `Manager objective: ${objective}`,
+                      `Delegated task: ${delegatedTask.task || objective}`,
+                      `Acceptance: ${(delegatedTask.acceptance || []).join(', ') || 'specific, evidence-aware, actionable'}`
+                    ].join('\n')
+                  }
+                ];
+                const specialistTurn = await runV2AgentTurn({
+                  agent: specialist,
+                  message: delegatedTask.task || objective,
+                  knowledge,
+                  runtime: specialistRuntime,
+                  invoke: async ({ attempt, feedback }) => {
+                    const retryNote = attempt > 1 && feedback.length
+                      ? {
+                          role: 'system',
+                          content: `Quality retry for delegated specialist output: ${feedback.join(', ')}.`
+                        }
+                      : null;
+                    return callPreferredProvider(
+                      specialist,
+                      retryNote ? [...specialistMessages, retryNote] : specialistMessages
+                    );
+                  }
+                });
+                const providerResult = specialistTurn.result?.result || {};
+                return {
+                  text: specialistTurn.response,
+                  provider: providerResult.provider || null,
+                  model: providerResult.model || specialist.model || null,
+                  evaluation: specialistTurn.evaluation
+                };
+              },
+              persistMessage: async (row) => {
+                return supabase('/rest/v1/ai_agent_messages', token, {
+                  method: 'POST',
+                  headers: { Prefer: 'return=minimal' },
+                  body: JSON.stringify(row)
+                });
+              },
+              recordSpan: async (span) => {
+                return supabase('/rest/v1/agent_trace_spans', token, {
+                  method: 'POST',
+                  headers: { Prefer: 'return=minimal' },
+                  body: JSON.stringify(span)
+                });
+              }
+            });
+
+            providerMessages = [
+              ...messages.slice(0, -1),
+              { role: 'system', content: liveCollaboration.synthesis_context },
+              messages[messages.length - 1]
+            ];
+
+            await supabaseOptional('/rest/v1/agent_trace_spans', token, {
+              method: 'POST',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                organization_id: agent.organization_id,
+                trace_id: v2TraceId,
+                span_id: `sp_synthesis_${Date.now().toString(36)}`,
+                agent_key: agent.slug || agent.id,
+                span_type: 'synthesis',
+                name: 'manager_synthesis_context',
+                status: 'completed',
+                input: {
+                  specialists: liveCollaboration.specialists_executed,
+                  failures: liveCollaboration.failures.length
+                },
+                output: {
+                  external_actions: 0,
+                  auto_send: false,
+                  auto_publish: false
+                },
+                completed_at: new Date().toISOString()
+              })
+            }, null);
+          }
+
           const v2Turn = await runV2AgentTurn({
             agent,
             message,
@@ -581,7 +708,14 @@ export default async function handler(req, res) {
           harnessMeta = {
             ...(v2Turn.meta || {}),
             trace_id: v2TraceId,
-            duration_ms: Date.now() - v2Started
+            duration_ms: Date.now() - v2Started,
+            collaboration: liveCollaboration ? {
+              protocol: liveCollaboration.protocol,
+              specialists_executed: liveCollaboration.specialists_executed,
+              failures: liveCollaboration.failures,
+              warnings: liveCollaboration.warnings,
+              external_actions: 0
+            } : null
           };
 
           await supabaseOptional('/rest/v1/agent_trace_spans', token, {
@@ -628,7 +762,9 @@ export default async function handler(req, res) {
                 duration_ms: Date.now() - v2Started,
                 summary: {
                   eval_pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null,
-                  score: runtimeEvaluation?.score ?? null
+                  score: runtimeEvaluation?.score ?? null,
+                  specialists: liveCollaboration?.specialists_executed || [],
+                  specialist_failures: liveCollaboration?.failures?.length || 0
                 }
               })
             },
@@ -804,7 +940,16 @@ export default async function handler(req, res) {
           rag_mode: knowledgeRetrieval.mode,
           rag_source_table: KNOWLEDGE_SOURCE_TABLE,
           skills: runtime.agent_card.skills,
-          delegation: runtime.delegation || null
+          delegation: runtime.delegation || null,
+          live_collaboration: liveCollaboration ? {
+            protocol: liveCollaboration.protocol,
+            specialists_executed: liveCollaboration.specialists_executed,
+            failures: liveCollaboration.failures,
+            warnings: liveCollaboration.warnings,
+            external_actions: 0,
+            auto_send: false,
+            auto_publish: false
+          } : null
         }
       }
     });
