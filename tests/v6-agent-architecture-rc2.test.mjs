@@ -57,5 +57,8 @@ describe('live chat V2 consumes full turn', () => {
     assert.match(src, /sp_req_|request_runtime/);
     assert.match(src, /provider_harness/);
     assert.match(src, /span_id: `sp_eval_/);
+    assert.match(src, /name: 'runtime_error'/);
+    assert.match(src, /status: 'failed'/);
+    assert.match(src, /throw error/);
   });
 });
