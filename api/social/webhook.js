@@ -1304,21 +1304,39 @@ async function processEvent(event, storedEvent, organizationId, rules) {
     return { matched: false, queued: false, own_echo: true };
   }
 
-  const matches = rules.map(rule => evaluateRule(rule, event)).filter(Boolean).sort((a, b) => b.confidence - a.confidence);
+  // "always" rules are catch-all fallbacks. Specific keyword/intent rules
+  // must get the first chance so a generic social reply never shadows flows
+  // such as platform_link or business_audit.
+  const specificRules = (rules || []).filter(rule => rule.match_mode !== 'always');
+  const matches = specificRules.map(rule => evaluateRule(rule, event)).filter(Boolean).sort((a, b) => b.confidence - a.confidence);
   let match = matches[0];
+  const actionable = ['comment.created', 'message.received'].includes(String(event.event_type || ''));
 
   // Keyword matching stays fast and deterministic. When it misses an
   // actionable inbound comment/message, use semantic classification so
   // colloquial Arabic such as "حللي نشاطي" still maps to business_audit.
-  if (!match && ['comment.created', 'message.received'].includes(String(event.event_type || ''))) {
-    match = await classifyEventWithAI(event, rules);
+  if (!match && actionable) {
+    match = await classifyEventWithAI(event, specificRules);
+  }
+
+  // Only after all specific rules and semantic classification miss do we
+  // allow an "always" rule. This makes it safe to enable a catch-all smart
+  // reply without breaking higher-value automations.
+  if (!match && actionable) {
+    const fallbackRule = (rules || []).find(rule =>
+      rule.match_mode === 'always'
+      && platformAllowed(rule, event.platform)
+      && eventTypeAllowed(rule, event.event_type)
+    );
+    if (fallbackRule) {
+      match = { rule: fallbackRule, confidence: 0.5, reason: 'fallback_always' };
+    }
   }
 
   if (!match) {
     // Keep actionable inbound items in the manual inbox queue even when they
     // do not match an automation rule. "ignored" is reserved for passive
     // events that need no human response (reactions, read receipts, etc.).
-    const actionable = ['comment.created', 'message.received'].includes(String(event.event_type || ''));
     if (!actionable && storedEvent.processing_status === 'new') {
       await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
         method: 'PATCH',
