@@ -132,8 +132,9 @@
     app.innerHTML = `<div class="error-card"><h1>${esc(title)}</h1><p>${esc(message)}</p>${action}</div>`;
   }
   async function boot() {
-    if (!window.TiqnoraDB?.isConfigured) return showError('قاعدة البيانات غير متصلة', 'أكمل إعداد Supabase أولًا.');
-    await window.TiqnoraDB.ready(); db = window.TiqnoraDB.raw;
+    if (!window.TiqnoraDB?.isEnabled?.()) return showError('قاعدة البيانات غير متصلة', 'إعداد Supabase غير مكتمل.');
+    await window.TiqnoraDB.ready;
+    db = window.TiqnoraDB.getClient?.() || null;
     if (!db) return showError('تعذر تحميل الاتصال', 'تحقق من الشبكة ثم أعد المحاولة.', '<button class="btn" onclick="location.reload()">إعادة المحاولة</button>');
     const { data: { session } } = await db.auth.getSession();
     if (!session) return showError('يلزم تسجيل الدخول', 'هذه مساحة داخلية خاصة بإدارة Tiqnora.', '<a class="btn btn-primary" href="/admin.html" style="display:inline-block;text-decoration:none">دخول لوحة التحكم</a>');
