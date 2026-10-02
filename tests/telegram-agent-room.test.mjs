@@ -62,7 +62,8 @@ test('Telegram team campaign instructions are classified as collaboration, not a
 test('Telegram command center excludes team collaboration from generic image execution', () => {
   const src = readFileSync(join(root, 'lib/telegram-command-center.js'), 'utf8');
   assert.ok(src.includes('const teamCollaborationRequested = isTeamCollaborationRequest(text)'));
-  assert.ok(src.includes('(isImageDesignRequest(text) && !teamCollaborationRequested)'));
+  assert.ok(src.includes('(isImageDesignRequest(text) && !teamCollaborationRequested && !videoExecutionRequested)'));
+  assert.ok(src.includes('(isVideoDesignRequest(text) && !teamCollaborationRequested)'));
   assert.ok(src.includes('teamCollaborationRequested || isAgentRoomDiscussionRequest(text)'));
 });
 
