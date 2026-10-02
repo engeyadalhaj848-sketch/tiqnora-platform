@@ -13,6 +13,7 @@ import {
   buildEvalInsert,
   buildLearningInsert
 } from '../../lib/v6/workforce/production-runtime.js';
+import { retrieveLiveKnowledge } from '../../lib/v6/workforce/live-rag.js';
 
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -328,12 +329,11 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [memory, recent, tasks, stateRows, knowledgeRows, runtimeAgents] = await Promise.all([
+    const [memory, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
       supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
       supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
       supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
-      supabaseOptional(`/rest/v1/ai_knowledge_chunks?organization_id=eq.${encodeURIComponent(agent.organization_id)}&select=id,document_id,content,metadata&order=created_at.desc&limit=120`, token, {}, []),
       supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&select=id,slug,name,name_ar,description`, token)
     ]);
     const stateRow = stateRows?.[0] || {};
@@ -346,11 +346,15 @@ export default async function handler(req, res) {
       last_outcome: stateRow.last_outcome || stateRow.state?.last_outcome || null,
       counters: stateRow.counters || stateRow.state?.counters || {}
     };
-    const knowledge = retrieveRagCandidates(message, (knowledgeRows || []).map(row => ({
-      ...row,
-      title: row.metadata?.title || row.metadata?.document_title || 'Tiqnora Knowledge',
-      source_uri: row.metadata?.source_uri || null
-    })), { limit: 8 });
+    const knowledgeRetrieval = await retrieveLiveKnowledge({
+      query: message,
+      organization_id: agent.organization_id,
+      token,
+      supabaseCall: supabase,
+      env: process.env,
+      limit: 8
+    });
+    const knowledge = knowledgeRetrieval.chunks;
     const runtimeMode = selectRuntimeMode(process.env);
     const runtime = runtimeMode.v2
       ? buildV2RuntimeContext({
@@ -621,6 +625,8 @@ export default async function handler(req, res) {
             path: runtimeMode.path,
             harness: harnessMeta,
             rag_chunk_ids: knowledge.map(item => item.id),
+            rag_retrieval_mode: knowledgeRetrieval.mode,
+            rag_vector_error: knowledgeRetrieval.diagnostics?.vector_error || null,
             skills: runtime.agent_card.skills,
             allowed_tools: runtime.tools
           }
@@ -651,6 +657,7 @@ export default async function handler(req, res) {
           path: (typeof runtimeMode !== 'undefined' ? runtimeMode.path : 'legacy.chat'),
           eval: runtimeEvaluation ? { score: runtimeEvaluation.score, pass: runtimeEvaluation.pass } : null,
           rag_chunks: knowledge.map(item => item.id),
+          rag_mode: knowledgeRetrieval.mode,
           skills: runtime.agent_card.skills,
           delegation: runtime.delegation || null
         }
