@@ -4,7 +4,10 @@ import {
   retrieveRagCandidates,
   runAgentHarness,
   evaluateAgentResponse,
-  buildLearningEvent
+  buildLearningEvent,
+  AGENT_CONCEPTS,
+  listRuntimeSkills,
+  listAgentSkillBindings
 } from '../../lib/v6/agent-runtime.js';
 import {
   selectRuntimeMode,
@@ -14,7 +17,7 @@ import {
   buildLearningInsert
 } from '../../lib/v6/workforce/production-runtime.js';
 import { retrieveLiveKnowledge } from '../../lib/v6/workforce/live-rag.js';
-import { embedText, toPgVectorLiteral } from '../../lib/v6/workforce/embeddings.js';
+import { embedText, embeddingStatus, toPgVectorLiteral } from '../../lib/v6/workforce/embeddings.js';
 
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -176,7 +179,7 @@ function taskContext(rows) {
   ].join('\n');
 }
 
-function expertSystemPrompt(agent, memory, tasks) {
+function expertSystemPrompt(agent, runtimeMemory, tasks) {
   const specialty = AGENT_EXPERTISE[agent?.slug] || `
 Role: Principal specialist. Stay rigorous, evidence-aware, practical, and within your real expertise. Recommend another Tiqnora specialist when a task clearly belongs elsewhere.
 `.trim();
@@ -362,6 +365,33 @@ export default async function handler(req, res) {
   const token = bearer(req);
   if (!token) return json(res, 401, { error: 'يلزم تسجيل الدخول.' });
 
+  if (req.method === 'GET' && String(req.query?.route || '').toLowerCase() === 'runtime-status') {
+    try {
+      const user = await supabase('/auth/v1/user', token);
+      const profiles = await supabase(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role,is_active`, token);
+      const profile = profiles?.[0];
+      if (!profile || !profile.is_active || !['admin','super_admin'].includes(profile.role)) {
+        return json(res, 403, { error: 'صلاحية أدمن مطلوبة.' });
+      }
+      const mode = selectRuntimeMode(process.env);
+      return json(res, 200, {
+        runtime: { mode: mode.mode, path: mode.path, v2_enabled: mode.v2 },
+        concepts: AGENT_CONCEPTS,
+        skills: listRuntimeSkills(),
+        agent_skill_bindings: listAgentSkillBindings(),
+        embeddings: embeddingStatus(process.env),
+        mcp: {
+          native: true,
+          endpoint: '/api/v6?route=mcp',
+          sdk: '@modelcontextprotocol/server',
+          compatibility_endpoint: '/api/v6?route=mcp_social'
+        }
+      });
+    } catch (error) {
+      return json(res, error.status && error.status < 600 ? error.status : 500, { error: error.message || 'تعذر تحميل حالة runtime.' });
+    }
+  }
+
   if (req.method === 'GET' && String(req.query?.route || '').toLowerCase() === 'providers') {
     try {
       const user = await supabase('/auth/v1/user', token);
@@ -402,13 +432,25 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [memory, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
+    const [memory, typedMemoryRows, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
       supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
+      supabaseOptional(`/rest/v1/agent_memory_entries?organization_id=eq.${encodeURIComponent(agent.organization_id)}&archived_at=is.null&select=memory_id,agent_key,memory_type,scope,key,content,summary,tags,created_at&order=created_at.desc&limit=80`, token, {}, []),
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
       supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
       supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
       supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&select=id,slug,name,name_ar,description`, token)
     ]);
+    const typedMemory = (typedMemoryRows || []).filter(row =>
+      ['shared','organization'].includes(row.scope) || !row.agent_key || row.agent_key === agent.slug
+    ).slice(0, 30);
+    const runtimeMemory = [
+      ...(memory || []),
+      ...typedMemory.map(row => ({
+        memory_key: `[${row.memory_type}] ${row.key}`,
+        memory_value: row.content,
+        typed_memory_id: row.memory_id
+      }))
+    ].slice(0, 60);
     const stateRow = stateRows?.[0] || {};
     const runtimeState = {
       ...(stateRow.state || {}),
@@ -435,7 +477,7 @@ export default async function handler(req, res) {
           message,
           agents: runtimeAgents || [],
           state: runtimeState,
-          memory,
+          memory: runtimeMemory,
           tasks,
           recent,
           knowledge
@@ -445,7 +487,7 @@ export default async function handler(req, res) {
           message,
           agents: runtimeAgents || [],
           state: runtimeState,
-          memory,
+          memory: runtimeMemory,
           tasks,
           recent,
           knowledge
@@ -653,6 +695,34 @@ export default async function handler(req, res) {
       organization_id: agent.organization_id, agent_id: agent.id, user_id: user.id,
       message, response: result.text, provider: result.provider, model: result.model, status: 'completed'
     });
+
+    if (conversation?.id) {
+      const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      await supabaseOptional('/rest/v1/agent_memory_entries', token, {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          organization_id: agent.organization_id,
+          memory_id: `chat_${conversation.id}`,
+          agent_key: agent.slug || agent.id,
+          memory_type: 'episodic',
+          scope: 'agent',
+          key: `chat_turn:${conversation.id}`,
+          content: `User: ${message.slice(0, 1800)}\nAssistant: ${String(result.text || '').slice(0, 2200)}`,
+          summary: String(result.text || '').slice(0, 500),
+          confidence: 1,
+          source: 'ai-workforce-chat',
+          tags: ['chat','episodic'],
+          expires_at: expiresAt,
+          metadata: {
+            conversation_id: conversation.id,
+            provider: result.provider || null,
+            model: result.model || null,
+            runtime_mode: runtimeMode.mode
+          }
+        })
+      }, []);
+    }
 
     await supabaseOptional('/rest/v1/ai_agent_state?on_conflict=agent_id', token, {
       method: 'POST',
