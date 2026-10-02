@@ -708,7 +708,14 @@ export default async function handler(req, res) {
           harnessMeta = {
             ...(v2Turn.meta || {}),
             trace_id: v2TraceId,
-            duration_ms: Date.now() - v2Started
+            duration_ms: Date.now() - v2Started,
+            collaboration: liveCollaboration ? {
+              protocol: liveCollaboration.protocol,
+              specialists_executed: liveCollaboration.specialists_executed,
+              failures: liveCollaboration.failures,
+              warnings: liveCollaboration.warnings,
+              external_actions: 0
+            } : null
           };
 
           await supabaseOptional('/rest/v1/agent_trace_spans', token, {
@@ -755,7 +762,9 @@ export default async function handler(req, res) {
                 duration_ms: Date.now() - v2Started,
                 summary: {
                   eval_pass: runtimeEvaluation?.pass ?? runtimeEvaluation?.passed ?? null,
-                  score: runtimeEvaluation?.score ?? null
+                  score: runtimeEvaluation?.score ?? null,
+                  specialists: liveCollaboration?.specialists_executed || [],
+                  specialist_failures: liveCollaboration?.failures?.length || 0
                 }
               })
             },
@@ -931,7 +940,16 @@ export default async function handler(req, res) {
           rag_mode: knowledgeRetrieval.mode,
           rag_source_table: KNOWLEDGE_SOURCE_TABLE,
           skills: runtime.agent_card.skills,
-          delegation: runtime.delegation || null
+          delegation: runtime.delegation || null,
+          live_collaboration: liveCollaboration ? {
+            protocol: liveCollaboration.protocol,
+            specialists_executed: liveCollaboration.specialists_executed,
+            failures: liveCollaboration.failures,
+            warnings: liveCollaboration.warnings,
+            external_actions: 0,
+            auto_send: false,
+            auto_publish: false
+          } : null
         }
       }
     });
