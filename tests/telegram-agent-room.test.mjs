@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isAgentRoomSetupCommand,
-  isAgentRoomDiscussionRequest
+  isAgentRoomDiscussionRequest,
+  selectExplicitParticipants
 } from '../lib/telegram-agent-room.js';
 import { isTeamCollaborationRequest } from '../lib/telegram-command-center.js';
 
@@ -63,4 +64,30 @@ test('Telegram command center excludes team collaboration from generic image exe
   assert.ok(src.includes('const teamCollaborationRequested = isTeamCollaborationRequest(text)'));
   assert.ok(src.includes('(isImageDesignRequest(text) && !teamCollaborationRequested)'));
   assert.ok(src.includes('teamCollaborationRequested || isAgentRoomDiscussionRequest(text)'));
+});
+
+
+test('Telegram collaboration prioritizes explicitly named campaign agents', () => {
+  const agents = [
+    { slug:'sales' },
+    { slug:'channel' },
+    { slug:'marketing' },
+    { slug:'content' },
+    { slug:'image-designer' },
+    { slug:'video-designer' },
+    { slug:'manager' }
+  ];
+  const request = 'مدير التسويق يحدد الزاوية، مدير المحتوى يكتب المحتوى، ومصمم الصور ومصمم الفيديو يجهزون المواد البصرية.';
+  assert.deepEqual(
+    selectExplicitParticipants(request, agents).map(agent => agent.slug),
+    ['marketing','content','image-designer','video-designer']
+  );
+});
+
+test('Telegram collaboration keeps explicit participant priority ahead of generic runtime ranking', () => {
+  const src = readFileSync(join(root, 'lib/telegram-agent-room.js'), 'utf8');
+  const start = src.indexOf('export async function runAgentRoomDiscussion');
+  const body = src.slice(start, start + 2600);
+  assert.ok(body.includes('const explicitParticipants = selectExplicitParticipants(topic, agents)'));
+  assert.ok(body.indexOf('explicitParticipants.forEach(addParticipant)') < body.indexOf('plannedParticipants.forEach(addParticipant)'));
 });
