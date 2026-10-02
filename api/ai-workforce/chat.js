@@ -179,7 +179,7 @@ function taskContext(rows) {
   ].join('\n');
 }
 
-function expertSystemPrompt(agent, runtimeMemory, tasks) {
+function expertSystemPrompt(agent, memory, tasks) {
   const specialty = AGENT_EXPERTISE[agent?.slug] || `
 Role: Principal specialist. Stay rigorous, evidence-aware, practical, and within your real expertise. Recommend another Tiqnora specialist when a task clearly belongs elsewhere.
 `.trim();
@@ -432,7 +432,7 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [memory, typedMemoryRows, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
+    const [legacyMemory, typedMemoryRows, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
       supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
       supabaseOptional(`/rest/v1/agent_memory_entries?organization_id=eq.${encodeURIComponent(agent.organization_id)}&archived_at=is.null&select=memory_id,agent_key,memory_type,scope,key,content,summary,tags,created_at&order=created_at.desc&limit=80`, token, {}, []),
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
@@ -443,8 +443,8 @@ export default async function handler(req, res) {
     const typedMemory = (typedMemoryRows || []).filter(row =>
       ['shared','organization'].includes(row.scope) || !row.agent_key || row.agent_key === agent.slug
     ).slice(0, 30);
-    const runtimeMemory = [
-      ...(memory || []),
+    const memory = [
+      ...(legacyMemory || []),
       ...typedMemory.map(row => ({
         memory_key: `[${row.memory_type}] ${row.key}`,
         memory_value: row.content,
@@ -477,7 +477,7 @@ export default async function handler(req, res) {
           message,
           agents: runtimeAgents || [],
           state: runtimeState,
-          memory: runtimeMemory,
+          memory,
           tasks,
           recent,
           knowledge
@@ -487,7 +487,7 @@ export default async function handler(req, res) {
           message,
           agents: runtimeAgents || [],
           state: runtimeState,
-          memory: runtimeMemory,
+          memory,
           tasks,
           recent,
           knowledge
