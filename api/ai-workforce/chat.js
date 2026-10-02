@@ -18,6 +18,7 @@ import {
 } from '../../lib/v6/workforce/production-runtime.js';
 import { retrieveLiveKnowledge } from '../../lib/v6/workforce/live-rag.js';
 import { embedText, embeddingStatus, toPgVectorLiteral } from '../../lib/v6/workforce/embeddings.js';
+import { executeLiveDelegation } from '../../lib/v6/workforce/live-collaboration.js';
 
 const DEFAULT_SUPABASE_URL = 'https://mndyabvlhvrhdbgmepkg.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_MyEtiYvxwkP0_PhRDH8aIQ_iYY6cQao';
@@ -438,7 +439,7 @@ export default async function handler(req, res) {
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
       supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
       supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
-      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&select=id,slug,name,name_ar,description`, token)
+      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&status=eq.active&select=id,organization_id,slug,name,name_ar,description,system_prompt,model,temperature,provider,status,is_enabled`, token)
     ]);
     const typedMemory = (typedMemoryRows || []).filter(row =>
       ['shared','organization'].includes(row.scope) || !row.agent_key || row.agent_key === agent.slug
@@ -524,13 +525,15 @@ export default async function handler(req, res) {
     let runtimeEvaluation = null;
     let learningEvent = null;
     let harnessMeta = null;
+    let liveCollaboration = null;
+    let providerMessages = messages;
 
     if (!result) {
       const invoke = async ({ attempt, feedback }) => {
           const retryNote = attempt > 1 && feedback.length
             ? { role: 'system', content: `Quality retry: improve these failed checks before answering: ${feedback.join(', ')}. Do not mention this retry to the user.` }
             : null;
-          return callPreferredProvider(agent, retryNote ? [...messages, retryNote] : messages);
+          return callPreferredProvider(agent, retryNote ? [...providerMessages, retryNote] : providerMessages);
         };
 
       if (runtimeMode.v2) {
