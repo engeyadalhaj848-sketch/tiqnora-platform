@@ -3,6 +3,7 @@ import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
 import { prepareSocialReviewBatch } from '../../lib/social-review-batch.js';
+import { composeServiceExplanation } from '../../lib/social-functional-overlay.js';
 import { getTikTokBusinessAccess, tiktokBusinessPost, tiktokBusinessGet } from '../../lib/v6/tiktok-business.js';
 import { runMorningWhatsAppOutreach } from '../../lib/v6/whatsapp-outreach.js';
 import {
@@ -437,6 +438,45 @@ export default async function handler(req, res) {
       last_error: status.last_error,
       webhook_url: 'https://tiqnora.com/api/telegram/webhook'
     });
+  }
+
+  if (route === 'preview_social_base') {
+    const imageJobId=String(req.query?.image_job_id||'');
+    const service=String(req.query?.service||'');
+    if(!/^img_[a-z0-9_]+$/i.test(imageJobId) || !['web_design','whatsapp_automation','ai_agents'].includes(service)){
+      return json(res,400,{error:'Invalid base preview request'});
+    }
+    try{
+      const rows=await query('image_jobs','image_job_id=eq.'+encodeURIComponent(imageJobId)+'&select=output_storage_path,format_key&limit=1');
+      const job=rows?.[0];
+      if(!job?.output_storage_path) return json(res,404,{error:'Base design not found'});
+      const key=supabaseKey();
+      const storagePath=String(job.output_storage_path).split('/').filter(Boolean).map(encodeURIComponent).join('/');
+      const upstream=await fetch(supabaseUrl()+'/storage/v1/object/designs/'+storagePath,{
+        headers:{apikey:key,Authorization:'Bearer '+key},
+        signal:AbortSignal.timeout(15000)
+      });
+      if(!upstream.ok) return json(res,upstream.status,{error:'Base design unavailable'});
+      const input=Buffer.from(await upstream.arrayBuffer());
+      const composed=await composeServiceExplanation({
+        service,
+        b64:input.toString('base64'),
+        format:{key:'portrait',width:1080,height:1350,label:'4:5'}
+      });
+      const sharp=(await import('sharp')).default;
+      const preview=await sharp(Buffer.from(composed.b64,'base64'))
+        .resize({width:540,withoutEnlargement:true})
+        .jpeg({quality:70})
+        .toBuffer();
+      return json(res,200,{
+        ok:true,
+        image_job_id:imageJobId,
+        service,
+        data_url:'data:image/jpeg;base64,'+preview.toString('base64')
+      });
+    }catch(error){
+      return json(res,503,{error:String(error.message||error).slice(0,300)});
+    }
   }
 
   if (route === 'preview_social_asset') {
