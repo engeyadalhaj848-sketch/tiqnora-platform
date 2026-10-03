@@ -39,3 +39,16 @@ test('telegram command center handles owner social approval callbacks and publis
   assert.ok(src.includes("approval.action === 'approve'"));
   assert.ok(src.includes('نتيجة النشر بعد اعتمادك'));
 });
+
+
+test('telegram social-review execution is prioritized before collaboration discussion', () => {
+  assert.ok(src.includes("deliverExistingSocialReviewBatch"));
+  assert.ok(src.includes("prepareSocialReviewBatch"));
+  assert.ok(src.includes("export function isSocialReviewExecutionRequest"));
+  assert.ok(src.includes("action: 'social_review_delivery'"));
+  const executionIndex = src.indexOf("if (isSocialReviewExecutionRequest(text))");
+  const discussionIndex = src.indexOf("if (teamCollaborationRequested || isAgentRoomDiscussionRequest(text) || isAuthorizedAgentRoomMessage(message))");
+  assert.ok(executionIndex > 0, 'social review execution handler missing');
+  assert.ok(discussionIndex > executionIndex, 'social review execution must run before discussion routing');
+  assert.ok(src.includes('لن يتم نشر أي شيء قبل اعتمادك'));
+});
