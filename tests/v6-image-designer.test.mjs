@@ -58,6 +58,24 @@ describe('image-designer core', () => {
     assert.match(art.prompt, /zero readable text/i);
   });
 
+  it('supports text-free social artwork while preserving the official logo layer', () => {
+    const art = buildArtDirection({
+      message: 'وكلاء الذكاء الاصطناعي للأعمال',
+      campaign: { render_copy: false, vertical: 'ai_agents' },
+      vertical: 'ai_agents',
+      brand: {
+        brand_name: 'Tiqnora AI',
+        visual_identity: {
+          colors: { electric_blue: '#0A5CFF', cyber_cyan: '#00D2FF', midnight_navy: '#060B1E' }
+        }
+      },
+      format: DESIGN_FORMATS[1]
+    });
+    assert.equal(art.overlay.render_copy, false);
+    assert.match(art.prompt, /business AI orchestration/i);
+    assert.match(art.prompt, /zero readable text/i);
+  });
+
   it('normalizes story generation to a supported portrait canvas', () => {
     const size = normalizeImageSize(1080, 1920);
     assert.equal(size.openai, '1024x1536');
