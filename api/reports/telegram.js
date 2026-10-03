@@ -450,12 +450,14 @@ export default async function handler(req, res) {
     return await runSocialAutopilotTick(res);
   }
 
-  if (route === 'prepare_social_review_now') {
+  if (route === 'prepare_social_review_now' || route === 'preview_social_review_now') {
     const rows = await query('organizations', 'slug=eq.tiqnora&select=settings&limit=1').catch(() => []);
     const armed = rows?.[0]?.settings?.social_autopilot?.review_batch_armed === true;
     if (!armed) return json(res, 409, { error: 'Review batch is not armed' });
     await updateTiqnoraSocialAutopilotSettings({ review_batch_armed: false });
-    const result = await prepareSocialReviewBatch();
+    const result = await prepareSocialReviewBatch({
+      deliverForApproval: route === 'prepare_social_review_now'
+    });
     return json(res, 200, result);
   }
 
