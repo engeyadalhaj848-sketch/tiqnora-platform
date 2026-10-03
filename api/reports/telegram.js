@@ -439,6 +439,32 @@ export default async function handler(req, res) {
     });
   }
 
+  if (route === 'preview_social_asset') {
+    const contentId=String(req.query?.content_id||'');
+    const imageJobId=String(req.query?.image_job_id||'');
+    if(!/^[0-9a-f-]{36}$/i.test(contentId) || !/^img_[a-z0-9_]+$/i.test(imageJobId)){
+      return json(res,400,{error:'Invalid preview asset id'});
+    }
+    try{
+      const publicUrl=(process.env.SUPABASE_URL||'https://mndyabvlhvrhdbgmepkg.supabase.co').replace(/\/$/,'')
+        +'/storage/v1/object/public/social-creatives/'
+        +encodeURIComponent(contentId)+'/'+encodeURIComponent(imageJobId)+'.png';
+      const upstream=await fetch(publicUrl,{signal:AbortSignal.timeout(15000)});
+      if(!upstream.ok) return json(res,upstream.status,{error:'Preview asset unavailable'});
+      const input=Buffer.from(await upstream.arrayBuffer());
+      const sharp=(await import('sharp')).default;
+      const preview=await sharp(input).resize({width:540,withoutEnlargement:true}).jpeg({quality:68}).toBuffer();
+      return json(res,200,{
+        ok:true,
+        content_id:contentId,
+        image_job_id:imageJobId,
+        data_url:'data:image/jpeg;base64,'+preview.toString('base64')
+      });
+    }catch(error){
+      return json(res,503,{error:String(error.message||error).slice(0,300)});
+    }
+  }
+
   if (route === 'tiktok_property_add' || route === 'tiktok_property_verify' || route === 'tiktok_property_list') {
     if (!(await isAuthorizedSocialScheduler(req))) return json(res, 401, { error: 'Unauthorized social scheduler' });
     const action = route === 'tiktok_property_add' ? 'add' : route === 'tiktok_property_verify' ? 'verify' : 'list';
