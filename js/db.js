@@ -105,8 +105,14 @@
     return fromRest(table, select, order);
   }
 
+  // ready is callable (ready()) AND thenable (await ready) for compatibility
+  const readyApi = function ready() { return readyPromise; };
+  readyApi.then = (onFulfilled, onRejected) => readyPromise.then(onFulfilled, onRejected);
+  readyApi.catch = (onRejected) => readyPromise.catch(onRejected);
+  readyApi.finally = (onFinally) => readyPromise.finally(onFinally);
+
   window.TiqnoraDB = {
-    ready: readyPromise,
+    ready: readyApi,
     isEnabled: () => enabled,
     getClient: () => client,
 
@@ -174,7 +180,6 @@
 
       const mapRows = (rows) => (rows || []).map((r) => this._mapPublicProduct(r));
 
-      // Preferred path: SECURITY DEFINER RPC (survives RLS policy mistakes on is_admin)
       if (enabled && restUrl) {
         try {
           const headers = {
@@ -214,7 +219,6 @@
         }
       }
 
-      // Fast path for the public store: call PostgREST directly.
       if (enabled) {
         let select = this._productCardSelect();
         if (cat) select = select.replace('categories(', 'categories!inner(');
@@ -228,7 +232,7 @@
         if (cat) extra['categories.slug'] = `eq.${cat}`;
         if (brand) extra['brands.slug'] = `eq.${brand}`;
         if (safeQ) {
-          const clean = safeQ.replace(/[,*()]/g, ' ').trim();
+          const clean = safeQ.replace(/[,.()]/g, ' ').trim();
           if (clean) extra.or = `(name_ar.ilike.*${clean}*,name_en.ilike.*${clean}*)`;
         }
         const pack = await fromRest('products', select, { col: 'sort_order' }, extra);
@@ -242,7 +246,6 @@
         }
       }
 
-      // Fallback to the loaded Supabase client only if direct REST failed.
       if (client) {
         let select = this._productCardSelect();
         if (cat) select = select.replace('categories(', 'categories!inner(');
@@ -256,7 +259,7 @@
         if (cat) query = query.eq('categories.slug', cat);
         if (brand) query = query.eq('brands.slug', brand);
         if (safeQ) {
-          const clean = safeQ.replace(/[,*()]/g, ' ').trim();
+          const clean = safeQ.replace(/[,.()]/g, ' ').trim();
           if (clean) query = query.or(`name_ar.ilike.%${clean}%,name_en.ilike.%${clean}%`);
         }
         const { data, error, count } = await query;
