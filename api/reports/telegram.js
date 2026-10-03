@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
-import { prepareSocialReviewBatch } from '../../lib/social-review-batch.js';
+import { prepareSocialReviewBatch, deliverExistingSocialReviewBatch } from '../../lib/social-review-batch.js';
 import { composeServiceExplanation } from '../../lib/social-functional-overlay.js';
 import { getTikTokBusinessAccess, tiktokBusinessPost, tiktokBusinessGet } from '../../lib/v6/tiktok-business.js';
 import { runMorningWhatsAppOutreach } from '../../lib/v6/whatsapp-outreach.js';
@@ -514,10 +514,24 @@ export default async function handler(req, res) {
     const armed = rows?.[0]?.settings?.social_autopilot?.review_batch_armed === true;
     if (!armed) return json(res, 409, { error: 'Review batch is not armed' });
     await updateTiqnoraSocialAutopilotSettings({ review_batch_armed: false });
+
+    if (route === 'prepare_social_review_now') {
+      const existing = await deliverExistingSocialReviewBatch();
+      if (existing.ready > 0) {
+        return json(res, 200, {
+          ...existing,
+          mode: 'reuse_existing'
+        });
+      }
+    }
+
     const result = await prepareSocialReviewBatch({
       deliverForApproval: route === 'prepare_social_review_now'
     });
-    return json(res, 200, result);
+    return json(res, 200, {
+      ...result,
+      mode: route === 'prepare_social_review_now' ? 'prepare_new' : 'preview_new'
+    });
   }
 
   if (route === 'telegram_webhook') {
