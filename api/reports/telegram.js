@@ -218,17 +218,10 @@ async function runGrowthCron(res, publishing = { processed: 0, results: [] }, ou
   };
 
   const tParallel = Date.now();
-  const settled = [];
-  try {
-    settled[0] = { status: 'fulfilled', value: await ensureDailyWorkforceTasks() };
-  } catch (reason) {
-    settled[0] = { status: 'rejected', reason };
-  }
-  try {
-    settled[1] = { status: 'fulfilled', value: await runAutonomousGrowth({ taskLimit: 5, skipProspectingIfRecent: true }) };
-  } catch (reason) {
-    settled[1] = { status: 'rejected', reason };
-  }
+  const settled = await Promise.allSettled([
+    ensureDailyWorkforceTasks(),
+    runAutonomousGrowth({ taskLimit: 5, skipProspectingIfRecent: true })
+  ]);
 
   if (settled[0].status === 'fulfilled') {
     workforce = settled[0].value || workforce;
