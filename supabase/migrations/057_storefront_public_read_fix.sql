@@ -21,7 +21,7 @@ exception
     end;
 end $$;
 
--- 2) Public SELECT for active products (OR'd with existing policies)
+-- 2) Public SELECT for active products
 alter table public.products enable row level security;
 
 drop policy if exists "products_public_read" on public.products;
@@ -30,7 +30,7 @@ create policy "products_public_read" on public.products
   to anon, authenticated
   using (is_active is true);
 
--- 3) Categories / brands needed for shop filters and card embeds
+-- 3) Categories / brands for shop filters and card embeds
 alter table public.categories enable row level security;
 drop policy if exists "categories_public_read" on public.categories;
 create policy "categories_public_read" on public.categories
@@ -45,7 +45,7 @@ create policy "brands_public_read" on public.brands
   to anon, authenticated
   using (true);
 
--- 4) SECURITY DEFINER RPC — reliable storefront path even if a policy still misfires
+-- 4) SECURITY DEFINER RPC
 create or replace function public.get_storefront_products(
   p_limit int default 24,
   p_offset int default 0,
@@ -75,26 +75,17 @@ begin
     and (
       q is null
       or p.name_ar ilike '%' || q || '%'
-      or coalesce(p.name_en, '') ilike '%' || q || '%'
+      or p.name_en ilike '%' || q || '%'
+      or coalesce(p.sku, '') ilike '%' || q || '%'
     );
 
   select coalesce(jsonb_agg(row_to_json(x)::jsonb), '[]'::jsonb) into items
   from (
     select
-      p.id,
-      p.slug,
-      p.name_ar,
-      p.name_en,
-      p.price,
-      p.discount_percent,
-      p.stock_quantity,
-      p.track_stock,
-      p.images,
-      p.is_active,
-      p.featured,
-      p.sort_order,
-      case when c.id is not null then jsonb_build_object('slug', c.slug, 'name_ar', c.name_ar) else null end as categories,
-      case when b.id is not null then jsonb_build_object('slug', b.slug, 'name', b.name) else null end as brands
+      p.id, p.slug, p.sku, p.name_ar, p.name_en, p.price, p.discount_percent,
+      p.stock_quantity, p.track_stock, p.images, p.is_active, p.featured, p.sort_order,
+      case when c.id is null then null else jsonb_build_object('slug', c.slug, 'name_ar', c.name_ar) end as categories,
+      case when b.id is null then null else jsonb_build_object('slug', b.slug, 'name', b.name) end as brands
     from public.products p
     left join public.categories c on c.id = p.category_id
     left join public.brands b on b.id = p.brand_id
@@ -104,7 +95,8 @@ begin
       and (
         q is null
         or p.name_ar ilike '%' || q || '%'
-        or coalesce(p.name_en, '') ilike '%' || q || '%'
+        or p.name_en ilike '%' || q || '%'
+        or coalesce(p.sku, '') ilike '%' || q || '%'
       )
     order by p.sort_order asc nulls last, p.created_at desc nulls last
     limit lim offset off
@@ -118,8 +110,4 @@ begin
 end;
 $$;
 
-revoke all on function public.get_storefront_products(int, int, text, text, text) from public;
 grant execute on function public.get_storefront_products(int, int, text, text, text) to anon, authenticated;
-
-comment on function public.get_storefront_products is
-  'Public storefront catalog. SECURITY DEFINER. Active products only. Used by shop.html via PostgREST RPC.';
