@@ -1,51 +1,81 @@
 -- ============================================================
--- 057: Storefront public read fix
--- Root cause: anon SELECT on products fails with
---   "permission denied for function is_admin"
--- because RLS policies call is_admin() while EXECUTE was not
--- granted to anon / authenticated.
--- Also ensures active products/categories/brands are readable.
+-- 057: Storefront public read fix (hardened)
+-- Fixes storefront 401/404 without exposing is_admin() to anon.
 -- Safe to re-run.
 -- ============================================================
 
--- 1) Allow policy evaluation to call is_admin() without error
-do $$
-begin
-  grant execute on function public.is_admin() to anon, authenticated;
-exception
-  when undefined_function then null;
-  when others then
-    begin
-      execute 'grant execute on function public.is_admin() to anon, authenticated';
-    exception when others then null;
-    end;
-end $$;
+-- Keep admin checks private to authenticated users.
+revoke execute on function public.is_admin() from anon;
 
--- 2) Public SELECT for active products
 alter table public.products enable row level security;
+alter table public.categories enable row level security;
+alter table public.brands enable row level security;
 
+-- Remove legacy policies whose PUBLIC role forces anon to evaluate is_admin().
+drop policy if exists "products_admin" on public.products;
+drop policy if exists "products_read" on public.products;
 drop policy if exists "products_public_read" on public.products;
+drop policy if exists "products_authenticated_read" on public.products;
+
 create policy "products_public_read" on public.products
   for select
-  to anon, authenticated
+  to anon
   using (is_active is true);
 
--- 3) Categories / brands for shop filters and card embeds
-alter table public.categories enable row level security;
+create policy "products_authenticated_read" on public.products
+  for select
+  to authenticated
+  using (is_active is true or public.is_admin());
+
+create policy "products_admin" on public.products
+  for all
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+drop policy if exists "categories_admin" on public.categories;
+drop policy if exists "categories_read" on public.categories;
 drop policy if exists "categories_public_read" on public.categories;
+drop policy if exists "categories_authenticated_read" on public.categories;
+
 create policy "categories_public_read" on public.categories
   for select
-  to anon, authenticated
-  using (true);
+  to anon
+  using (status = 'published'::public.content_status);
 
-alter table public.brands enable row level security;
+create policy "categories_authenticated_read" on public.categories
+  for select
+  to authenticated
+  using (status = 'published'::public.content_status or public.is_admin());
+
+create policy "categories_admin" on public.categories
+  for all
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+drop policy if exists "brands_admin" on public.brands;
+drop policy if exists "brands_read" on public.brands;
 drop policy if exists "brands_public_read" on public.brands;
+drop policy if exists "brands_authenticated_read" on public.brands;
+
 create policy "brands_public_read" on public.brands
   for select
-  to anon, authenticated
-  using (true);
+  to anon
+  using (status = 'published'::public.content_status);
 
--- 4) SECURITY DEFINER RPC
+create policy "brands_authenticated_read" on public.brands
+  for select
+  to authenticated
+  using (status = 'published'::public.content_status or public.is_admin());
+
+create policy "brands_admin" on public.brands
+  for all
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+-- Public storefront RPC runs with caller privileges, so RLS remains enforced.
 create or replace function public.get_storefront_products(
   p_limit int default 24,
   p_offset int default 0,
@@ -55,7 +85,8 @@ create or replace function public.get_storefront_products(
 )
 returns jsonb
 language plpgsql
-security definer
+stable
+security invoker
 set search_path = public
 as $$
 declare
@@ -75,7 +106,7 @@ begin
     and (
       q is null
       or p.name_ar ilike '%' || q || '%'
-      or p.name_en ilike '%' || q || '%'
+      or coalesce(p.name_en, '') ilike '%' || q || '%'
       or coalesce(p.sku, '') ilike '%' || q || '%'
     );
 
@@ -95,7 +126,7 @@ begin
       and (
         q is null
         or p.name_ar ilike '%' || q || '%'
-        or p.name_en ilike '%' || q || '%'
+        or coalesce(p.name_en, '') ilike '%' || q || '%'
         or coalesce(p.sku, '') ilike '%' || q || '%'
       )
     order by p.sort_order asc nulls last, p.created_at desc nulls last
@@ -110,4 +141,8 @@ begin
 end;
 $$;
 
+revoke all on function public.get_storefront_products(int, int, text, text, text) from public;
 grant execute on function public.get_storefront_products(int, int, text, text, text) to anon, authenticated;
+
+comment on function public.get_storefront_products is
+  'Storefront catalog RPC. SECURITY INVOKER; RLS remains enforced.';
