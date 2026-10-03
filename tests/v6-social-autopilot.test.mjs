@@ -95,14 +95,16 @@ test('autopilot sends every approved-quality post to Telegram for owner approval
 });
 
 
-test('agent review batch prepares three owner-gated posts with premium artwork', () => {
+test('agent review batch prepares three owner-gated posts with generated quality-reviewed artwork', () => {
   assert.equal(reviewBatch.includes('prepareSocialReviewBatch'), true);
   assert.equal(reviewBatch.includes("['facebook','instagram','tiktok']"), true);
   assert.equal(reviewBatch.includes("status:'waiting_approval'"), true);
   assert.equal(reviewBatch.includes('notifySocialApproval'), true);
-  assert.equal(reviewBatch.includes('review-web-design.png'), true);
-  assert.equal(reviewBatch.includes('review-whatsapp-automation.png'), true);
-  assert.equal(reviewBatch.includes('review-ai-agents.png'), true);
+  assert.equal(reviewBatch.includes('generateDesignAsset'), true);
+  assert.equal(reviewBatch.includes("SOCIAL_BUCKET='social-creatives'"), true);
+  assert.equal(reviewBatch.includes("manager_review_status:'passed'"), true);
+  assert.equal(reviewBatch.includes('image_quality_score'), true);
+  assert.equal(reviewBatch.includes('forceNew:true'), true);
   assert.equal(assetScript.includes("review-web-design.png"), true);
   assert.equal(assetScript.includes("review-whatsapp-automation.png"), true);
   assert.equal(assetScript.includes("review-ai-agents.png"), true);
