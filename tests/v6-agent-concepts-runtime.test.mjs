@@ -160,12 +160,50 @@ test('multi-agent planner assigns matching specialists and manager synthesis', (
   assert.equal(plan.manager_synthesis_required, true);
 });
 
+test('follow-up delegation resolves specialists from recent conversation context', () => {
+  const plan = planMultiAgentDelegation(
+    'حوّل المشاكل الثلاث السابقة إلى مهام تنفيذية ووزعها على الوكلاء المختصين، ثم أعطني خلاصة موحدة.',
+    [
+      { slug: 'manager' },
+      { slug: 'assistant' },
+      { slug: 'sales' },
+      { slug: 'marketing' },
+      { slug: 'content' }
+    ],
+    {
+      recent: [{
+        message: 'راجع جاهزية المبيعات اليوم',
+        response: 'المشاكل السابقة تخص ICP للمبيعات، Pipeline CRM، وتموضع التسويق ورسائل المحتوى.'
+      }]
+    }
+  );
+
+  const participants = plan.participants.map((item) => item.slug);
+  assert.ok(participants.includes('sales'));
+  assert.ok(participants.includes('marketing'));
+  assert.ok(participants.includes('content'));
+  assert.equal(participants.includes('assistant'), false);
+  assert.equal(plan.routing_context_used, true);
+  assert.equal(plan.manager_synthesis_required, true);
+  assert.ok(plan.tasks.every((task) => task.task.includes('previous')));
+});
+
+test('manager does not route summary language to assistant when a specialist also matches', () => {
+  const plan = planMultiAgentDelegation(
+    'اعطني خلاصة عن المبيعات وخطة متابعة العملاء',
+    [{ slug: 'manager' }, { slug: 'assistant' }, { slug: 'sales' }]
+  );
+  const participants = plan.participants.map((item) => item.slug);
+  assert.deepEqual(participants, ['sales']);
+});
+
 test('orchestration context combines state, skills, RAG, tools and delegation', () => {
   const ctx = orchestrationContext({
     agent: { slug: 'manager' },
     message: 'حل مشكلة الموقع وسو خطة تسويق',
     agents: [{ slug: 'manager' }, { slug: 'developer' }, { slug: 'marketing' }],
-    knowledge: [{ id: 'k1', title: 'Runbook', content: 'Deployment runbook' }]
+    knowledge: [{ id: 'k1', title: 'Runbook', content: 'Deployment runbook' }],
+    recent: [{ message: 'نحتاج إصلاح الموقع', response: 'المطور مسؤول عن الإصلاح.' }]
   });
   assert.equal(ctx.agent_card.slug, 'manager');
   assert.equal(ctx.execution_contract.protocol, 'tiqnora-intent/v1');
@@ -173,6 +211,7 @@ test('orchestration context combines state, skills, RAG, tools and delegation', 
   assert.ok(ctx.skills_prompt.includes('Loaded specialist skills'));
   assert.ok(Array.isArray(ctx.tools));
   assert.ok(ctx.delegation);
+  assert.equal(ctx.delegation.routing_context_used, true);
 });
 
 test('migration contains persistence for state, RAG, evals, learning and A2A', () => {
