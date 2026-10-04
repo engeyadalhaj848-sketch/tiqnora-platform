@@ -55,9 +55,20 @@ describe('AI Workforce chat rendering resilience', () => {
     assert.match(src, /filter\(Boolean\)/);
   });
 
+  it('recovers a completed persisted reply after a transient browser fetch failure', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /async function recoverSavedConversation\(agentId, message, startedAt\)/);
+    assert.match(src, /await refreshAgentConversations\(agentId\)/);
+    assert.match(src, /row\.status !== 'completed'/);
+    assert.match(src, /String\(row\.message \|\| ''\)\.trim\(\) !== normalizedMessage/);
+    assert.match(src, /failed to fetch\|networkerror\|load failed\|network request failed/i);
+    assert.match(src, /const recovered = await recoverSavedConversation\(agentId, message, startedAt\)/);
+    assert.match(src, /تم تنفيذ الطلب واستعادة رد الوكيل بعد انقطاع الاتصال/);
+  });
+
   it('cache-busts the Workforce JavaScript asset on the page', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261002-5/);
+    assert.match(html, /workforce\\.js\\?v=20261004-1/);
   });
 
   it('chat API returns an explicit reply fallback in addition to the saved conversation', () => {
@@ -93,7 +104,7 @@ describe('AI Workforce A2A visibility and DAILY dates', () => {
 
   it('cache-busts the updated Workforce UI asset', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261002-5/);
+    assert.match(html, /workforce\\.js\\?v=20261004-1/);
   });
 });
 
