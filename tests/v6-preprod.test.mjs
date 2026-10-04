@@ -25,7 +25,7 @@ test('Vercel Hobby serverless API count remains exactly 11', () => {
     const full = join(dir, entry.name);
     return entry.isDirectory() ? walk(full) : [full];
   });
-  const functions = walk(root).filter(path => /\.(?:js|mjs|ts)$/.test(path) && !path.endsWith('_gateway-smoke.js'));
+  const functions = walk(root).filter(path => /\.(?:js|mjs|ts)$/.test(path));
   assert.equal(functions.length, 11, functions.join('\n'));
 });
 
