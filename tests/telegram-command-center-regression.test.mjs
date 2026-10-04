@@ -52,3 +52,19 @@ test('telegram social-review execution is prioritized before collaboration discu
   assert.ok(discussionIndex > executionIndex, 'social review execution must run before discussion routing');
   assert.ok(src.includes('لن يتم نشر أي شيء قبل اعتمادك'));
 });
+
+
+test('telegram owner can explicitly publish an image post to all connected social platforms', () => {
+  const publisher = readFileSync(join(root, 'lib/telegram-social-publisher.js'), 'utf8');
+  assert.ok(src.includes('isTelegramSocialPublishRequest'));
+  assert.ok(src.includes('publishTelegramSocialPost'));
+  assert.ok(src.includes('نتيجة النشر من Telegram'));
+  assert.ok(src.indexOf('if (isTelegramSocialPublishRequest(message))') < src.indexOf("if (!text) return { ok: true, note: 'empty_text' };"));
+  assert.ok(publisher.includes("PLATFORMS = ['facebook', 'instagram', 'tiktok']"));
+  assert.ok(publisher.includes("telegramApi('getFile'"));
+  assert.ok(publisher.includes("SOCIAL_BUCKET = 'social-creatives'"));
+  assert.ok(publisher.includes("owner_approved_via: 'telegram_group'"));
+  assert.ok(publisher.includes("requires_approval: false"));
+  assert.ok(publisher.includes('processPublishingJob'));
+  assert.ok(publisher.includes('/publish or انشر'));
+});
