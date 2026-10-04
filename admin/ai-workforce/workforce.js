@@ -251,7 +251,7 @@
       try {
         const rows = await refreshAgentConversations(agentId);
         const recovered = (rows || []).find(row => {
-          if (!row || row.status !== 'completed') return false;
+          if (!row || !['completed', 'failed'].includes(row.status)) return false;
           if (String(row.message || '').trim() !== normalizedMessage) return false;
           const created = new Date(row.created_at || 0).getTime();
           return Number.isFinite(created) && created >= cutoff;
@@ -263,6 +263,20 @@
     }
 
     return null;
+  }
+
+  function friendlyAiFailure(message) {
+    const value = String(message || '');
+    const lower = value.toLowerCase();
+    const openaiCredits = lower.includes('openai') && (lower.includes('no credits') || lower.includes('insufficient'));
+    const geminiQuota = (lower.includes('google_ai') || lower.includes('gemini')) && lower.includes('quota');
+
+    if (openaiCredits && geminiQuota) {
+      return 'تعذر تشغيل الوكلاء الآن: رصيد OpenAI API منتهٍ وGemini تجاوز حد الاستخدام. يتم تجربة مزودات الاحتياط تلقائيًا عند توفرها.';
+    }
+    if (openaiCredits) return 'رصيد OpenAI API منتهٍ حاليًا.';
+    if (geminiQuota) return 'Gemini تجاوز حد الاستخدام الحالي. جرّب لاحقًا أو استخدم مزود احتياط.';
+    return value || 'تعذر تشغيل مزود الذكاء الاصطناعي.';
   }
 
   async function sendMessage(e) {
@@ -323,6 +337,11 @@
       if (networkError) {
         const recovered = await recoverSavedConversation(agentId, message, startedAt);
         if (recovered) {
+          if (recovered.status === 'failed') {
+            if (selectedAgent?.id === agentId) renderChat();
+            toast(friendlyAiFailure(recovered.error_message), false);
+            return;
+          }
           const reply = recovered.response || '';
           if (selectedAgent?.id === agentId) renderChat();
           if (shouldSpeak && reply) setTimeout(() => speakArabic(reply), 60);
