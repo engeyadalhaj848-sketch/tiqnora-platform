@@ -59,7 +59,7 @@ describe('AI Workforce chat rendering resilience', () => {
     const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
     assert.match(src, /async function recoverSavedConversation\(agentId, message, startedAt\)/);
     assert.match(src, /await refreshAgentConversations\(agentId\)/);
-    assert.match(src, /row\.status !== 'completed'/);
+    assert.match(src, /\['completed', 'failed'\]\.includes\(row\.status\)/);
     assert.match(src, /String\(row\.message \|\| ''\)\.trim\(\) !== normalizedMessage/);
     assert.match(src, /failed to fetch\|networkerror\|load failed\|network request failed/i);
     assert.match(src, /const recovered = await recoverSavedConversation\(agentId, message, startedAt\)/);
