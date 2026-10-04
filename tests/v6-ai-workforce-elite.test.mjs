@@ -32,6 +32,13 @@ test('OpenAI is primary with provider resilience for workforce and commerce', ()
   const candidates = workforceChat.slice(candidatesStart, candidatesEnd);
   assert.equal(candidates.indexOf("id: 'openai'") < candidates.indexOf("id: 'google_ai'"), true);
   assert.equal(workforceChat.includes('max_completion_tokens: 4096'), true);
+  assert.equal(workforceChat.includes('https://ai-gateway.vercel.sh/v1/chat/completions'), true);
+  assert.equal(workforceChat.includes("id: 'vercel_ai_gateway'"), true);
+  assert.equal(workforceChat.includes('VERCEL_OIDC_TOKEN'), true);
+  assert.equal(workforceChat.includes("openai/gpt-5.6-luna"), true);
+  assert.equal(provider.includes('https://ai-gateway.vercel.sh/v1/chat/completions'), true);
+  assert.equal(provider.includes('vercel_ai_gateway'), true);
+  assert.equal(provider.includes('VERCEL_OIDC_TOKEN'), true);
   assert.equal(commerceAi.includes("import { generateText } from '../../lib/ai/provider.js';"), true);
   assert.equal(commerceAi.includes('async function callCommerceAI'), true);
   assert.equal(commerceAi.includes('generativelanguage.googleapis.com'), false);

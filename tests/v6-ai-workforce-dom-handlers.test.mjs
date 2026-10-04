@@ -59,16 +59,25 @@ describe('AI Workforce chat rendering resilience', () => {
     const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
     assert.match(src, /async function recoverSavedConversation\(agentId, message, startedAt\)/);
     assert.match(src, /await refreshAgentConversations\(agentId\)/);
-    assert.match(src, /row\.status !== 'completed'/);
+    assert.match(src, /\['completed', 'failed'\]\.includes\(row\.status\)/);
     assert.match(src, /String\(row\.message \|\| ''\)\.trim\(\) !== normalizedMessage/);
     assert.match(src, /failed to fetch\|networkerror\|load failed\|network request failed/i);
     assert.match(src, /const recovered = await recoverSavedConversation\(agentId, message, startedAt\)/);
     assert.match(src, /تم تنفيذ الطلب واستعادة رد الوكيل بعد انقطاع الاتصال/);
   });
 
+  it('recovers a persisted failed provider result and shows a friendly quota message', () => {
+    const src = readFileSync(new URL('../admin/ai-workforce/workforce.js', import.meta.url), 'utf8');
+    assert.match(src, /\['completed', 'failed'\]\.includes\(row\.status\)/);
+    assert.match(src, /function friendlyAiFailure\(message\)/);
+    assert.match(src, /recovered\.status === 'failed'/);
+    assert.match(src, /رصيد OpenAI API منتهٍ/);
+    assert.match(src, /Gemini تجاوز حد الاستخدام/);
+  });
+
   it('cache-busts the Workforce JavaScript asset on the page', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261004-1/);
+    assert.match(html, /workforce\.js\?v=20261004-2/);
   });
 
   it('chat API returns an explicit reply fallback in addition to the saved conversation', () => {
@@ -104,7 +113,7 @@ describe('AI Workforce A2A visibility and DAILY dates', () => {
 
   it('cache-busts the updated Workforce UI asset', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\.js\?v=20261004-1/);
+    assert.match(html, /workforce\.js\?v=20261004-2/);
   });
 });
 
