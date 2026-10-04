@@ -5,7 +5,9 @@ import {
   listRuntimeSkills,
   listAgentSkillBindings,
   getSkillsForAgent,
-  allowedMcpTools
+  allowedMcpTools,
+  formatApprovedLearning,
+  orchestrationContext
 } from '../lib/v6/agent-runtime.js';
 
 describe('runtime Skills registry', () => {
@@ -19,6 +21,38 @@ describe('runtime Skills registry', () => {
     assert.ok(developer);
     assert.deepEqual(developer.skill_ids, getSkillsForAgent('developer').map((skill) => skill.id));
     assert.deepEqual(developer.tools, allowedMcpTools('developer'));
+  });
+});
+
+describe('approved learning accumulation', () => {
+  it('injects only approved lessons and preserves safety boundaries', () => {
+    const prompt = formatApprovedLearning([
+      { id: 'a1', lesson_key: 'verify_before_claiming', lesson: 'Verify production evidence before claiming success.', status: 'approved' },
+      { id: 'p1', lesson_key: 'not_ready', lesson: 'This proposed lesson must not be applied.', status: 'proposed' }
+    ]);
+    assert.match(prompt, /Verify production evidence before claiming success/);
+    assert.doesNotMatch(prompt, /proposed lesson must not be applied/);
+    assert.match(prompt, /never override global safety rules/i);
+
+    const runtime = orchestrationContext({
+      agent: { slug: 'developer' },
+      message: 'Fix the production bug',
+      approvedLessons: [
+        { id: 'a1', lesson_key: 'verify_before_claiming', lesson: 'Verify production evidence before claiming success.', status: 'approved' }
+      ]
+    });
+    assert.match(runtime.learning_prompt, /verify_before_claiming/);
+  });
+
+  it('live chat loads approved learning and adds it to main and delegated prompts', () => {
+    const src = readFileSync(new URL('../api/ai-workforce/chat.js', import.meta.url), 'utf8');
+    assert.match(src, /ai_agent_learning_events\?organization_id=eq/);
+    assert.match(src, /status=eq\.approved/);
+    assert.match(src, /approvedLearningForAgent/);
+    assert.match(src, /runtime\.learning_prompt/);
+    assert.match(src, /specialistRuntime\.learning_prompt/);
+    assert.match(src, /approved_learning_ids/);
+    assert.match(src, /agent_key: agent\.slug \|\| agent\.id/);
   });
 });
 
