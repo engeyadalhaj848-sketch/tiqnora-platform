@@ -517,6 +517,7 @@ export default async function handler(req, res) {
     ]);
     const runtimePrompt = [
       formatStateContext(runtime.state),
+      runtime.intent_prompt,
       runtime.skills_prompt,
       runtime.rag_prompt,
       runtime.learning_prompt,
@@ -582,7 +583,10 @@ export default async function handler(req, res) {
             span_type: 'step',
             name: 'request_runtime',
             status: 'completed',
-            input: { message_len: message.length },
+            input: {
+              message_len: message.length,
+              execution_contract: runtime.execution_contract
+            },
             output: { path: runtimeMode.path }
           })
         }, null);
@@ -618,6 +622,7 @@ export default async function handler(req, res) {
                 });
                 const specialistRuntimePrompt = [
                   formatStateContext(specialistRuntime.state),
+                  specialistRuntime.intent_prompt,
                   specialistRuntime.skills_prompt,
                   specialistRuntime.rag_prompt,
                   specialistRuntime.learning_prompt,
@@ -830,6 +835,7 @@ export default async function handler(req, res) {
           agent,
           message,
           knowledge,
+          executionContract: runtime.execution_contract,
           invoke
         });
         result = harnessRun.result;
@@ -928,6 +934,11 @@ export default async function handler(req, res) {
             rag_source_table: KNOWLEDGE_SOURCE_TABLE,
             rag_vector_error: knowledgeRetrieval.diagnostics?.vector_error || null,
             approved_learning_ids: approvedLessons.map((row) => row.id || row.lesson_key).filter(Boolean),
+            execution_contract: {
+              protocol: runtime.execution_contract?.protocol || null,
+              objective: runtime.execution_contract?.objective || message,
+              definition_of_done: runtime.execution_contract?.definition_of_done || []
+            },
             skills: runtime.agent_card.skills,
             allowed_tools: runtime.tools
           }
