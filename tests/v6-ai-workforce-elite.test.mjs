@@ -42,7 +42,10 @@ test('Vercel AI Gateway is primary with direct-provider resilience for workforce
   assert.equal(provider.includes('vercel_ai_gateway'), true);
   assert.equal(provider.includes('VERCEL_OIDC_TOKEN'), true);
   assert.equal(provider.includes('...(fallbackModels.length ? { models: fallbackModels } : {})'), true);
-  assert.equal(provider.includes("const preferredProvider = aiGatewayToken()"), true);
+  assert.equal(provider.includes("const preferredProvider = aiGatewayEnabled()"), true);
+  assert.equal(provider.includes("await import('ai')"), true);
+  assert.equal(workforceChat.includes("await import('ai')"), true);
+  assert.equal(workforceChat.includes("if (aiGatewayEnabled()) out.push({ id: 'vercel_ai_gateway'"), true);
   assert.equal(commerceAi.includes("import { generateText } from '../../lib/ai/provider.js';"), true);
   assert.equal(commerceAi.includes('async function callCommerceAI'), true);
   assert.equal(commerceAi.includes('generativelanguage.googleapis.com'), false);
