@@ -148,6 +148,127 @@ describe('RC AI quota resilience', () => {
     }
   });
 
+  it('uses Vercel AI Gateway first and sends model fallbacks at the REST top level', async () => {
+    const oldFetch = globalThis.fetch;
+    const saved = {
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      GOOGLE_GEMINI_API_KEY: process.env.GOOGLE_GEMINI_API_KEY,
+      GOOGLE_AI_API_KEY: process.env.GOOGLE_AI_API_KEY,
+      XAI_API_KEY: process.env.XAI_API_KEY,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      AI_GATEWAY_ENABLED: process.env.AI_GATEWAY_ENABLED,
+      AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+      VERCEL_OIDC_TOKEN: process.env.VERCEL_OIDC_TOKEN,
+      AI_GATEWAY_MODEL: process.env.AI_GATEWAY_MODEL,
+      AI_GATEWAY_FALLBACK_MODELS: process.env.AI_GATEWAY_FALLBACK_MODELS
+    };
+    process.env.AI_GATEWAY_ENABLED = 'true';
+    process.env.VERCEL_OIDC_TOKEN = 'oidc-test-token';
+    process.env.AI_GATEWAY_MODEL = 'openai/gpt-5.6-luna';
+    process.env.AI_GATEWAY_FALLBACK_MODELS = 'google/gemini-3.1-flash-lite,alibaba/qwen3.7-flash';
+    process.env.OPENAI_API_KEY = 'direct-openai-test-key';
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_GEMINI_API_KEY;
+    delete process.env.GOOGLE_AI_API_KEY;
+    delete process.env.XAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const calls = [];
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes('ai-gateway.vercel.sh')) {
+        const body = JSON.parse(init.body);
+        assert.equal(init.headers.Authorization, 'Bearer oidc-test-token');
+        assert.equal(body.model, 'openai/gpt-5.6-luna');
+        assert.deepEqual(body.models, ['google/gemini-3.1-flash-lite', 'alibaba/qwen3.7-flash']);
+        assert.equal(body.providerOptions.gateway.tags[0], 'app:tiqnora');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            model: 'openai/gpt-5.6-luna',
+            choices: [{ message: { content: 'gateway ok' } }]
+          })
+        };
+      }
+      throw new Error('direct provider should not be called when Gateway succeeds');
+    };
+
+    try {
+      const result = await generateText({ prompt: 'hello', allowDeterministic: false });
+      assert.equal(result.provider, 'vercel_ai_gateway');
+      assert.equal(result.text, 'gateway ok');
+      assert.equal(calls.length, 1);
+    } finally {
+      globalThis.fetch = oldFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value == null) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it('falls back from exhausted Gateway budget to the direct OpenAI provider', async () => {
+    const oldFetch = globalThis.fetch;
+    const saved = {
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      GOOGLE_GEMINI_API_KEY: process.env.GOOGLE_GEMINI_API_KEY,
+      GOOGLE_AI_API_KEY: process.env.GOOGLE_AI_API_KEY,
+      XAI_API_KEY: process.env.XAI_API_KEY,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      AI_GATEWAY_ENABLED: process.env.AI_GATEWAY_ENABLED,
+      AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+      VERCEL_OIDC_TOKEN: process.env.VERCEL_OIDC_TOKEN
+    };
+    process.env.AI_GATEWAY_ENABLED = 'true';
+    process.env.VERCEL_OIDC_TOKEN = 'oidc-test-token';
+    process.env.OPENAI_API_KEY = 'direct-openai-test-key';
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_GEMINI_API_KEY;
+    delete process.env.GOOGLE_AI_API_KEY;
+    delete process.env.XAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      if (String(url).includes('ai-gateway.vercel.sh')) {
+        return {
+          ok: false,
+          status: 402,
+          json: async () => ({ error: { message: 'Payment required: gateway budget exhausted' } })
+        };
+      }
+      if (String(url).includes('api.openai.com')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            model: 'chat-latest',
+            choices: [{ message: { content: 'direct fallback ok' } }]
+          })
+        };
+      }
+      throw new Error('unexpected provider');
+    };
+
+    try {
+      const result = await generateText({ prompt: 'hello', allowDeterministic: false });
+      assert.equal(result.provider, 'openai');
+      assert.equal(result.text, 'direct fallback ok');
+      assert.equal(urls[0].includes('ai-gateway.vercel.sh'), true);
+      assert.equal(urls[1].includes('api.openai.com'), true);
+    } finally {
+      globalThis.fetch = oldFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value == null) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it('aiProviderHealth reports configured providers', () => {
     const health = aiProviderHealth();
     assert.ok(typeof health.configured === 'boolean');
@@ -156,14 +277,18 @@ describe('RC AI quota resilience', () => {
   });
 
   it('missing API key is classified as not configured', async () => {
-    const oldKey = process.env.GEMINI_API_KEY;
-    const oldOpen = process.env.OPENAI_API_KEY;
-    delete process.env.GEMINI_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.XAI_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.GOOGLE_AI_API_KEY;
-    delete process.env.GOOGLE_GEMINI_API_KEY;
+    const saved = {
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      XAI_API_KEY: process.env.XAI_API_KEY,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      GOOGLE_AI_API_KEY: process.env.GOOGLE_AI_API_KEY,
+      GOOGLE_GEMINI_API_KEY: process.env.GOOGLE_GEMINI_API_KEY,
+      AI_GATEWAY_ENABLED: process.env.AI_GATEWAY_ENABLED,
+      AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+      VERCEL_OIDC_TOKEN: process.env.VERCEL_OIDC_TOKEN
+    };
+    for (const key of Object.keys(saved)) delete process.env[key];
 
     try {
       await assert.rejects(
@@ -171,8 +296,10 @@ describe('RC AI quota resilience', () => {
         (err) => err.code === 'AI_PROVIDER_NOT_CONFIGURED'
       );
     } finally {
-      if (oldKey) process.env.GEMINI_API_KEY = oldKey;
-      if (oldOpen) process.env.OPENAI_API_KEY = oldOpen;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value == null) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 });

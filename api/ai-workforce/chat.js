@@ -219,27 +219,70 @@ async function callOpenAI(agent, messages) {
   return { text: payload.choices?.[0]?.message?.content || '', model: payload.model || agent.model };
 }
 
+function aiGatewayEnabled() {
+  return Boolean(process.env.AI_GATEWAY_API_KEY)
+    || String(process.env.AI_GATEWAY_ENABLED || '').toLowerCase() === 'true';
+}
+
 function aiGatewayToken() {
-  if (process.env.AI_GATEWAY_API_KEY) return process.env.AI_GATEWAY_API_KEY;
-  if (String(process.env.AI_GATEWAY_ENABLED || '').toLowerCase() === 'true') {
-    return process.env.VERCEL_OIDC_TOKEN || '';
-  }
-  return '';
+  return process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || '';
 }
 
 async function callVercelGateway(agent, messages) {
   const token = aiGatewayToken();
+  const primaryModel = process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna';
+
+  if (!token && aiGatewayEnabled()) {
+    try {
+      const fallbackModels = String(
+        process.env.AI_GATEWAY_FALLBACK_MODELS ||
+        'google/gemini-3.1-flash-lite,alibaba/qwen3.7-flash,google/gemini-3.6-flash'
+      )
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean)
+        .filter(value => value !== primaryModel)
+        .slice(0, 4);
+      const { generateText: gatewayGenerateText } = await import('ai');
+      const result = await gatewayGenerateText({
+        model: primaryModel,
+        messages,
+        temperature: Number(agent.temperature ?? 0.7),
+        maxOutputTokens: 4096,
+        providerOptions: {
+          gateway: {
+            ...(fallbackModels.length ? { models: fallbackModels } : {}),
+            tags: ['feature:ai-workforce', `env:${process.env.VERCEL_ENV || 'unknown'}`]
+          }
+        }
+      });
+      const servedModel =
+        result?.response?.modelId ||
+        result?.providerMetadata?.gateway?.routing?.model ||
+        primaryModel;
+      return {
+        text: String(result?.text || ''),
+        model: servedModel,
+        gateway: true,
+        fallback_used: servedModel !== primaryModel
+      };
+    } catch (error) {
+      throw Object.assign(new Error(String(error?.message || error || 'Vercel AI Gateway SDK request failed')), {
+        status: Number(error?.statusCode || error?.status || 502),
+        providerStatus: Number(error?.statusCode || error?.status || 502)
+      });
+    }
+  }
+
   if (!token) {
-    throw Object.assign(new Error('Vercel AI Gateway is not available in this runtime.'), {
+    throw Object.assign(new Error('Vercel AI Gateway is not enabled in this runtime.'), {
       status: 503,
       code: 'AI_GATEWAY_NOT_CONFIGURED'
     });
   }
-
-  const primaryModel = process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna';
   const fallbackModels = String(
     process.env.AI_GATEWAY_FALLBACK_MODELS ||
-    'google/gemini-3.6-flash,spacexai/grok-4.7'
+    'google/gemini-3.1-flash-lite,alibaba/qwen3.7-flash,google/gemini-3.6-flash'
   )
     .split(',')
     .map(value => value.trim())
@@ -252,14 +295,12 @@ async function callVercelGateway(agent, messages) {
     max_tokens: 4096,
     temperature: Number(agent.temperature ?? 0.7),
     messages,
-    ...(fallbackModels.length ? {
-      providerOptions: {
-        gateway: {
-          models: fallbackModels,
-          tags: ['feature:ai-workforce', 'env:production']
-        }
+    ...(fallbackModels.length ? { models: fallbackModels } : {}),
+    providerOptions: {
+      gateway: {
+        tags: ['feature:ai-workforce', `env:${process.env.VERCEL_ENV || 'unknown'}`]
       }
-    } : {})
+    }
   };
 
   const response = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
@@ -343,9 +384,9 @@ async function callGrok(agent, messages) {
 
 function providerCandidates() {
   const out = [];
+  if (aiGatewayEnabled()) out.push({ id: 'vercel_ai_gateway', call: callVercelGateway });
   if (process.env.OPENAI_API_KEY) out.push({ id: 'openai', call: callOpenAI });
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) out.push({ id: 'google_ai', call: callGemini });
-  if (aiGatewayToken()) out.push({ id: 'vercel_ai_gateway', call: callVercelGateway });
   if (process.env.XAI_API_KEY) out.push({ id: 'xai', call: callGrok });
   if (process.env.ANTHROPIC_API_KEY) out.push({ id: 'anthropic', call: callAnthropic });
   return out;
@@ -439,7 +480,7 @@ function providerStatusPayload() {
   const providers = [
     { id: 'google_ai', name: 'Google Gemini', configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY), defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash', envVars: ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GEMINI_MODEL'] },
     { id: 'openai', name: 'OpenAI', configured: Boolean(process.env.OPENAI_API_KEY), defaultModel: process.env.OPENAI_MODEL || 'chat-latest', envVars: ['OPENAI_API_KEY', 'OPENAI_MODEL'] },
-    { id: 'vercel_ai_gateway', name: 'Vercel AI Gateway', configured: Boolean(aiGatewayToken()), defaultModel: process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna', envVars: ['VERCEL_OIDC_TOKEN (managed by Vercel)', 'AI_GATEWAY_API_KEY', 'AI_GATEWAY_MODEL'] },
+    { id: 'vercel_ai_gateway', name: 'Vercel AI Gateway', configured: aiGatewayEnabled(), defaultModel: process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna', envVars: ['VERCEL_OIDC_TOKEN (managed by Vercel)', 'AI_GATEWAY_API_KEY', 'AI_GATEWAY_MODEL'] },
     { id: 'anthropic', name: 'Claude (Anthropic)', configured: Boolean(process.env.ANTHROPIC_API_KEY), defaultModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', envVars: ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'] },
     { id: 'xai', name: 'Grok (xAI)', configured: Boolean(process.env.XAI_API_KEY), defaultModel: process.env.XAI_MODEL || 'grok-3-mini', envVars: ['XAI_API_KEY', 'XAI_MODEL'] }
   ];
@@ -448,6 +489,7 @@ function providerStatusPayload() {
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
+
   const token = bearer(req);
   if (!token) return json(res, 401, { error: 'يلزم تسجيل الدخول.' });
 
