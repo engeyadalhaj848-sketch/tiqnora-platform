@@ -239,7 +239,7 @@ async function callVercelGateway(agent, messages) {
   const primaryModel = process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna';
   const fallbackModels = String(
     process.env.AI_GATEWAY_FALLBACK_MODELS ||
-    'google/gemini-3.6-flash,spacexai/grok-4.7'
+    'google/gemini-3.1-flash-lite,alibaba/qwen3.7-flash,google/gemini-3.6-flash'
   )
     .split(',')
     .map(value => value.trim())
@@ -252,14 +252,12 @@ async function callVercelGateway(agent, messages) {
     max_tokens: 4096,
     temperature: Number(agent.temperature ?? 0.7),
     messages,
-    ...(fallbackModels.length ? {
-      providerOptions: {
-        gateway: {
-          models: fallbackModels,
-          tags: ['feature:ai-workforce', 'env:production']
-        }
+    ...(fallbackModels.length ? { models: fallbackModels } : {}),
+    providerOptions: {
+      gateway: {
+        tags: ['feature:ai-workforce', `env:${process.env.VERCEL_ENV || 'unknown'}`]
       }
-    } : {})
+    }
   };
 
   const response = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
@@ -343,9 +341,9 @@ async function callGrok(agent, messages) {
 
 function providerCandidates() {
   const out = [];
+  if (aiGatewayToken()) out.push({ id: 'vercel_ai_gateway', call: callVercelGateway });
   if (process.env.OPENAI_API_KEY) out.push({ id: 'openai', call: callOpenAI });
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) out.push({ id: 'google_ai', call: callGemini });
-  if (aiGatewayToken()) out.push({ id: 'vercel_ai_gateway', call: callVercelGateway });
   if (process.env.XAI_API_KEY) out.push({ id: 'xai', call: callGrok });
   if (process.env.ANTHROPIC_API_KEY) out.push({ id: 'anthropic', call: callAnthropic });
   return out;
