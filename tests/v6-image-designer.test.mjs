@@ -53,7 +53,10 @@ describe('image-designer core', () => {
     assert.match(art.prompt, /zero readable text/i);
     assert.ok(art.overlay.headline_ar);
     assert.ok(art.overlay.cta_ar);
-    assert.equal(art.prompt_version, 'tiqnora-art-v4');
+    assert.equal(art.prompt_version, 'tiqnora-art-v5-final-social-ad');
+    assert.match(art.prompt, /FINAL SOCIAL AD RULE/);
+    assert.match(art.prompt, /not a UI concept/i);
+    assert.match(art.negative_prompt, /dominant device mockup/i);
     assert.match(art.prompt, /Headline/);
     assert.match(art.prompt, /zero readable text/i);
   });
