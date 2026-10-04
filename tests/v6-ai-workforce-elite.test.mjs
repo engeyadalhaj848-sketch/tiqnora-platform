@@ -26,23 +26,26 @@ test('elite workforce uses memory, recent conversation, and open tasks', () => {
   assert.equal(workforceChat.includes('Open tasks for this agent:'), true);
 });
 
-test('OpenAI is primary with provider resilience for workforce and commerce', () => {
+test('Vercel AI Gateway is primary with direct-provider resilience for workforce and commerce', () => {
   const candidatesStart = workforceChat.indexOf('function providerCandidates()');
   const candidatesEnd = workforceChat.indexOf('async function callPreferredProvider', candidatesStart);
   const candidates = workforceChat.slice(candidatesStart, candidatesEnd);
+  assert.equal(candidates.indexOf("id: 'vercel_ai_gateway'") < candidates.indexOf("id: 'openai'"), true);
   assert.equal(candidates.indexOf("id: 'openai'") < candidates.indexOf("id: 'google_ai'"), true);
   assert.equal(workforceChat.includes('max_completion_tokens: 4096'), true);
   assert.equal(workforceChat.includes('https://ai-gateway.vercel.sh/v1/chat/completions'), true);
   assert.equal(workforceChat.includes("id: 'vercel_ai_gateway'"), true);
   assert.equal(workforceChat.includes('VERCEL_OIDC_TOKEN'), true);
   assert.equal(workforceChat.includes("openai/gpt-5.6-luna"), true);
+  assert.equal(workforceChat.includes('...(fallbackModels.length ? { models: fallbackModels } : {})'), true);
   assert.equal(provider.includes('https://ai-gateway.vercel.sh/v1/chat/completions'), true);
   assert.equal(provider.includes('vercel_ai_gateway'), true);
   assert.equal(provider.includes('VERCEL_OIDC_TOKEN'), true);
+  assert.equal(provider.includes('...(fallbackModels.length ? { models: fallbackModels } : {})'), true);
+  assert.equal(provider.includes("const preferredProvider = aiGatewayToken()"), true);
   assert.equal(commerceAi.includes("import { generateText } from '../../lib/ai/provider.js';"), true);
   assert.equal(commerceAi.includes('async function callCommerceAI'), true);
   assert.equal(commerceAi.includes('generativelanguage.googleapis.com'), false);
-  assert.equal(provider.includes("preferredProvider = openaiKey()"), true);
 });
 
 test('workforce public-output guard protects private ownership identity', () => {
