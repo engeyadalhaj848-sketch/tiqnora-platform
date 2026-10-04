@@ -219,6 +219,72 @@ async function callOpenAI(agent, messages) {
   return { text: payload.choices?.[0]?.message?.content || '', model: payload.model || agent.model };
 }
 
+function aiGatewayToken() {
+  return process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || '';
+}
+
+async function callVercelGateway(agent, messages) {
+  const token = aiGatewayToken();
+  if (!token) {
+    throw Object.assign(new Error('Vercel AI Gateway is not available in this runtime.'), {
+      status: 503,
+      code: 'AI_GATEWAY_NOT_CONFIGURED'
+    });
+  }
+
+  const primaryModel = process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna';
+  const fallbackModels = String(
+    process.env.AI_GATEWAY_FALLBACK_MODELS ||
+    'google/gemini-3.6-flash,spacexai/grok-4.7'
+  )
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+    .filter(value => value !== primaryModel)
+    .slice(0, 4);
+
+  const body = {
+    model: primaryModel,
+    max_tokens: 4096,
+    temperature: Number(agent.temperature ?? 0.7),
+    messages,
+    ...(fallbackModels.length ? {
+      providerOptions: {
+        gateway: {
+          models: fallbackModels,
+          tags: ['feature:ai-workforce', 'env:production']
+        }
+      }
+    } : {})
+  };
+
+  const response = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Vercel-AI-App-Name': 'Tiqnora AI Workforce',
+      'X-Vercel-AI-App-Url': 'https://tiqnora.com'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.message || `Vercel AI Gateway failed (${response.status})`;
+    throw Object.assign(new Error(message), {
+      status: response.status === 402 ? 402 : 502,
+      providerStatus: response.status
+    });
+  }
+
+  return {
+    text: payload.choices?.[0]?.message?.content || '',
+    model: payload.model || primaryModel,
+    gateway: true
+  };
+}
+
 async function callAnthropic(agent, messages) {
   if (!process.env.ANTHROPIC_API_KEY) throw Object.assign(new Error('لم يتم إعداد ANTHROPIC_API_KEY في Vercel بعد.'), { status: 503 });
   const system = messages.find(m => m.role === 'system')?.content || '';
@@ -275,6 +341,7 @@ function providerCandidates() {
   const out = [];
   if (process.env.OPENAI_API_KEY) out.push({ id: 'openai', call: callOpenAI });
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) out.push({ id: 'google_ai', call: callGemini });
+  if (aiGatewayToken()) out.push({ id: 'vercel_ai_gateway', call: callVercelGateway });
   if (process.env.XAI_API_KEY) out.push({ id: 'xai', call: callGrok });
   if (process.env.ANTHROPIC_API_KEY) out.push({ id: 'anthropic', call: callAnthropic });
   return out;
@@ -368,6 +435,7 @@ function providerStatusPayload() {
   const providers = [
     { id: 'google_ai', name: 'Google Gemini', configured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY), defaultModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash', envVars: ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GEMINI_MODEL'] },
     { id: 'openai', name: 'OpenAI', configured: Boolean(process.env.OPENAI_API_KEY), defaultModel: process.env.OPENAI_MODEL || 'chat-latest', envVars: ['OPENAI_API_KEY', 'OPENAI_MODEL'] },
+    { id: 'vercel_ai_gateway', name: 'Vercel AI Gateway', configured: Boolean(aiGatewayToken()), defaultModel: process.env.AI_GATEWAY_MODEL || 'openai/gpt-5.6-luna', envVars: ['VERCEL_OIDC_TOKEN (managed by Vercel)', 'AI_GATEWAY_API_KEY', 'AI_GATEWAY_MODEL'] },
     { id: 'anthropic', name: 'Claude (Anthropic)', configured: Boolean(process.env.ANTHROPIC_API_KEY), defaultModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', envVars: ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'] },
     { id: 'xai', name: 'Grok (xAI)', configured: Boolean(process.env.XAI_API_KEY), defaultModel: process.env.XAI_MODEL || 'grok-3-mini', envVars: ['XAI_API_KEY', 'XAI_MODEL'] }
   ];
