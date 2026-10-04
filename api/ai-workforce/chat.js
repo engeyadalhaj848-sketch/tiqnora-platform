@@ -220,7 +220,11 @@ async function callOpenAI(agent, messages) {
 }
 
 function aiGatewayToken() {
-  return process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || '';
+  if (process.env.AI_GATEWAY_API_KEY) return process.env.AI_GATEWAY_API_KEY;
+  if (String(process.env.AI_GATEWAY_ENABLED || '').toLowerCase() === 'true') {
+    return process.env.VERCEL_OIDC_TOKEN || '';
+  }
+  return '';
 }
 
 async function callVercelGateway(agent, messages) {
