@@ -57,6 +57,7 @@ describe('image-designer core', () => {
     assert.match(art.prompt, /FINAL SOCIAL AD RULE/);
     assert.match(art.prompt, /not a UI concept/i);
     assert.match(art.negative_prompt, /dominant device mockup/i);
+    assert.doesNotMatch(art.prompt, /central responsive-device ecosystem/i);
     assert.match(art.prompt, /Headline/);
     assert.match(art.prompt, /zero readable text/i);
   });
