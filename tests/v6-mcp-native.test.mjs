@@ -49,6 +49,10 @@ describe('official MCP v2 server/client handshake', () => {
     const tools = await client.listTools();
     assert.ok(tools.tools.some((tool) => tool.name === 'social.status'));
     assert.ok(tools.tools.some((tool) => tool.name === 'social.publish'));
+    assert.ok(tools.tools.some((tool) => tool.name === 'knowledge.search'));
+    assert.ok(tools.tools.some((tool) => tool.name === 'memory.read'));
+    assert.ok(tools.tools.some((tool) => tool.name === 'learning.read'));
+    assert.ok(tools.tools.some((tool) => tool.name === 'eval.read'));
 
     const resources = await client.listResources();
     assert.ok(resources.resources.some((resource) => resource.uri === 'tiqnora://agent-runtime/status'));
@@ -65,6 +69,52 @@ describe('official MCP v2 server/client handshake', () => {
     assert.equal(result.structuredContent.ok, true);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].auth.profile.role, 'super_admin');
+
+    await transport.close();
+    await handler.close();
+  });
+
+  test('read-only context tools use the authenticated Supabase tenant context', async () => {
+    const requests = [];
+    const handler = createTiqnoraNativeMcpHandler({
+      executeTool: async () => ({ ok: true }),
+      env: { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'anon' },
+      fetchImpl: async (url, init = {}) => {
+        requests.push({ url: String(url), init });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{
+            id: 'chunk-1',
+            document_id: 'doc-1',
+            title: 'Operating Guide',
+            content: 'Use verified evidence before claiming execution.',
+            rank: 0.91
+          }]
+        };
+      }
+    });
+    const client = new Client(
+      { name: 'context-read-test', version: '1.0.0' },
+      { versionNegotiation: { mode: 'auto' } }
+    );
+    const transport = inProcessTransport(handler, toMcpAuthInfo(fakeAdminAuth()));
+
+    await client.connect(transport);
+    const result = await client.callTool({
+      name: 'knowledge.search',
+      arguments: { query: 'verified evidence', limit: 3 }
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent.ok, true);
+    assert.equal(result.structuredContent.organization_id, fakeAdminAuth().profile.default_organization_id);
+    assert.equal(result.structuredContent.results[0].title, 'Operating Guide');
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /\/rest\/v1\/rpc\/search_agent_knowledge$/);
+    const body = JSON.parse(requests[0].init.body);
+    assert.equal(body.p_organization_id, fakeAdminAuth().profile.default_organization_id);
+    assert.equal(body.p_query, 'verified evidence');
 
     await transport.close();
     await handler.close();
