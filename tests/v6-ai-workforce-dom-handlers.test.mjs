@@ -68,7 +68,7 @@ describe('AI Workforce chat rendering resilience', () => {
 
   it('cache-busts the Workforce JavaScript asset on the page', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\\.js\\?v=20261004-1/);
+    assert.match(html, /workforce\.js\?v=20261004-1/);
   });
 
   it('chat API returns an explicit reply fallback in addition to the saved conversation', () => {
@@ -104,7 +104,7 @@ describe('AI Workforce A2A visibility and DAILY dates', () => {
 
   it('cache-busts the updated Workforce UI asset', () => {
     const html = readFileSync(new URL('../admin/ai-workforce/index.html', import.meta.url), 'utf8');
-    assert.match(html, /workforce\\.js\\?v=20261004-1/);
+    assert.match(html, /workforce\.js\?v=20261004-1/);
   });
 });
 
