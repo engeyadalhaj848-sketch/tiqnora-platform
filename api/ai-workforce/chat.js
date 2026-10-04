@@ -446,6 +446,32 @@ function providerStatusPayload() {
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
+
+  if (
+    process.env.VERCEL_ENV === 'preview' &&
+    req.method === 'GET' &&
+    String(req.query?.route || '').toLowerCase() === 'gateway-smoke'
+  ) {
+    try {
+      const result = await callVercelGateway(
+        { temperature: 0 },
+        [{ role: 'user', content: 'Reply exactly with TIQNORA_GATEWAY_OK' }]
+      );
+      return json(res, 200, {
+        ok: String(result?.text || '').includes('TIQNORA_GATEWAY_OK'),
+        provider: 'vercel_ai_gateway',
+        model: result?.model || null,
+        text: result?.text || ''
+      });
+    } catch (error) {
+      return json(res, error?.providerStatus || error?.status || 502, {
+        ok: false,
+        provider: 'vercel_ai_gateway',
+        error: String(error?.message || error).slice(0, 500)
+      });
+    }
+  }
+
   const token = bearer(req);
   if (!token) return json(res, 401, { error: 'يلزم تسجيل الدخول.' });
 
