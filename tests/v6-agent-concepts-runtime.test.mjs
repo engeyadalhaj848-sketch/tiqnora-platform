@@ -8,6 +8,8 @@ import {
   allowedMcpTools,
   buildAgentCard,
   buildStateSnapshot,
+  buildExecutionContract,
+  formatExecutionContract,
   retrieveRagCandidates,
   evaluateAgentResponse,
   buildLearningEvent,
@@ -59,6 +61,31 @@ test('memory and state snapshot is bounded and explicit', () => {
   assert.equal(state.memory_items, 2);
   assert.equal(state.open_tasks, 1);
   assert.equal(state.recent_turns, 3);
+});
+
+test('execution contract makes objective, context and definition of done explicit', () => {
+  const contract = buildExecutionContract({
+    agent: { slug: 'developer' },
+    message: 'اصلح مشكلة الدفع وتأكد من الإنتاج',
+    state: { current_goal: 'restore checkout' },
+    memory: [{ key: 'checkout' }],
+    tasks: [{ title: 'verify payment' }],
+    knowledge: [{ id: 'k1' }, { id: 'k2' }],
+    approvedLessons: [{ status: 'approved', lesson: 'verify before claiming success' }]
+  });
+  assert.equal(contract.protocol, 'tiqnora-intent/v1');
+  assert.equal(contract.agent_slug, 'developer');
+  assert.match(contract.objective, /مشكلة الدفع/);
+  assert.equal(contract.context_available.memory_items, 1);
+  assert.equal(contract.context_available.knowledge_chunks, 2);
+  assert.equal(contract.context_available.approved_lessons, 1);
+  assert.ok(contract.definition_of_done.some((item) => /tool\/runtime evidence/i.test(item)));
+  assert.equal(contract.external_actions_require_approval, true);
+
+  const prompt = formatExecutionContract(contract);
+  assert.match(prompt, /Execution contract/);
+  assert.match(prompt, /definition_of_done/);
+  assert.match(prompt, /ambiguity_policy/);
 });
 
 test('RAG retrieval selects matching grounded chunks', () => {
@@ -141,6 +168,8 @@ test('orchestration context combines state, skills, RAG, tools and delegation', 
     knowledge: [{ id: 'k1', title: 'Runbook', content: 'Deployment runbook' }]
   });
   assert.equal(ctx.agent_card.slug, 'manager');
+  assert.equal(ctx.execution_contract.protocol, 'tiqnora-intent/v1');
+  assert.ok(ctx.intent_prompt.includes('definition_of_done'));
   assert.ok(ctx.skills_prompt.includes('Loaded specialist skills'));
   assert.ok(Array.isArray(ctx.tools));
   assert.ok(ctx.delegation);
@@ -179,6 +208,8 @@ test('workforce chat loads state, RAG, skills, harness and eval persistence', ()
   assert.ok(src.includes('ai_agent_state'));
   assert.ok(src.includes('ai_knowledge_chunks'));
   assert.ok(src.includes('orchestrationContext'));
+  assert.ok(src.includes('runtime.intent_prompt'));
+  assert.ok(src.includes('runtime.execution_contract'));
   assert.ok(src.includes('runAgentHarness'));
   assert.ok(src.includes('ai_agent_evals'));
   assert.ok(src.includes('ai_agent_learning_events'));
