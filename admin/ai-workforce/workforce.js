@@ -240,6 +240,31 @@
     return data || [];
   }
 
+  async function recoverSavedConversation(agentId, message, startedAt) {
+    const normalizedMessage = String(message || '').trim();
+    const cutoff = Number(startedAt || Date.now()) - 5000;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, 700 * attempt));
+      }
+      try {
+        const rows = await refreshAgentConversations(agentId);
+        const recovered = (rows || []).find(row => {
+          if (!row || row.status !== 'completed') return false;
+          if (String(row.message || '').trim() !== normalizedMessage) return false;
+          const created = new Date(row.created_at || 0).getTime();
+          return Number.isFinite(created) && created >= cutoff;
+        });
+        if (recovered) return recovered;
+      } catch (syncError) {
+        console.warn('AI Workforce fetch recovery sync failed:', syncError);
+      }
+    }
+
+    return null;
+  }
+
   async function sendMessage(e) {
     e.preventDefault();
     const input = $('#chat-input'), button = $('#send'), message = input.value.trim();
@@ -247,7 +272,8 @@
 
     const agentId = selectedAgent.id;
     const shouldSpeak = isVoiceAgent();
-    const tempId = `pending_${Date.now().toString(36)}`;
+    const startedAt = Date.now();
+    const tempId = `pending_${startedAt.toString(36)}`;
     button.disabled = true;
     input.disabled = true;
     button.textContent = 'يفكر…';
@@ -291,9 +317,26 @@
       if (selectedAgent?.id === agentId) renderChat();
       if (shouldSpeak && reply) setTimeout(() => speakArabic(reply), 60);
     } catch (error) {
+      const networkError = error instanceof TypeError
+        || /failed to fetch|networkerror|load failed|network request failed/i.test(String(error?.message || ''));
+
+      if (networkError) {
+        const recovered = await recoverSavedConversation(agentId, message, startedAt);
+        if (recovered) {
+          const reply = recovered.response || '';
+          if (selectedAgent?.id === agentId) renderChat();
+          if (shouldSpeak && reply) setTimeout(() => speakArabic(reply), 60);
+          toast('تم تنفيذ الطلب واستعادة رد الوكيل بعد انقطاع الاتصال.');
+          return;
+        }
+      }
+
       const ai = document.querySelector(`[data-temp-ai="${tempId}"]`);
-      if (ai) ai.innerHTML = `${esc(error.message || 'تعذر الحصول على رد')}<div class="meta"><span>فشل</span></div>`;
-      toast(error.message || 'تعذر الحصول على رد', false);
+      const messageText = networkError
+        ? 'تعذر استلام الرد من الشبكة. لم نجد ردًا محفوظًا بعد؛ أعد المحاولة.'
+        : (error.message || 'تعذر الحصول على رد');
+      if (ai) ai.innerHTML = `${esc(messageText)}<div class="meta"><span>فشل</span></div>`;
+      toast(messageText, false);
       const currentInput = $('#chat-input');
       const currentButton = $('#send');
       if (currentInput) currentInput.disabled = false;
