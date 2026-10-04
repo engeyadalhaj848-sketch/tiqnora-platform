@@ -71,6 +71,19 @@ function memoryContext(rows) {
   return `Saved Tiqnora company memory:\n${rows.map(row => `- ${row.memory_key}: ${row.memory_value}`).join('\n')}`;
 }
 
+function approvedLearningForAgent(rows, agent) {
+  const slug = String(agent?.slug || '').toLowerCase();
+  return (rows || [])
+    .filter((row) => {
+      if (!row || row.status !== 'approved' || !String(row.lesson || '').trim()) return false;
+      if (row.agent_id && row.agent_id === agent?.id) return true;
+      const lessonAgent = String(row.metadata?.agent_key || '').toLowerCase();
+      if (lessonAgent && slug && lessonAgent === slug) return true;
+      return ['organization', 'shared'].includes(String(row.metadata?.scope || '').toLowerCase());
+    })
+    .slice(0, 8);
+}
+
 const ELITE_OPERATING_STANDARD = `
 You are part of Tiqnora's internal AI executive workforce. Operate at principal/expert level in your specialty.
 
@@ -433,13 +446,14 @@ export default async function handler(req, res) {
     agent = agents?.[0];
     if (!agent || agent.status !== 'active' || !agent.is_enabled) return json(res, 404, { error: 'الموظف غير موجود أو غير نشط.' });
 
-    const [legacyMemory, typedMemoryRows, recent, tasks, stateRows, runtimeAgents] = await Promise.all([
+    const [legacyMemory, typedMemoryRows, recent, tasks, stateRows, runtimeAgents, approvedLearningRows] = await Promise.all([
       supabase(`/rest/v1/ai_memory?agent_id=eq.${encodeURIComponent(agentId)}&select=memory_key,memory_value&order=created_at.desc&limit=40`, token),
       supabaseOptional(`/rest/v1/agent_memory_entries?organization_id=eq.${encodeURIComponent(agent.organization_id)}&archived_at=is.null&select=memory_id,agent_key,memory_type,scope,key,content,summary,tags,created_at&order=created_at.desc&limit=80`, token, {}, []),
       supabase(`/rest/v1/ai_conversations?agent_id=eq.${encodeURIComponent(agentId)}&select=message,response&status=eq.completed&order=created_at.desc&limit=12`, token),
       supabase(`/rest/v1/ai_tasks?agent_id=eq.${encodeURIComponent(agentId)}&status=in.(todo,in_progress,blocked)&select=title,description,status,priority,due_at&order=priority.desc,created_at.desc&limit=20`, token),
       supabaseOptional(`/rest/v1/ai_agent_state?agent_id=eq.${encodeURIComponent(agentId)}&select=version,mode,current_goal,active_thread,last_outcome,counters,state&limit=1`, token, {}, []),
-      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&status=eq.active&select=id,organization_id,slug,name,name_ar,description,system_prompt,model,temperature,provider,status,is_enabled`, token)
+      supabase(`/rest/v1/ai_agents?organization_id=eq.${encodeURIComponent(agent.organization_id)}&is_enabled=eq.true&status=eq.active&select=id,organization_id,slug,name,name_ar,description,system_prompt,model,temperature,provider,status,is_enabled`, token),
+      supabaseOptional(`/rest/v1/ai_agent_learning_events?organization_id=eq.${encodeURIComponent(agent.organization_id)}&status=eq.approved&select=id,agent_id,lesson_key,lesson,status,metadata,created_at&order=created_at.desc&limit=100`, token, {}, [])
     ]);
     const typedMemory = (typedMemoryRows || []).filter(row =>
       ['shared','organization'].includes(row.scope) || !row.agent_key || row.agent_key === agent.slug
@@ -452,6 +466,7 @@ export default async function handler(req, res) {
         typed_memory_id: row.memory_id
       }))
     ].slice(0, 60);
+    const approvedLessons = approvedLearningForAgent(approvedLearningRows, agent);
     const stateRow = stateRows?.[0] || {};
     const runtimeState = {
       ...(stateRow.state || {}),
@@ -481,7 +496,8 @@ export default async function handler(req, res) {
           memory,
           tasks,
           recent,
-          knowledge
+          knowledge,
+          approvedLessons
         })
       : orchestrationContext({
           agent,
@@ -491,7 +507,8 @@ export default async function handler(req, res) {
           memory,
           tasks,
           recent,
-          knowledge
+          knowledge,
+          approvedLessons
         });
 
     const history = (recent || []).reverse().flatMap(row => [
@@ -502,6 +519,7 @@ export default async function handler(req, res) {
       formatStateContext(runtime.state),
       runtime.skills_prompt,
       runtime.rag_prompt,
+      runtime.learning_prompt,
       `Allowed MCP/tool scopes for this agent: ${runtime.tools.join(', ')}. Never call or claim tools outside these scopes.`,
       runtime.delegation ? `Manager orchestration plan (delegate through Tiqnora A2A/multi-agent runtime where available):\n${JSON.stringify(runtime.delegation)}` : ''
     ].filter(Boolean).join('\n\n');
@@ -595,12 +613,14 @@ export default async function handler(req, res) {
                   memory,
                   tasks,
                   recent: [],
-                  knowledge
+                  knowledge,
+                  approvedLessons: approvedLearningForAgent(approvedLearningRows, specialist)
                 });
                 const specialistRuntimePrompt = [
                   formatStateContext(specialistRuntime.state),
                   specialistRuntime.skills_prompt,
                   specialistRuntime.rag_prompt,
+                  specialistRuntime.learning_prompt,
                   `Allowed MCP/tool scopes for this specialist: ${specialistRuntime.tools.join(', ')}. Do not execute external actions.`,
                   'This is a bounded A2A specialist task. Return analysis/artifact text only. Do not delegate again.'
                 ].filter(Boolean).join('\n\n');
@@ -907,6 +927,7 @@ export default async function handler(req, res) {
             rag_retrieval_mode: knowledgeRetrieval.mode,
             rag_source_table: KNOWLEDGE_SOURCE_TABLE,
             rag_vector_error: knowledgeRetrieval.diagnostics?.vector_error || null,
+            approved_learning_ids: approvedLessons.map((row) => row.id || row.lesson_key).filter(Boolean),
             skills: runtime.agent_card.skills,
             allowed_tools: runtime.tools
           }
@@ -920,6 +941,7 @@ export default async function handler(req, res) {
           body: JSON.stringify(buildLearningInsert({
             organization_id: agent.organization_id,
             agent_id: agent.id,
+            agent_key: agent.slug || agent.id,
             source_eval_id: evalRows?.[0]?.id || null,
             learning: learningEvent
           }))
