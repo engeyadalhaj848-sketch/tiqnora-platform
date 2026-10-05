@@ -93,3 +93,33 @@
 .svc-step:hover{transform:translateY(-4px);box-shadow:0 16px 34px rgba(10,92,255,.075);border-color:rgba(10,92,255,.18)}
 .svc-cta{background-image:linear-gradient(135deg,rgba(6,11,30,.95),rgba(11,21,41,.80)),var(--svc-visual,url("../assets/tiqnora-platform-bg.svg"));background-size:cover;background-position:center 62%;box-shadow:0 26px 72px rgba(6,11,30,.22);border:1px solid rgba(255,255,255,.07)}
 @media(max-width:700px){.svc-hero{background-position:70% center;min-height:auto;padding:5.75rem 0 2.6rem}.svc-hero-grid{gap:1.65rem}.svc-hero-grid>div:first-child::before{inset:-.8rem;border-radius:18px;opacity:.8}.svc-hero-ctas .btn{width:100%}.svc-card{border-radius:16px}}
+
+/* Tiqnora touch layout v3 */
+@media (max-width:1120px), (hover:none) and (pointer:coarse){
+  .svc-hero{min-height:auto;padding:calc(var(--header-h) + 2rem) 0 2.75rem;background-position:70% center}
+  .svc-hero-grid{grid-template-columns:1fr!important;gap:1.4rem}
+  .svc-hero-grid>div:first-child{max-width:720px}
+  .svc-hero h1{max-width:13ch;font-size:clamp(2rem,7vw,3.2rem)}
+  .svc-hero-lead{max-width:42rem;margin-bottom:1.2rem}
+  .svc-hero-ctas{gap:.6rem}
+  .chat-ui,.mock-browser{max-width:680px;margin-inline:auto}
+  .svc-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .svc-split{grid-template-columns:1fr!important;gap:1.35rem}
+  .svc-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:720px), (hover:none) and (pointer:coarse) and (max-width:900px){
+  .svc-hero{padding-top:calc(var(--header-h) + 1.6rem);padding-bottom:2.35rem}
+  .svc-hero h1{max-width:none;font-size:clamp(1.95rem,10vw,2.75rem)}
+  .svc-hero-lead{font-size:.96rem;line-height:1.7}
+  .svc-hero-ctas{display:grid;grid-template-columns:1fr}
+  .svc-hero-ctas .btn{width:100%;min-height:48px}
+  .svc-cards{grid-template-columns:1fr}
+  .svc-card{padding:1rem}
+  .svc-steps{grid-template-columns:1fr}
+  .svc-step{padding:1rem;text-align:start}
+  .svc-sec{padding:2.8rem 0}
+  .svc-sec-h{text-align:start}
+  .svc-cta{padding:1.6rem 1rem}
+  .svc-cta-actions{display:grid;grid-template-columns:1fr}
+  .svc-cta-actions .btn{width:100%}
+}
