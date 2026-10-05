@@ -139,3 +139,26 @@
   .nav-actions{gap:.35rem}
   .language-toggle,.cart-button{min-width:40px;height:40px;padding:.35rem .55rem}
 }
+
+/* Tiqnora store polish v2 */
+.store-shop-page .store-header,.store-info-page .store-header,.store-track-page .store-header,.store-product-page .store-header{background:rgba(255,255,255,.92)!important;backdrop-filter:blur(16px) saturate(125%);box-shadow:0 8px 30px rgba(11,21,41,.055)}
+.store-shop-page .store-main,.store-info-page .store-main,.store-track-page .store-main,.store-product-page .store-main{position:relative;background:
+radial-gradient(circle at 86% 0%,rgba(10,92,255,.08),transparent 24%),
+radial-gradient(circle at 12% 10%,rgba(0,210,255,.055),transparent 22%),
+linear-gradient(180deg,#F8FBFF 0,#FFFFFF 280px)!important}
+.store-shop-page .store-main::before,.store-info-page .store-main::before,.store-track-page .store-main::before{content:"";position:absolute;inset:0 0 auto;height:260px;pointer-events:none;background-image:linear-gradient(rgba(10,92,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(10,92,255,.025) 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(#000,transparent)}
+.store-shop-page .store-main>.container,.store-info-page .store-main>.container,.store-track-page .store-main>.container{position:relative;z-index:1}
+.store-shop-page .store-title,.store-info-page h1,.store-track-page .store-title{letter-spacing:-.02em}
+.store-shop-page .shop-filters{padding:12px;border:1px solid rgba(11,21,41,.07);border-radius:18px;background:rgba(255,255,255,.88);box-shadow:0 12px 36px rgba(11,21,41,.055);backdrop-filter:blur(10px)}
+.store-shop-page .product-card{box-shadow:0 8px 28px rgba(11,21,41,.045)}
+.store-shop-page .product-card:hover{box-shadow:0 18px 42px rgba(10,92,255,.11)}
+.store-info-page .policy-page,.store-track-page .track-box{background:rgba(255,255,255,.91);border:1px solid rgba(11,21,41,.075);border-radius:22px;padding:clamp(20px,4vw,34px);box-shadow:0 18px 52px rgba(11,21,41,.07);backdrop-filter:blur(10px)}
+.store-info-page .faq-block details{border-radius:14px;transition:border-color .2s ease,box-shadow .2s ease}
+.store-info-page .faq-block details[open]{border-color:rgba(10,92,255,.20);box-shadow:0 10px 26px rgba(10,92,255,.06)}
+.store-track-page .track-input input{box-shadow:inset 0 0 0 1px rgba(11,21,41,.03)}
+.store-product-page .p-layout{position:relative;z-index:1}
+.store-product-page .p-gallery,.store-product-page .p-meta{border-radius:20px}
+@media(max-width:640px){
+.store-shop-page .shop-filters{padding:9px;border-radius:15px}
+.store-info-page .policy-page,.store-track-page .track-box{padding:18px;border-radius:18px}
+}
