@@ -13,10 +13,33 @@
   <title>تصميم المواقع | تيقنورا</title>
   <link rel="icon" type="image/png" href="../assets/tiqnora-logo.png" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=6.4.0" />
-  <link rel="stylesheet" href="services-premium.css?v=3" />
+  <link rel="stylesheet" href="../styles.css?v=6.5.0" />
+  <link rel="stylesheet" href="services-premium.css?v=4" />
   <style>
     .wd-page{overflow-x:hidden}.wd-hero{position:relative;min-height:min(78vh,680px);display:flex;align-items:center;padding:6.5rem 0 2.5rem;background-color:#060B1E;background-image:linear-gradient(90deg,rgba(6,11,30,.96),rgba(6,11,30,.86) 48%,rgba(6,11,30,.48)),url('../assets/tiqnora-web-design-bg.svg');background-size:cover;background-position:center;background-repeat:no-repeat;color:#F0F6FF}.wd-hero::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 70% 55% at 75% 15%,rgba(10,92,255,.25),transparent 55%),radial-gradient(ellipse 45% 40% at 15% 85%,rgba(0,229,255,.1),transparent 50%)}.wd-hero-grid{position:relative;z-index:1;display:grid;gap:2rem;align-items:center;width:min(100% - 2rem,1180px);margin-inline:auto}@media(min-width:1024px){.wd-hero-grid{grid-template-columns:.95fr 1.15fr}}.wd-kicker{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.12em;color:#00D2FF;margin-bottom:.85rem}.wd-hero h1{font-size:clamp(2.1rem,5vw,3.2rem);line-height:1.12;margin:0 0 1rem;font-weight:700}.wd-hero h1 em{font-style:normal;background:linear-gradient(135deg,#00E5FF,#5BA8FF);-webkit-background-clip:text;background-clip:text;color:transparent}.wd-hero-lead{font-size:1.05rem;color:#B8C9E0;max-width:26rem;margin:0 0 1.5rem;line-height:1.65}.wd-hero-ctas{display:flex;flex-wrap:wrap;gap:.7rem}.stage{position:relative;height:360px;max-width:520px;width:100%;margin:0 auto}.br{position:absolute;inset-inline-start:0;top:4%;width:84%;border-radius:14px;background:#0a1324;border:1px solid rgba(0,229,255,.22);box-shadow:0 28px 70px rgba(0,0,0,.55);overflow:hidden;z-index:1}.br-bar{height:34px;background:#101a30;display:flex;align-items:center;gap:5px;padding:0 11px}.br-bar span{width:8px;height:8px;border-radius:50%}.br-bar span:nth-child(1){background:#ff5f57}.br-bar span:nth-child(2){background:#febc2e}.br-bar span:nth-child(3){background:#28c840}.br-url{flex:1;height:16px;margin-inline-start:8px;border-radius:5px;background:rgba(255,255,255,.05)}.ph{position:absolute;inset-inline-end:2%;bottom:0;width:124px;height:250px;border-radius:20px;background:#070d18;border:2px solid rgba(0,229,255,.4);box-shadow:0 22px 48px rgba(0,0,0,.55);z-index:2;padding:10px 8px}.ph-notch{width:42px;height:5px;border-radius:99px;background:rgba(255,255,255,.12);margin:0 auto 8px}.wd-sec{padding:3.5rem 0}.wd-sec-alt{background:#F4F7FB}.shot{display:grid;gap:1.5rem;margin-bottom:2.5rem;align-items:center}@media(min-width:900px){.shot{grid-template-columns:1.2fr .8fr}.shot.reverse > :first-child{order:2}}.shot-frame{border-radius:14px;overflow:hidden;border:1px solid rgba(11,21,41,.1);box-shadow:0 16px 40px rgba(11,21,41,.08);background:#0a1324}.shot-meta h3{margin:.5rem 0}.shot-meta p{color:#6B7C93;font-size:.92rem}.tag{font-size:.68rem;font-weight:700;color:#0A5CFF;letter-spacing:.08em}
+  
+    /* wd-touch-v3 */
+    @media (max-width:1120px), (hover:none) and (pointer:coarse){
+      .wd-hero{min-height:auto;padding:calc(var(--header-h) + 2rem) 0 2.75rem;background-position:70% center}
+      .wd-hero-grid{grid-template-columns:1fr!important;gap:1.25rem}
+      .wd-hero h1{font-size:clamp(2rem,7vw,3.2rem);max-width:13ch}
+      .wd-hero-lead{max-width:42rem}
+      .stage{height:300px;max-width:620px}
+      .shot{grid-template-columns:1fr!important;gap:1rem}
+      .shot.reverse > :first-child{order:initial!important}
+    }
+    @media (max-width:720px), (hover:none) and (pointer:coarse) and (max-width:900px){
+      .wd-hero{padding-top:calc(var(--header-h) + 1.6rem);padding-bottom:2.35rem}
+      .wd-hero h1{font-size:clamp(1.95rem,10vw,2.75rem);max-width:none}
+      .wd-hero-lead{font-size:.96rem}
+      .wd-hero-ctas{display:grid;grid-template-columns:1fr}
+      .wd-hero-ctas .btn{width:100%;min-height:48px}
+      .stage{height:250px}
+      .br{width:88%}
+      .ph{width:96px;height:190px}
+      .wd-sec{padding:2.8rem 0}
+      .shot{margin-bottom:2rem}
+    }
   </style>
 </head>
 <body class="wd-page">
