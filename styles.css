@@ -162,3 +162,98 @@ linear-gradient(180deg,#F8FBFF 0,#FFFFFF 280px)!important}
 .store-shop-page .shop-filters{padding:9px;border-radius:15px}
 .store-info-page .policy-page,.store-track-page .track-box{padding:18px;border-radius:18px}
 }
+
+/* Tiqnora mobile-first polish v3 */
+@media (max-width:1120px), (hover:none) and (pointer:coarse){
+  :root{--header-h:64px}
+  .site-header{height:var(--header-h)}
+  .header-inner{width:min(100% - 1rem,var(--max));gap:.55rem}
+  .brand{flex:0 0 auto;gap:.4rem}
+  .brand img{width:32px;height:32px}
+  .brand-text{font-size:.92rem}
+  .menu-toggle{display:flex!important;order:3;flex:0 0 42px;width:42px;height:42px;border-radius:12px;border:1px solid currentColor;opacity:.88}
+  .site-nav{display:none!important}
+  .site-nav.open{
+    display:flex!important;
+    position:fixed;
+    top:calc(var(--header-h) + 8px);
+    inset-inline:10px;
+    max-height:calc(100dvh - var(--header-h) - 24px);
+    overflow:auto;
+    padding:12px;
+    border:1px solid rgba(11,21,41,.08);
+    border-radius:18px;
+    background:rgba(255,255,255,.98)!important;
+    color:var(--text-dark)!important;
+    box-shadow:0 24px 70px rgba(6,11,30,.18)!important;
+    backdrop-filter:blur(18px) saturate(135%);
+    z-index:120;
+  }
+  .site-nav.open a{
+    display:flex;
+    align-items:center;
+    min-height:48px;
+    padding:.75rem .9rem;
+    border-radius:12px;
+    font-size:.98rem;
+    font-weight:600;
+  }
+  .site-nav.open a:hover{background:#F4F7FB;color:var(--blue)}
+  .site-nav.open a::after{display:none}
+  .nav-actions{margin-inline-start:auto;gap:.35rem}
+  .header-cta{display:inline-flex!important;min-height:40px;padding:.55rem .85rem;font-size:.8rem;white-space:nowrap}
+  .language-toggle{display:none}
+  .cart-button{min-width:40px;height:40px;padding:.35rem .55rem}
+  .cart-button span{display:none}
+  .hero{min-height:auto;padding:calc(var(--header-h) + 2rem) 0 2.75rem;background-position:70% center}
+  .hero-grid{grid-template-columns:1fr!important;gap:1.25rem}
+  .hero-copy{max-width:720px;padding-block:.5rem}
+  .hero-eyebrow{font-size:.76rem}
+  .hero h1{font-size:clamp(2rem,7vw,3.25rem);line-height:1.16;max-width:13ch}
+  .hero-lead{max-width:42rem;font-size:1rem;line-height:1.75;margin-bottom:1.15rem}
+  .hero-actions{gap:.6rem}
+  .hero-visual{margin-top:.35rem;max-width:680px;width:100%;justify-self:center}
+  .browser-mock{transform:none!important}
+  .browser-body{min-height:170px}
+  .section{padding:3.25rem 0}
+  .section-header{margin-bottom:1.9rem}
+  .systems-visual-grid{grid-template-columns:1fr!important;gap:1rem}
+  .svc-vcard{display:grid;grid-template-columns:minmax(190px,36%) 1fr;min-height:200px}
+  .svc-vcard-visual{height:100%;min-height:200px}
+  .svc-vcard-body{padding:1.1rem 1.15rem 1.2rem}
+  .svc-vcard-body p{font-size:.88rem}
+}
+@media (max-width:720px), (hover:none) and (pointer:coarse) and (max-width:900px){
+  .header-cta{display:none!important}
+  .header-inner{gap:.4rem}
+  .brand-text{display:none}
+  .nav-actions{order:2}
+  .menu-toggle{order:3}
+  .hero{padding-top:calc(var(--header-h) + 1.6rem);padding-bottom:2.35rem}
+  .hero h1{font-size:clamp(1.95rem,10vw,2.75rem);max-width:none}
+  .hero-lead{font-size:.96rem;line-height:1.7}
+  .hero-actions{display:grid;grid-template-columns:1fr}
+  .hero-actions .btn{width:100%;min-height:48px}
+  .hero-visual{margin-top:.25rem}
+  .browser-body{min-height:145px}
+  .section{padding:2.8rem 0}
+  .section-header{text-align:start;margin-inline:0}
+  .section-header h2{font-size:clamp(1.55rem,7vw,2.1rem)}
+  .systems-visual-grid{grid-template-columns:1fr!important}
+  .svc-vcard{display:flex;min-height:0}
+  .svc-vcard-visual{height:150px;min-height:150px}
+  .svc-vcard-body{padding:1rem 1rem 1.15rem}
+  .svc-vcard-body h3{font-size:1.04rem}
+  .process-steps{grid-template-columns:1fr!important;gap:.85rem}
+  .step{text-align:start;display:grid;grid-template-columns:auto 1fr;column-gap:.85rem;align-items:start;padding:1rem}
+  .step-icon{grid-row:1/3;margin:0}
+  .step h3{margin-top:.15rem}
+  .why-grid{grid-template-columns:1fr!important}
+  .why-item{padding:1rem}
+  .cta-banner{padding:1.6rem 1rem;border-radius:16px}
+}
+@media (max-width:390px){
+  .cart-button{display:none}
+  .menu-toggle{width:40px;height:40px;flex-basis:40px}
+  .hero-eyebrow{font-size:.72rem}
+}
