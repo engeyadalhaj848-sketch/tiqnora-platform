@@ -61,3 +61,15 @@
 .svc-split-copy h3{font-size:1.35rem;margin:0 0 .65rem;color:#0B1529}.svc-split-copy p{color:#6B7C93;line-height:1.7;margin:0 0 1rem}
 .svc-pills{display:flex;flex-wrap:wrap;gap:.4rem}.svc-pill{padding:.3rem .65rem;border-radius:999px;font-size:.75rem;font-weight:600;background:rgba(10,92,255,.1);color:#0A5CFF;border:1px solid rgba(10,92,255,.2)}
 @media(max-width:480px){.svc-hero{min-height:auto;padding:5.5rem 0 2.25rem}.svc-cta{padding:2rem 1.15rem}}
+
+/* Tiqnora service backgrounds v1 */
+.svc-hero{
+  background-color:#060B1E;
+  background-image:linear-gradient(90deg,rgba(6,11,30,.96),rgba(6,11,30,.86) 48%,rgba(6,11,30,.48)),url("../assets/tiqnora-platform-bg.svg");
+  background-size:cover;background-position:center;background-repeat:no-repeat;
+}
+.svc-cta{
+  background-image:linear-gradient(135deg,rgba(6,11,30,.94),rgba(11,21,41,.82)),url("../assets/tiqnora-platform-bg.svg");
+  background-size:cover;background-position:center 62%;
+}
+@media(max-width:700px){.svc-hero{background-position:68% center}}

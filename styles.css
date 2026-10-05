@@ -45,3 +45,41 @@
 @media(prefers-reduced-motion:reduce){.reveal,.stagger > *{opacity:1;transform:none;transition:none}}
 @media(max-width:480px){.svc-vcard-visual{height:120px}.system-icon,.step-icon{width:48px;height:48px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* Tiqnora visual backgrounds v1 */
+.hero{
+  background-color:var(--navy-950);
+  background-image:
+    linear-gradient(90deg,rgba(3,7,18,.97) 0%,rgba(3,7,18,.90) 40%,rgba(3,7,18,.58) 70%,rgba(3,7,18,.30) 100%),
+    radial-gradient(circle at 78% 32%,rgba(0,210,255,.14),transparent 38%),
+    url("assets/tiqnora-platform-bg.svg");
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+  isolation:isolate;
+}
+.hero::after{
+  content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:
+    linear-gradient(180deg,rgba(3,7,18,.02),rgba(3,7,18,.22)),
+    linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);
+  background-size:auto,48px 48px,48px 48px;
+  mask-image:linear-gradient(#000,rgba(0,0,0,.8) 70%,transparent);
+}
+.hero-grid{position:relative;z-index:1}
+.hero-copy{max-width:650px}
+.hero-visual{filter:drop-shadow(0 30px 60px rgba(0,0,0,.45))}
+.svc-vcard:first-child .svc-vcard-visual{
+  background-image:linear-gradient(180deg,rgba(6,11,30,.18),rgba(6,11,30,.78)),url("assets/tiqnora-platform-bg.svg");
+  background-size:cover;background-position:center;
+}
+.cta-banner{
+  background-image:linear-gradient(135deg,rgba(6,11,30,.94),rgba(11,21,41,.80)),url("assets/tiqnora-platform-bg.svg");
+  background-size:cover;background-position:center 64%;
+}
+@media(max-width:700px){
+  .hero{background-position:68% center}
+  .hero::after{background-size:auto,36px 36px,36px 36px}
+  .hero-copy{max-width:100%}
+}

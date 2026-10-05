@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Tiqnora futuristic technology background">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#030712"/><stop offset=".55" stop-color="#060B1E"/><stop offset="1" stop-color="#0B1529"/></linearGradient>
+  <radialGradient id="halo" cx="78%" cy="32%" r="58%"><stop stop-color="#0A5CFF" stop-opacity=".42"/><stop offset=".48" stop-color="#00D2FF" stop-opacity=".13"/><stop offset="1" stop-color="#060B1E" stop-opacity="0"/></radialGradient>
+  <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0A5CFF" stop-opacity="0"/><stop offset=".55" stop-color="#00D2FF"/><stop offset="1" stop-color="#fff" stop-opacity=".18"/></linearGradient>
+  <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse"><path d="M52 0H0V52" fill="none" stroke="#6CA8FF" stroke-opacity=".08" stroke-width="1"/></pattern>
+  <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect width="1600" height="900" fill="url(#bg)"/>
+<rect width="1600" height="900" fill="url(#halo)"/>
+<rect y="260" width="1600" height="640" fill="url(#grid)" opacity=".55"/>
+<g opacity=".9" filter="url(#glow)">
+  <circle cx="1325" cy="245" r="235" fill="none" stroke="#0A5CFF" stroke-opacity=".34" stroke-width="2"/>
+  <circle cx="1325" cy="245" r="185" fill="none" stroke="#00D2FF" stroke-opacity=".34" stroke-width="1.5"/>
+  <ellipse cx="1325" cy="245" rx="280" ry="96" fill="none" stroke="#00D2FF" stroke-opacity=".38" stroke-width="2" transform="rotate(-18 1325 245)"/>
+  <ellipse cx="1325" cy="245" rx="260" ry="72" fill="none" stroke="#0A5CFF" stroke-opacity=".42" stroke-width="1.5" transform="rotate(34 1325 245)"/>
+</g>
+<g fill="#00D2FF">
+  <circle cx="1175" cy="128" r="5"/><circle cx="1442" cy="178" r="4"/><circle cx="1268" cy="352" r="4"/><circle cx="1510" cy="305" r="5"/>
+</g>
+<g fill="none" stroke-linecap="round">
+  <path d="M60 708C300 630 480 716 670 657S1020 520 1540 596" stroke="url(#beam)" stroke-width="4" opacity=".7"/>
+  <path d="M20 765C330 660 565 780 780 690s430-194 800-121" stroke="#0A5CFF" stroke-opacity=".45" stroke-width="2"/>
+  <path d="M100 820C420 726 638 820 895 742s425-137 650-101" stroke="#00D2FF" stroke-opacity=".27" stroke-width="1.5"/>
+</g>
+<g opacity=".78">
+  <path d="M100 605C260 540 390 566 515 610S770 681 920 625" fill="none" stroke="#00D2FF" stroke-opacity=".22"/>
+  <path d="M100 618C260 552 390 578 515 622S770 693 920 637" fill="none" stroke="#0A5CFF" stroke-opacity=".2"/>
+  <g fill="#8EDBFF">
+    <circle cx="180" cy="590" r="2.5"/><circle cx="330" cy="575" r="2.5"/><circle cx="520" cy="611" r="2.5"/><circle cx="705" cy="658" r="2.5"/><circle cx="900" cy="628" r="2.5"/>
+  </g>
+</g>
+<g opacity=".55" stroke="#55CFFF" stroke-width="1">
+  <path d="M1020 500v184M1090 470v214M1160 520v164M1230 455v229M1300 490v194M1370 440v244M1440 515v169M1510 470v214"/>
+</g>
+<g fill="#AEEBFF" opacity=".75">
+  <circle cx="1020" cy="500" r="3"/><circle cx="1090" cy="470" r="3"/><circle cx="1160" cy="520" r="3"/><circle cx="1230" cy="455" r="3"/><circle cx="1300" cy="490" r="3"/><circle cx="1370" cy="440" r="3"/><circle cx="1440" cy="515" r="3"/><circle cx="1510" cy="470" r="3"/>
+</g>
+<rect width="1600" height="900" fill="url(#bg)" opacity=".12"/>
+</svg>
