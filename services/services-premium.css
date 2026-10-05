@@ -73,3 +73,23 @@
   background-size:cover;background-position:center 62%;
 }
 @media(max-width:700px){.svc-hero{background-position:68% center}}
+
+/* Tiqnora service polish v2 */
+.svc-ai-page{--svc-visual:url("../assets/tiqnora-ai-agents-bg.svg")}
+.svc-social-page{--svc-visual:url("../assets/tiqnora-social-automation-bg.svg")}
+.wd-page{--svc-visual:url("../assets/tiqnora-web-design-bg.svg")}
+.svc-hero{background-color:#060B1E;background-image:linear-gradient(90deg,rgba(3,7,18,.97) 0%,rgba(6,11,30,.91) 44%,rgba(6,11,30,.55) 72%,rgba(6,11,30,.30) 100%),var(--svc-visual,url("../assets/tiqnora-platform-bg.svg"));background-size:cover;background-position:center;background-repeat:no-repeat}
+.svc-hero-grid>div:first-child{position:relative}
+.svc-hero-grid>div:first-child::before{content:"";position:absolute;inset:-1.15rem;border-radius:24px;background:linear-gradient(145deg,rgba(6,11,30,.42),rgba(6,11,30,.10));border:1px solid rgba(255,255,255,.055);backdrop-filter:blur(2px);z-index:-1}
+.svc-hero h1{font-size:clamp(2.15rem,5.25vw,3.6rem);letter-spacing:-.025em}
+.svc-hero-lead{font-size:clamp(1rem,1.55vw,1.12rem)}
+.chat-ui,.mock-browser{backdrop-filter:blur(12px);box-shadow:0 34px 80px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.045)}
+.svc-sec-alt{position:relative;overflow:hidden;background:linear-gradient(180deg,#F6F9FC,#F1F5FA)}
+.svc-sec-alt::before{content:"";position:absolute;width:520px;height:520px;border-radius:50%;inset-inline-start:-280px;top:-180px;background:radial-gradient(circle,rgba(10,92,255,.07),rgba(0,210,255,.025) 44%,transparent 70%);pointer-events:none}
+.svc-card{position:relative;overflow:hidden;box-shadow:0 10px 30px rgba(11,21,41,.055)}
+.svc-card::before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,transparent,#0A5CFF,#00D2FF,transparent);opacity:.55}
+.svc-card:hover{transform:translateY(-6px);box-shadow:0 22px 48px rgba(10,92,255,.115)}
+.svc-step{transition:transform .24s ease,box-shadow .24s ease,border-color .24s ease}
+.svc-step:hover{transform:translateY(-4px);box-shadow:0 16px 34px rgba(10,92,255,.075);border-color:rgba(10,92,255,.18)}
+.svc-cta{background-image:linear-gradient(135deg,rgba(6,11,30,.95),rgba(11,21,41,.80)),var(--svc-visual,url("../assets/tiqnora-platform-bg.svg"));background-size:cover;background-position:center 62%;box-shadow:0 26px 72px rgba(6,11,30,.22);border:1px solid rgba(255,255,255,.07)}
+@media(max-width:700px){.svc-hero{background-position:70% center;min-height:auto;padding:5.75rem 0 2.6rem}.svc-hero-grid{gap:1.65rem}.svc-hero-grid>div:first-child::before{inset:-.8rem;border-radius:18px;opacity:.8}.svc-hero-ctas .btn{width:100%}.svc-card{border-radius:16px}}
