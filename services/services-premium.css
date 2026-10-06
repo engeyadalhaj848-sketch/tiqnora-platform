@@ -123,3 +123,14 @@
   .svc-cta-actions{display:grid;grid-template-columns:1fr}
   .svc-cta-actions .btn{width:100%}
 }
+
+.svc-ai-page{--svc-visual:url("https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1600&q=82")}
+.svc-social-page{--svc-visual:url("https://images.unsplash.com/photo-1533750349088-cd871a92f312?auto=format&fit=crop&w=1600&q=82")}
+.wd-page{--svc-visual:url("https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1600&q=82")}
+/* Replace illustrative browser/chat widgets with original sector photography */
+.svc-ai-page .svc-hero-grid>div:nth-child(2),.svc-social-page .svc-hero-grid>div:nth-child(2){position:relative;min-height:330px;border-radius:22px;overflow:hidden;background-size:cover;background-position:center;box-shadow:0 28px 70px rgba(0,0,0,.4)}
+.svc-ai-page .svc-hero-grid>div:nth-child(2){background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.25)),url("https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=1100&q=82")}
+.svc-social-page .svc-hero-grid>div:nth-child(2){background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.25)),url("https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1100&q=82")}
+.svc-ai-page .svc-hero-grid>div:nth-child(2)>.chat-ui,.svc-social-page .svc-hero-grid>div:nth-child(2)>.mock-browser{display:none!important}
+@media(max-width:700px){.svc-ai-page .svc-hero-grid>div:nth-child(2),.svc-social-page .svc-hero-grid>div:nth-child(2){min-height:230px}}
+@media(prefers-reduced-motion:reduce){.float-soft{animation:none!important}}
