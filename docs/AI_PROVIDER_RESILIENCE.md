@@ -1,18 +1,21 @@
 # AI Provider Resilience
 
-## Provider chain
-Tiqnora uses a free-first provider chain for text generation, structured analysis, WhatsApp replies, and supported social comment replies:
+## Provider chains
+
+### Social replies
+WhatsApp and supported social comment replies use the free-first chain:
 
 1. Groq — default model `openai/gpt-oss-20b`
 2. Gemini — multi-model fallback, default `gemini-3.8-flash`
 3. OpenRouter — default `openrouter/free`
-4. Vercel AI Gateway — only when explicitly enabled
-5. OpenAI — optional legacy/paid fallback
-6. xAI / Grok — optional fallback
-7. Anthropic — optional fallback
-8. Deterministic template fallback when `allowDeterministic=true`
+4. OpenAI — optional legacy/paid fallback
+5. xAI / Grok — optional fallback
+6. Anthropic — optional fallback
 
-The social webhook uses the same free-first intent: Groq → Gemini → OpenRouter before any paid provider.
+### Shared workforce / commerce provider
+The existing Vercel AI Gateway priority is preserved when Gateway is explicitly enabled. Direct-provider fallback then proceeds through Groq → Gemini → OpenRouter → OpenAI → xAI → Anthropic. This avoids changing established workforce routing while still adding the new free providers.
+
+A deterministic template fallback remains available where `allowDeterministic=true`.
 
 ## Environment variables
 Required for the free-first chain:
