@@ -62,11 +62,16 @@ test('WhatsApp emotion-only frustration is not escalated as an unknown work requ
 });
 
 
-test('WhatsApp agent is AI-first with deeper conversation context', () => {
-  const openaiPos = webhook.indexOf('if (process.env.OPENAI_API_KEY)');
+test('WhatsApp agent is free-first AI with deeper conversation context', () => {
+  const groqPos = webhook.indexOf('if (process.env.GROQ_API_KEY)');
   const geminiPos = webhook.indexOf('const geminiKey =');
-  assert.equal(openaiPos >= 0 && geminiPos > openaiPos, true);
-  assert.equal(webhook.includes("process.env.OPENAI_MODEL || 'chat-latest'"), true);
+  const openrouterPos = webhook.indexOf('if (process.env.OPENROUTER_API_KEY)');
+  const openaiPos = webhook.indexOf('if (process.env.OPENAI_API_KEY)');
+  assert.equal(groqPos >= 0 && geminiPos > groqPos, true);
+  assert.equal(openrouterPos > geminiPos, true);
+  assert.equal(openaiPos > openrouterPos, true);
+  assert.equal(webhook.includes("process.env.GROQ_MODEL || 'openai/gpt-oss-20b'"), true);
+  assert.equal(webhook.includes("process.env.OPENROUTER_MODEL || 'openrouter/free'"), true);
   assert.equal(webhook.includes('limit = 16'), true);
   assert.equal(webhook.includes('Math.min(20'), true);
   assert.equal(webhook.includes('تصرف كمساعد محادثة ذكي جدًا، وليس كبوت ردود جاهزة'), true);
@@ -90,10 +95,11 @@ test('OpenAI chat-latest uses max_completion_tokens and logs provider success', 
 });
 
 
-test('OpenAI chat-latest omits unsupported temperature', () => {
+test('OpenAI chat-latest remains a compatible late fallback', () => {
   const start = webhook.indexOf("if (process.env.OPENAI_API_KEY)");
-  const end = webhook.indexOf("const geminiKey =", start);
+  const end = webhook.indexOf("if (process.env.XAI_API_KEY)", start);
   const openaiBlock = webhook.slice(start, end);
+  assert.equal(start >= 0 && end > start, true);
   assert.equal(openaiBlock.includes('max_completion_tokens: maxTokens'), true);
   assert.equal(openaiBlock.includes('\n          temperature,'), false);
 });
