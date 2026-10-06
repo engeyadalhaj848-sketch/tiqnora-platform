@@ -683,9 +683,112 @@ async function metaGraphPost(path, accessToken, payload) {
 async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens = 180 } = {}) {
   const failures = [];
 
-  // Prefer OpenAI for customer conversations when configured. This produces
-  // materially better multi-turn Arabic dialogue than the previous
-  // keyword/fallback-heavy path. Other providers remain as automatic fallback.
+  // Customer conversations use the free-first chain:
+  // Groq -> Gemini -> OpenRouter Free -> legacy paid providers.
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          ...(json ? { response_format: { type: 'json_object' } } : {}),
+          messages: [{ role: 'user', content: prompt }]
+        }),
+        signal: AbortSignal.timeout(12000)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || body?.message || `Groq failed (${response.status})`);
+      const text = body?.choices?.[0]?.message?.content?.trim();
+      if (text) {
+        console.info('Social AI provider success', { provider: 'groq', model: body?.model || model });
+        return { text, provider: 'groq', model: body?.model || model };
+      }
+      throw new Error('Groq returned empty text');
+    } catch (error) {
+      failures.push(`groq: ${error.message}`);
+    }
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (geminiKey) {
+    const models = [
+      process.env.GEMINI_MODEL,
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite'
+    ].filter(Boolean).filter((value, index, list) => list.indexOf(value) === index);
+
+    for (const model of models) {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(geminiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature,
+              maxOutputTokens: maxTokens,
+              ...(json ? { responseMimeType: 'application/json' } : {})
+            }
+          }),
+          signal: AbortSignal.timeout(15000)
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body?.error?.message || `Gemini failed (${response.status})`);
+        const text = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join('').trim();
+        if (text) {
+          console.info('Social AI provider success', { provider: 'google_ai', model });
+          return { text, provider: 'google_ai', model };
+        }
+        throw new Error('Gemini returned empty text');
+      } catch (error) {
+        failures.push(`google_ai/${model}: ${error.message}`);
+      }
+    }
+  }
+
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const model = process.env.OPENROUTER_MODEL || 'openrouter/free';
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://tiqnora.com',
+          'X-Title': 'Tiqnora'
+        },
+        body: JSON.stringify({
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          ...(json ? { response_format: { type: 'json_object' } } : {}),
+          messages: [{ role: 'user', content: prompt }]
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error?.message || body?.message || `OpenRouter failed (${response.status})`);
+      const text = body?.choices?.[0]?.message?.content?.trim();
+      if (text) {
+        console.info('Social AI provider success', { provider: 'openrouter', model: body?.model || model });
+        return { text, provider: 'openrouter', model: body?.model || model };
+      }
+      throw new Error('OpenRouter returned empty text');
+    } catch (error) {
+      failures.push(`openrouter: ${error.message}`);
+    }
+  }
+
+  // Keep existing paid providers as late fallbacks if credentials are still present.
   if (process.env.OPENAI_API_KEY) {
     try {
       const model = process.env.OPENAI_MODEL || 'chat-latest';
@@ -697,7 +800,8 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
           max_completion_tokens: maxTokens,
           ...(json ? { response_format: { type: 'json_object' } } : {}),
           messages: [{ role: 'user', content: prompt }]
-        })
+        }),
+        signal: AbortSignal.timeout(12000)
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body?.error?.message || `OpenAI failed (${response.status})`);
@@ -712,32 +816,6 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
     }
   }
 
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-  if (geminiKey) {
-    try {
-      const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(geminiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature,
-            maxOutputTokens: maxTokens,
-            ...(json ? { responseMimeType: 'application/json' } : {})
-          }
-        })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.error?.message || `Gemini failed (${response.status})`);
-      const text = (body?.candidates?.[0]?.content?.parts || []).map(x => x?.text || '').join('').trim();
-      if (text) return { text, provider: 'google_ai', model };
-      throw new Error('Gemini returned empty text');
-    } catch (error) {
-      failures.push(`google_ai: ${error.message}`);
-    }
-  }
-
   if (process.env.XAI_API_KEY) {
     try {
       const model = process.env.XAI_MODEL || 'grok-3-mini';
@@ -749,7 +827,8 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
           temperature,
           max_tokens: maxTokens,
           messages: [{ role: 'user', content: prompt }]
-        })
+        }),
+        signal: AbortSignal.timeout(12000)
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body?.error?.message || `xAI failed (${response.status})`);
@@ -776,7 +855,8 @@ async function callSocialAI(prompt, { json = false, temperature = 0.3, maxTokens
           max_tokens: maxTokens,
           temperature,
           messages: [{ role: 'user', content: prompt }]
-        })
+        }),
+        signal: AbortSignal.timeout(12000)
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body?.error?.message || `Anthropic failed (${response.status})`);
