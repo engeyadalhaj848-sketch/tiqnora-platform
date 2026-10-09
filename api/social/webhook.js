@@ -1,6 +1,7 @@
 import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
+import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -1523,6 +1524,177 @@ async function hasRecentWhatsappAutoReply(storedEvent, organizationId, windowMs 
   return false;
 }
 
+
+async function loadWhatsAppSalesConversation(storedEvent, organizationId) {
+  if (!storedEvent?.conversation_id) return null;
+  const rows = await rest(
+    'conversations?id=eq.' + encodeURIComponent(storedEvent.conversation_id)
+      + '&organization_id=eq.' + encodeURIComponent(organizationId)
+      + '&select=id,lead_id,metadata,status&limit=1'
+  );
+  return rows?.[0] || null;
+}
+
+async function notifyQualifiedSalesTeam(summary, storedEvent, leadId) {
+  try {
+    const { telegramTargetChatId, sendTelegramText } = await import('../../lib/telegram-command-center.js');
+    const chatId = await telegramTargetChatId();
+    if (!chatId) return false;
+    const body = [
+      '🔥 فرصة مبيعات من واتساب — تتطلب متابعة بشرية',
+      'الشركة: ' + (summary.company || 'غير محدد'),
+      'العميل: ' + (summary.customer_name || 'غير محدد'),
+      'رقم التواصل: ' + (summary.customer_phone || 'داخل المحادثة'),
+      'الخدمة: ' + (summary.service_label || 'غير محددة'),
+      'الهدف: ' + (summary.goal || 'يلزم الاستيضاح'),
+      'التفاصيل: ' + (summary.scope || 'لم تحدد'),
+      'موعد التنفيذ: ' + (summary.timeline || 'لم يحدد'),
+      'الميزانية: ' + (summary.budget || 'لم تحدد'),
+      'سبب التحويل: ' + summary.handoff_reason,
+      'معرف العميل CRM: ' + (leadId || 'بانتظار الربط'),
+      'معرف المحادثة: ' + (storedEvent?.conversation_id || 'غير متوفر'),
+      'الإجراء: مراجعة الاحتياج، التواصل من المحادثة، واعتماد التسعير بشريًا. لا يوجد سعر آلي.'
+    ].join('\n');
+    await sendTelegramText(chatId, body);
+    return true;
+  } catch (error) {
+    console.warn('Sales handoff Telegram alert failed; CRM handoff remains pending', {
+      conversation_id: storedEvent?.conversation_id || null,
+      message: String(error?.message || error).slice(0, 200)
+    });
+    return false;
+  }
+}
+
+async function persistWhatsAppSalesPlan(plan, conversation, storedEvent, organizationId, ruleId) {
+  if (!plan?.active || !conversation?.id) return false;
+  const summary = salesHandoffSummary(plan, storedEvent || {});
+  const salesState = {
+    ...plan.state,
+    ...(plan.handoff ? { handoff: summary, handoff_at: new Date().toISOString() } : {})
+  };
+  const patch = {
+    metadata: { ...(conversation.metadata || {}), sales_manager: salesState },
+    updated_at: new Date().toISOString(),
+    ...(plan.handoff ? { status: 'open', priority: 'high', assigned_agent: 'sales' } : {})
+  };
+  if (plan.handoff) {
+    // Persist the complete handoff card in the already existing inbox action queue.
+    // A draft request without discovery stays "contacted", not falsely "qualified".
+    const qualified = plan.reason === 'customer_confirmed_requirements';
+    const leadRows = conversation.lead_id
+      ? await rest('leads?id=eq.' + encodeURIComponent(conversation.lead_id)
+          + '&organization_id=eq.' + encodeURIComponent(organizationId)
+          + '&select=id,custom_fields&limit=1')
+      : [];
+    const lead = leadRows?.[0] || null;
+    let leadId = lead?.id || null;
+    if (leadId) {
+      await rest('leads?id=eq.' + encodeURIComponent(leadId) + '&organization_id=eq.' + encodeURIComponent(organizationId), {
+        method: 'PATCH',
+        body: JSON.stringify({
+          interest: summary.service_label || null,
+          ...(qualified ? { pipeline_stage: 'qualified' } : {}),
+          custom_fields: {
+            ...(lead.custom_fields || {}),
+            sales_manager: { ...summary, qualification_status: qualified ? 'qualified' : 'human_requested' }
+          },
+          updated_at: new Date().toISOString()
+        })
+      });
+    } else {
+      const created = await rest('leads', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          name: summary.customer_name || summary.company || 'عميل واتساب',
+          contact_name: summary.customer_name || null,
+          company_name: summary.company || null,
+          phone: summary.customer_phone || null,
+          whatsapp: summary.customer_phone || null,
+          source: 'social:whatsapp',
+          status: 'new',
+          pipeline_stage: qualified ? 'qualified' : 'contacted',
+          interest: summary.service_label || null,
+          message: summary.goal || 'طلب متابعة بشرية من واتساب',
+          last_contact_at: new Date().toISOString(),
+          custom_fields: {
+            sales_manager: { ...summary, qualification_status: qualified ? 'qualified' : 'human_requested' }
+          }
+        })
+      });
+      leadId = created?.[0]?.id || null;
+      if (!leadId) throw new Error('CRM lead creation did not return an ID');
+      patch.lead_id = leadId;
+    }
+    const accepted = await createActionOnce({
+      organizationId,
+      eventId: storedEvent.id,
+      ruleId,
+      actionType: 'sales_qualified_handoff',
+      status: 'pending',
+      result: { ...summary, lead_id: leadId, conversation_id: conversation.id, requires_human_pricing: true }
+    });
+    if (!accepted) return false;
+    await rest('conversations?id=eq.' + encodeURIComponent(conversation.id)
+      + '&organization_id=eq.' + encodeURIComponent(organizationId), {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    });
+    await notifyQualifiedSalesTeam(summary, storedEvent, leadId);
+    return true;
+  }
+  await rest('conversations?id=eq.' + encodeURIComponent(conversation.id)
+    + '&organization_id=eq.' + encodeURIComponent(organizationId), {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  });
+  return true;
+}
+
+async function generateSalesManagerReply(plan, event, history = []) {
+  const fallback = String(plan.reply || '').slice(0, 950);
+  if (plan.deterministic || plan.handoff) return fallback;
+  const prompt = [
+    'أنت مدير مبيعات استشاري متمرس في شركة Tiqnora AI بالسعودية، وتعمل على تأهيل العميل وليس الضغط عليه.',
+    'العميل يتحدث بالعربية: تحدث بعربية طبيعية واضحة، قصيرة ولطيفة دون إغراقه بالتفاصيل التسويقية.',
+    'أظهر فهما لسياق الحوار ومشكلته، وتعاطف مع اعتراضه إن وجد. لا تسأل عن معلومات قدمها سابقا.',
+    'مهمتك في هذه الرسالة سؤال واحد فقط يخدم خطوة التأهيل الحالية، دون الانتقال لأسئلة أخرى.',
+    'لا تخترع أي سعر أو عرض أو خصم أو ضمان نتائج أو موعد أو صلاحيات أو اتفاق لم يؤكدها الفريق.',
+    'الأسعار والاعتمادات والتفاوض النهائي حصرا للبشر في فريق Tiqnora.',
+    'لا تطلب كلمات مرور أو تفاصيل حساسة. لا تدّع أنك موظف بشري.',
+    'لا تغيّر حقيقة ما تم جمعه ولا تقترح خدمات غير مطلوبة. لا تذكر معلومات المالك أو المؤسس.',
+    'صياغة الرد المقترحة ومعناه وسؤاله الإلزامي: ' + fallback,
+    'البيانات المعروفة: ' + JSON.stringify({
+      service: plan.state.service_label,
+      company: plan.state.company,
+      goal: plan.state.goal,
+      scope: plan.state.scope,
+      timeline: plan.state.timeline,
+      budget: plan.state.budget,
+      decision_maker: plan.state.decision_maker
+    }),
+    'السياق الأخير: ' + JSON.stringify((history || []).slice(-6)),
+    'رسالة العميل: ' + String(event.content || '').slice(0, 800),
+    'رد واحد جاهز للإرسال، بحد أقصى 3 جمل، مع السؤال المستهدف فقط، وبدون علامات Markdown.'
+  ].join('\n');
+  try {
+    const answer = await callSocialAI(prompt, { temperature: 0.3, maxTokens: 240 });
+    const text = String(answer?.text || '').trim().replace(/\s+/g, ' ');
+    const arabic = (text.match(/[\u0600-\u06FF]/g) || []).length;
+    // Ask the planned question and prefer deterministic wording if AI drifts or invents numbers.
+    if (text.length >= 20 && text.length <= 650 && arabic >= 15
+        && /[؟?]/.test(text) && !/[0-9٠-٩]{2,}\s*(?:ريال|ر\.س|sar)/i.test(text)
+        && !/نضمن|اضمن لك|100%|خصم حصري|السعر النهائي|القسم المختص/.test(text)) {
+      return text;
+    }
+  } catch (error) {
+    console.warn('Sales AI phrasing fallback', { message: String(error?.message || error).slice(0, 180) });
+  }
+  return fallback;
+}
+
 async function processEvent(event, storedEvent, organizationId, rules) {
   // Meta echoes comments authored by the connected Page/Instagram account
   // back through the webhook. Treat those as outbound echoes so they never
@@ -1622,6 +1794,24 @@ async function processEvent(event, storedEvent, organizationId, rules) {
     const history = event.platform === 'whatsapp'
       ? await recentConversationHistory(storedEvent, organizationId)
       : [];
+    const salesConversation = event.platform === 'whatsapp' && storedEvent.conversation_id
+      && event.event_type === 'message.received' && rule.intent !== 'platform_link'
+      ? await loadWhatsAppSalesConversation(storedEvent, organizationId).catch(error => {
+        console.warn('Sales conversation lookup failed', { message: error.message });
+        return null;
+      }) : null;
+    let salesPlan = salesConversation
+      ? planWhatsAppSalesTurn({
+        message: event.content,
+        history,
+        previous: salesConversation.metadata?.sales_manager || {},
+        lead: {}
+      })
+      : null;
+    if (salesPlan?.suppress) {
+      // Human owns this conversation after a handoff. Never interrupt them with an automatic reply.
+      return { matched: true, intent: rule.intent || null, confidence, awaiting_human: true };
+    }
 
     const reserved = await createActionOnce({
       organizationId,
@@ -1633,10 +1823,24 @@ async function processEvent(event, storedEvent, organizationId, rules) {
     });
     if (!reserved) return { matched: true, intent: rule.intent || null, confidence, auto_reply_duplicate: true };
 
-    const text = await generateAgentReply(event, rule, {
-      followUp: whatsappFollowUp,
-      history
-    });
+    let text;
+    if (salesPlan?.handoff) {
+      try {
+        const saved = await persistWhatsAppSalesPlan(
+          salesPlan, salesConversation, storedEvent, organizationId, rule.id
+        );
+        if (!saved) throw new Error('Sales handoff was not recorded');
+        text = salesPlan.reply;
+      } catch (error) {
+        console.warn('Sales handoff persistence failed', { message: error.message });
+        salesPlan = null;
+        text = 'وصلني طلبك، وبحافظ على محادثتك ليكمل معك الفريق بعد مراجعتها. للتسعير الدقيق نحتاج تأكيد متطلبات المشروع من المختص.';
+      }
+    } else {
+      text = salesPlan?.active
+        ? await generateSalesManagerReply(salesPlan, event, history)
+        : await generateAgentReply(event, rule, { followUp: whatsappFollowUp, history });
+    }
     const specialistHandoff = event.platform === 'whatsapp' && /القسم المختص/.test(String(text || ''));
     try {
       const delivery = await sendAutomaticReply(event, storedEvent, organizationId, text);
@@ -1649,6 +1853,13 @@ async function processEvent(event, storedEvent, organizationId, rules) {
         })
       });
       if (delivery.sent) {
+        if (salesPlan?.active && !salesPlan.handoff) {
+          await persistWhatsAppSalesPlan(
+            salesPlan, salesConversation, storedEvent, organizationId, rule.id
+          ).catch(error => {
+            console.warn('Sales qualification state write failed', { message: error.message });
+          });
+        }
         if (specialistHandoff) {
           await createActionOnce({
             organizationId,
