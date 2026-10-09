@@ -124,13 +124,11 @@
   .svc-cta-actions .btn{width:100%}
 }
 
-.svc-ai-page{--svc-visual:url("https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1600&q=82")}
-.svc-social-page{--svc-visual:url("https://images.unsplash.com/photo-1533750349088-cd871a92f312?auto=format&fit=crop&w=1600&q=82")}
-.wd-page{--svc-visual:url("https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1600&q=82")}
+.svc-ai-page{--svc-visual:url("../assets/tiqnora-platform-bg.svg")}
+.svc-social-page{--svc-visual:url("../assets/tiqnora-social-automation-bg.svg")}
+.wd-page{--svc-visual:url("https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1400&q=78")}
 /* Replace illustrative browser/chat widgets with original sector photography */
 .svc-ai-page .svc-hero-grid>div:nth-child(2),.svc-social-page .svc-hero-grid>div:nth-child(2){position:relative;min-height:330px;border-radius:22px;overflow:hidden;background-size:cover;background-position:center;box-shadow:0 28px 70px rgba(0,0,0,.4)}
-.svc-ai-page .svc-hero-grid>div:nth-child(2){background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.25)),url("https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=1100&q=82")}
-.svc-social-page .svc-hero-grid>div:nth-child(2){background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.25)),url("https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1100&q=82")}
 .svc-ai-page .svc-hero-grid>div:nth-child(2)>.chat-ui,.svc-social-page .svc-hero-grid>div:nth-child(2)>.mock-browser{display:none!important}
 @media(max-width:700px){.svc-ai-page .svc-hero-grid>div:nth-child(2),.svc-social-page .svc-hero-grid>div:nth-child(2){min-height:230px}}
 @media(prefers-reduced-motion:reduce){.float-soft{animation:none!important}}
@@ -138,15 +136,15 @@
 /* Keep the closing CTA distinct without reusing the service hero photo */
 .svc-page .svc-cta,.wd-page .svc-cta{background-image:linear-gradient(135deg,#060B1E,#0B1529 56%,#121F3A)!important}
 
-/* Service imagery: real photographs tied to each service, no illustrative dashboard mockups */
+/* Service imagery: verified service-context photography. Unsplash source/license references: docs/IMAGE-SOURCES.md. */
 .svc-page .svc-hero{
   background-image:radial-gradient(ellipse 70% 55% at 78% 10%,rgba(10,92,255,.25),transparent 60%),linear-gradient(135deg,#060B1E 0%,#0B1529 60%,#121F3A 100%)!important;
 }
 .svc-ai-page .svc-hero-grid>div:nth-child(2){
-  background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.2)),url("https://images.unsplash.com/photo-1712159018726-4564d92f3ec2?auto=format&fit=crop&w=1100&q=85")!important;
+  background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.2)),url("https://images.unsplash.com/photo-1770368787729-6a42187b668c?auto=format&fit=crop&w=1100&q=78")!important;
   background-position:center 42%!important;
 }
 .svc-social-page .svc-hero-grid>div:nth-child(2){
-  background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.2)),url("https://images.unsplash.com/photo-1765285262806-54bcc4a311ba?auto=format&fit=crop&w=1100&q=85")!important;
+  background-image:linear-gradient(180deg,rgba(6,11,30,.08),rgba(6,11,30,.2)),url("https://images.unsplash.com/photo-1759215524649-78b47fc790e0?auto=format&fit=crop&w=1100&q=78")!important;
   background-position:center 42%!important;
 }
