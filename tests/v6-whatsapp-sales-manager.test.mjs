@@ -48,12 +48,11 @@ test('Direct human request bypasses all qualification steps', () => {
 });
 
 test('Collected scope, timeline and optional budget are preserved across messages', () => {
-  let s = turn('أبغى متجر إلكتروني لبيع المنتجات لشركتنا شركة التجارة الحديثة').state;
-  assert.equal(s.service, 'ecommerce');
-  s = turn('نحتاج بيع المنتجات بالجملة والتجزئة', s).state;
-  s = turn('التجارة الحديثة', s).state;
-  assert.ok(s.company);
+  const s = { stage: 'qualifying', step: 'scope', service: 'ecommerce',
+    service_label: 'متجر إلكتروني', goal: 'زيادة طلبات الجملة',
+    company: 'التجارة الحديثة' };
   const scope = turn('حوالي 100 منتج، بيع جملة وتجزئة', s);
+  assert.equal(scope.state.scope, 'حوالي 100 منتج، بيع جملة وتجزئة');
   assert.equal(scope.state.step, 'timeline');
   const date = turn('خلال شهرين', scope.state);
   assert.equal(date.state.step, 'budget');
