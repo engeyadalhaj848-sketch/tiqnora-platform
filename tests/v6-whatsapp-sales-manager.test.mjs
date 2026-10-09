@@ -85,3 +85,17 @@ test('Handoff summary does not invent prices or customer details', () => {
   assert.equal(summary.pricing_status, 'pending_human_review');
   assert.equal(summary.owner_approved_price, false);
 });
+
+test('Unlinked affirmative reply to manual outreach asks rather than assuming', () => {
+  const reply = turn('نعم');
+  assert.equal(reply.state.step, 'decision_maker');
+  assert.match(reply.reply, /هل حضرتك الشخص المسؤول/);
+  assert.notEqual(reply.handoff, true);
+});
+
+test('Do not restart automation after an older specialist handoff', () => {
+  const reply = turn('حسنًا', {}, [
+    { role: 'assistant', text: 'شكراً لتفهمك، فريقنا سيتواصل معك قريبًا.' }
+  ]);
+  assert.equal(reply.suppress, true);
+});
