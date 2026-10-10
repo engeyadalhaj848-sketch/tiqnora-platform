@@ -169,3 +169,78 @@ test('Sales coach avoids repeating previous answer verbatim', () => {
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'repetitive');
 });
+
+
+test('Customer says تصميم مواقع: website service must be recognized, not another service menu', () => {
+  const previous = { stage: 'qualifying', step: 'service',
+    company: 'عبارة عن سوبرات مواد غذائيه', service: null };
+  const result = turn('تصميم مواقع', previous, [
+    { role: 'customer', text: 'نعم لدي شركة عبارة عن سوبرات مواد غذائيه' },
+    { role: 'assistant', text: 'ممتاز، هل حاب نبدأ بتصميم الموقع/المتجر؟' }
+  ]);
+  assert.equal(result.state.service, 'website');
+  assert.equal(result.state.step, 'goal');
+  assert.match(result.reply, /موقع/);
+  assert.match(result.reply, /المواد الغذائية/);
+  assert.doesNotMatch(result.reply, /أي خدمة تحتاجها الآن/);
+});
+
+test('Plural and casual website variants are recognized', () => {
+  for (const message of ['مواقع', 'تصميم مواقع', 'تصميم المواقع', 'ابغى موقع إلكتروني',
+    'أحتاج تطوير مواقع', 'website', 'مواقع إلكترونية']) {
+    const result = turn(message);
+    assert.equal(result.state.service, 'website', message);
+    assert.equal(result.state.step, 'goal', message);
+  }
+});
+
+test('Store variants still retain distinct e-commerce routing', () => {
+  for (const message of ['متاجر إلكترونية', 'متجر', 'متجر الكتروني']) {
+    assert.equal(turn(message).state.service, 'ecommerce');
+  }
+});
+
+test('A hello tomorrow resumes context rather than reasking service from scratch', () => {
+  const previous = { stage: 'qualifying', step: 'service',
+    company: 'عبارة عن سوبرات مواد غذائيه', service: null };
+  const history = [
+    { role: 'customer', text: 'نعم لدي شركة عبارة عن سوبرات مواد غذائيه' },
+    { role: 'assistant', text: 'هل تريد موقع أم متجر أم تسويق؟' },
+    { role: 'customer', text: 'تصميم مواقع' },
+    { role: 'assistant', text: 'يسعدنا نخدمك 🌹 أي خدمة تحتاجها الآن: موقع، متجر، أتمتة واتساب، تسويق، أو حل تقني آخر؟' },
+    { role: 'customer', text: 'سابر' },
+    { role: 'assistant', text: 'يسعدنا نخدمك 🌹 أي خدمة تحتاجها الآن: موقع، متجر، أتمتة واتساب، تسويق، أو حل تقني آخر؟' }
+  ];
+  const result = turn('السلام عليكم', previous, history);
+  assert.equal(result.state.service, 'website');
+  assert.equal(result.state.step, 'goal');
+  assert.match(result.reply, /وعليكم السلام/);
+  assert.match(result.reply, /كنا نتكلم/);
+  assert.doesNotMatch(result.reply, /أي خدمة تحتاجها الآن/);
+});
+
+test('Unclear short reply does not overwrite goals or trap customer in repeated question', () => {
+  const previous = { stage: 'qualifying', step: 'goal', service: 'website',
+    service_label: 'موقع إلكتروني', company: 'نشاط غذائي' };
+  const result = turn('سابر', previous);
+  assert.equal(result.state.goal, null);
+  assert.equal(result.state.step, 'goal');
+  assert.match(result.reply, /ما فهمت المقصود/);
+  assert.doesNotMatch(result.reply, /أي خدمة تحتاجها الآن/);
+});
+
+test('Greeting while qualifying does not get recorded as goal or company', () => {
+  const previous = { stage: 'qualifying', step: 'goal', service: 'website',
+    service_label: 'موقع إلكتروني' };
+  const result = turn('السلام عليكم', previous);
+  assert.equal(result.state.goal, null);
+  assert.equal(result.state.step, 'goal');
+  assert.match(result.reply, /وعليكم السلام/);
+});
+
+test('Quality gate rejects generic service-menu after the website has been chosen', () => {
+  const r = assessWhatsAppSalesReply('يسعدنا نخدمك 🌹 أي خدمة تحتاجها الآن: موقع، متجر، أتمتة واتساب، تسويق، أو حل تقني آخر؟',
+    { plan: { state: { service: 'website', service_label: 'موقع إلكتروني' } }, message: 'تصميم مواقع' });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'ignored_known_service');
+});
