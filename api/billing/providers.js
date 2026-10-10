@@ -1017,7 +1017,9 @@ async function handleManualPaymentLinks(req, res) {
   if (!cfg.configured || !cfg.productId || !cfg.webhookSecret) {
     return json(res, 503, { ok: false, error: 'whop_not_ready', message: 'راجع إعدادات WHOP_API_KEY وWHOP_ACCOUNT_ID وWHOP_PRODUCT_ID وWHOP_WEBHOOK_SECRET في Vercel.' });
   }
-  const charge = toWhopAmount(amountSar, cfg.currency);
+  // Keep the agreed amount in Saudi riyals; do not silently convert the invoice to USD.
+  const chargeCurrency = 'sar';
+  const charge = money2(amountSar);
   if (!Number.isFinite(charge) || charge < 1) {
     return json(res, 400, { ok: false, error: 'whop_amount_below_minimum' });
   }
@@ -1029,7 +1031,7 @@ async function handleManualPaymentLinks(req, res) {
     created_by: admin.user.id,
     environment: cfg.sandbox ? 'sandbox' : 'production',
     whop_amount: charge,
-    whop_currency: cfg.currency,
+    whop_currency: chargeCurrency,
     amount_sar: money2(amountSar),
     auto_purchase: false,
   };
@@ -1065,7 +1067,7 @@ async function handleManualPaymentLinks(req, res) {
   try {
     checkout = await createCheckoutConfiguration({
       amount: charge,
-      currency: cfg.currency,
+      currency: chargeCurrency,
       orderId: order.id,
       orderNumber,
       title: 'Tiqnora ' + orderNumber.slice(-14),
@@ -1314,6 +1316,12 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
     let amountOk = true;
     if (expectedWhop != null && amount != null) {
       amountOk = Math.abs(expectedWhop - amount) <= 0.05 || Math.abs(Number(order.total) - amount) <= 0.05;
+    }
+    if (order.payment_meta?.source === 'manual_payment_link') {
+      const expectedCurrency = String(order.payment_meta?.whop_currency || '').toLowerCase();
+      amountOk = expectedWhop != null && amount != null && Number.isFinite(amount)
+        && Math.abs(expectedWhop - amount) <= 0.05
+        && expectedCurrency === currency;
     }
     if (!amountOk) {
       await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
