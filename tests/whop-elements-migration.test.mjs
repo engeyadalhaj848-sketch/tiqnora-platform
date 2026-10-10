@@ -12,7 +12,7 @@ test('manual payment link URL, lookup, and bilingual copy are preserved', () => 
   assert.match(pay, /'ar'/);
   assert.match(pay, /'en'/);
   assert.match(pay, /invoice\.amount_sar/);
-  assert.match(pay, /invoice\.order_number/);
+  assert.match(pay, /data\.order_number/);
 });
 
 test('legacy Whop embed is removed from both active checkouts', () => {
