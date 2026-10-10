@@ -2,6 +2,7 @@ import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
+import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -1654,43 +1655,20 @@ async function persistWhatsAppSalesPlan(plan, conversation, storedEvent, organiz
 }
 
 async function generateSalesManagerReply(plan, event, history = []) {
-  const fallback = String(plan.reply || '').slice(0, 950);
-  if (plan.deterministic || plan.handoff) return fallback;
-  const prompt = [
-    'أنت مدير مبيعات استشاري متمرس في شركة Tiqnora AI بالسعودية، وتعمل على تأهيل العميل وليس الضغط عليه.',
-    'العميل يتحدث بالعربية: تحدث بعربية طبيعية واضحة، قصيرة ولطيفة دون إغراقه بالتفاصيل التسويقية.',
-    'أظهر فهما لسياق الحوار ومشكلته، وتعاطف مع اعتراضه إن وجد. لا تسأل عن معلومات قدمها سابقا.',
-    'مهمتك في هذه الرسالة سؤال واحد فقط يخدم خطوة التأهيل الحالية، دون الانتقال لأسئلة أخرى.',
-    'لا تخترع أي سعر أو عرض أو خصم أو ضمان نتائج أو موعد أو صلاحيات أو اتفاق لم يؤكدها الفريق.',
-    'الأسعار والاعتمادات والتفاوض النهائي حصرا للبشر في فريق Tiqnora.',
-    'لا تطلب كلمات مرور أو تفاصيل حساسة. لا تدّع أنك موظف بشري.',
-    'لا تغيّر حقيقة ما تم جمعه ولا تقترح خدمات غير مطلوبة. لا تذكر معلومات المالك أو المؤسس.',
-    'صياغة الرد المقترحة ومعناه وسؤاله الإلزامي: ' + fallback,
-    'البيانات المعروفة: ' + JSON.stringify({
-      service: plan.state.service_label,
-      company: plan.state.company,
-      goal: plan.state.goal,
-      scope: plan.state.scope,
-      timeline: plan.state.timeline,
-      budget: plan.state.budget,
-      decision_maker: plan.state.decision_maker
-    }),
-    'السياق الأخير: ' + JSON.stringify((history || []).slice(-6)),
-    'رسالة العميل: ' + String(event.content || '').slice(0, 800),
-    'رد واحد جاهز للإرسال، بحد أقصى 3 جمل، مع السؤال المستهدف فقط، وبدون علامات Markdown.'
-  ].join('\n');
+  // Deterministic opt-out, confirmation and human handoffs stay authoritative.
+  if (plan.deterministic || plan.handoff) return String(plan.reply || '').slice(0, 700);
+  const fallback = whatsappSalesCoachFallback({ plan, message: event.content, history });
+  const prompt = buildWhatsAppSalesCoachPrompt({ plan, event, history });
   try {
-    const answer = await callSocialAI(prompt, { temperature: 0.3, maxTokens: 240 });
-    const text = String(answer?.text || '').trim().replace(/\s+/g, ' ');
-    const arabic = (text.match(/[\u0600-\u06FF]/g) || []).length;
-    // Ask the planned question and prefer deterministic wording if AI drifts or invents numbers.
-    if (text.length >= 20 && text.length <= 650 && arabic >= 15
-        && /[؟?]/.test(text) && !/[0-9٠-٩]{2,}\s*(?:ريال|ر\.س|sar)/i.test(text)
-        && !/نضمن|اضمن لك|100%|خصم حصري|السعر النهائي|القسم المختص/.test(text)) {
-      return text;
-    }
+    const result = await callSocialAI(prompt, { temperature: 0.4, maxTokens: 420 });
+    const assessment = assessWhatsAppSalesReply(result?.text, { plan, message: event.content, history });
+    if (assessment.ok) return assessment.text.slice(0, 700);
+    console.warn('WhatsApp sales reply failed quality gate; using safe coaching fallback', {
+      reason: assessment.reason,
+      provider: result?.provider || null
+    });
   } catch (error) {
-    console.warn('Sales AI phrasing fallback', { message: String(error?.message || error).slice(0, 180) });
+    console.warn('WhatsApp sales coach degraded', { message: String(error?.message || error).slice(0, 180) });
   }
   return fallback;
 }

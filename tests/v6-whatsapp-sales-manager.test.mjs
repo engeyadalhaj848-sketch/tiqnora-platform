@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../lib/v6/whatsapp-sales-manager.js';
+import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../lib/v6/whatsapp-sales-coach.js';
 
 function turn(message, previous = {}, history = []) {
   return planWhatsAppSalesTurn({ message, previous, history });
@@ -98,4 +99,73 @@ test('Do not restart automation after an older specialist handoff', () => {
     { role: 'assistant', text: 'شكراً لتفهمك، فريقنا سيتواصل معك قريبًا.' }
   ]);
   assert.equal(reply.suppress, true);
+});
+
+
+test('An interrupted goal question must not save a price question as a goal', () => {
+  const prior = { stage: 'qualifying', step: 'goal', service: 'website', service_label: 'موقع إلكتروني' };
+  const plan = turn('طيب كم سعر الموقع؟', prior);
+  assert.equal(plan.state.goal, null);
+  assert.equal(plan.state.step, 'goal');
+});
+
+test('An interrupted company or scope question must not poison customer profile', () => {
+  const company = turn('بكم طيب؟', { stage: 'qualifying', step: 'company', service: 'website', service_label: 'موقع إلكتروني', goal: 'عرض خدماتنا' });
+  assert.equal(company.state.company, null);
+  assert.equal(company.state.step, 'company');
+  const scope = turn('متى تخلصون؟', { stage: 'qualifying', step: 'scope', service: 'website', service_label: 'موقع إلكتروني', goal: 'طلبات أكثر', company: 'شركة التنين' });
+  assert.equal(scope.state.scope, null);
+  assert.equal(scope.state.step, 'scope');
+});
+
+test('Asking for a person mid-qualification does not set bogus company or scope', () => {
+  const result = turn('ابغى اكلم احد من المبيعات', { stage: 'qualifying', step: 'company', service: 'website', service_label: 'موقع إلكتروني' });
+  assert.equal(result.handoff, true);
+  assert.equal(result.state.company, null);
+  assert.equal(result.state.stage, 'awaiting_team');
+});
+
+test('Opt-out while awaiting a human still records the opt-out', () => {
+  const result = turn('وقف الرسائل', { stage: 'awaiting_team', service: 'website' });
+  assert.equal(result.state.stage, 'opted_out');
+  assert.equal(result.deterministic, true);
+  assert.equal(turn('وقف الرسائل', result.state).suppress, true);
+});
+
+test('Sales coach prioritizes answering the current question, not a rigid script', () => {
+  const prompt = buildWhatsAppSalesCoachPrompt({
+    plan: { state: { step: 'goal', service_label: 'موقع إلكتروني', company: 'شركة التنين' }, reply: 'ما هدفكم من الموقع؟' },
+    event: { content: 'قبل ما نكمل كم يكلف؟' },
+    history: [{ role: 'assistant', text: 'ما هدفكم من الموقع؟' }]
+  });
+  assert.match(prompt, /أجب عن سؤال العميل الحالي أولًا/);
+  assert.match(prompt, /شركة التنين/);
+  assert.match(prompt, /لا توجد أسعار مؤكدة/);
+});
+
+test('Sales coach quality gate rejects unapproved amounts, made-up actions and rambling', () => {
+  const context = { plan: { state: { step: 'goal' } }, message: 'كم سعر الموقع؟' };
+  assert.equal(assessWhatsAppSalesReply('سعر الموقع هو 5000 ريال ويشمل كل شيء.', context).ok, false);
+  assert.equal(assessWhatsAppSalesReply('تم حجز موعد لك غدًا من غير أي تفاصيل إضافية.', context).ok, false);
+  assert.equal(assessWhatsAppSalesReply('وش اسم الشركة؟ وكم الميزانية؟', context).ok, false);
+  assert.equal(assessWhatsAppSalesReply('السعر يبدأ من باقة ثابتة تناسبك بالتأكيد.', context).ok, false);
+  assert.equal(assessWhatsAppSalesReply('السعر يختلف حسب الصفحات والوظائف المطلوبة، وش أهم شيء تبي الموقع يسويه؟', context).ok, true);
+});
+
+test('Sales coach fallback answers the pricing concern instead of ignoring it', () => {
+  const plan = { reply: 'وش هدفك من الموقع؟', state: { step: 'goal' } };
+  const reply = whatsappSalesCoachFallback({ plan, message: 'كم السعر؟' });
+  assert.match(reply, /السعر/);
+  assert.match(reply, /وش هدفك/);
+  const interrupted = whatsappSalesCoachFallback({ plan, message: 'كم السعر؟',
+    history: [{ role: 'assistant', text: 'وش هدفك من الموقع؟' }] });
+  assert.match(interrupted, /السعر/);
+  assert.doesNotMatch(interrupted, /وش هدفك/);
+});
+
+test('Sales coach avoids repeating previous answer verbatim', () => {
+  const reply = 'بالنسبة للسعر، يعتمد على حجم المشروع والوظائف المطلوبة. وش نوع موقعكم؟';
+  const result = assessWhatsAppSalesReply(reply, { history: [{ role: 'assistant', text: reply }] });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'repetitive');
 });
