@@ -298,6 +298,10 @@
       "destination": "/api/billing/providers?route=supplier_fulfillment_submit"
     },
     {
+      "source": "/api/payments/manual-links",
+      "destination": "/api/billing/providers?route=manual_payment_links"
+    },
+    {
       "source": "/api/payments/create-checkout",
       "destination": "/api/billing/providers?route=whop_create_checkout"
     },
