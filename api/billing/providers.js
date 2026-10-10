@@ -992,6 +992,7 @@ async function handleManualPaymentLinks(req, res) {
       created_at: row.created_at,
       charge_amount: row.payment_meta?.whop_amount ?? null,
       charge_currency: row.payment_meta?.whop_currency ?? null,
+      environment: row.payment_meta?.environment || null,
       purchase_url: row.payment_meta?.purchase_url || null,
     }));
     return json(res, 200, { ok: true, payment_links: entries });
