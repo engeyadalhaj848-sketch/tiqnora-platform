@@ -16,7 +16,6 @@
     gtag('js', new Date());
     gtag('config', 'G-XW3K04YQMH', { anonymize_ip: true });
   </script>
-  <script async defer src="https://js.whop.com/static/checkout/loader.js"></script>
   <style>
     .pay-opt{display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;cursor:pointer}
     .pay-opt.selected{border-color:var(--accent);background:rgba(99,102,241,.08)}
@@ -190,7 +189,7 @@ html,body,.checkout-page{background:#F7F9FC!important;color:#0B1529!important}.s
       const wrap = document.getElementById('whop-wrap');
       if (method === 'whop') {
         wrap.classList.add('active');
-        document.getElementById('place-order').textContent = lastWhop?.whop?.sessionId ? 'أدخل بيانات الدفع أعلاه' : 'متابعة الدفع';
+        document.getElementById('place-order').textContent = checkoutMounted ? 'أدخل بيانات الدفع أعلاه' : 'متابعة الدفع';
       } else {
         wrap.classList.remove('active');
         document.getElementById('place-order').textContent = 'تأكيد الطلب';
@@ -204,24 +203,53 @@ html,body,.checkout-page{background:#F7F9FC!important;color:#0B1529!important}.s
       });
     });
 
-    function mountWhop(sessionId, planId, environment, returnUrl) {
+
+    let elementsLoader = null;
+    let checkoutMounted = false;
+    function ensureWhopElements() {
+      if (typeof window.WhopElements === 'function') return Promise.resolve(window.WhopElements);
+      if (!elementsLoader) {
+        elementsLoader = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.whop.com/elements/amber/elements.js';
+          script.setAttribute('data-whop-elements', '');
+          script.async = true;
+          script.onload = () => typeof window.WhopElements === 'function'
+            ? resolve(window.WhopElements)
+            : reject(new Error('Whop Elements unavailable'));
+          script.onerror = () => reject(new Error('Whop Elements failed to load'));
+          document.head.appendChild(script);
+        }).catch(error => { elementsLoader = null; throw error; });
+      }
+      return elementsLoader;
+    }
+
+    async function mountWhop(sessionId, planId, environment) {
       const mount = document.getElementById('whop-mount');
       const wrap = document.getElementById('whop-wrap');
       const msg = document.getElementById('whop-msg');
       wrap.classList.add('active');
-      mount.innerHTML = '';
-      const el = document.createElement('div');
-      if (planId) el.setAttribute('data-whop-checkout-plan-id', planId);
-      if (sessionId) el.setAttribute('data-whop-checkout-session', sessionId);
-      el.setAttribute('data-whop-checkout-return-url', returnUrl || 'https://www.tiqnora.com/order-complete');
-      el.setAttribute('data-whop-checkout-theme', 'dark');
-      el.setAttribute('data-whop-checkout-environment', environment === 'production' ? 'production' : 'sandbox');
-      mount.appendChild(el);
-      msg.textContent = environment === 'sandbox'
-        ? 'وضع الاختبار: لن يتم خصم مبلغ حقيقي حتى يتم تفعيل الإنتاج.'
-        : 'أدخل بيانات الدفع لإكمال الطلب. التأكيد النهائي بعد التحقق من بوابة الدفع.';
-      if (window.Whop && typeof window.Whop.loadCheckout === 'function') {
-        try { window.Whop.loadCheckout(); } catch (_) {}
+      if (!sessionId && !planId) {
+        msg.textContent = 'تعذر بدء الدفع. حاول مرة أخرى.';
+        return false;
+      }
+      try {
+        const sdk = await ensureWhopElements();
+        mount.replaceChildren();
+        // Reuse the server-created checkout configuration: never trust browser totals.
+        const options = sessionId ? { checkoutConfiguration: sessionId } : { plan: planId };
+        const checkout = sdk({ environment: environment === 'sandbox' ? 'sandbox' : 'production' })
+          .checkout.create(options);
+        checkout.create('checkout').mount('#whop-mount');
+        checkoutMounted = true;
+        msg.textContent = environment === 'sandbox'
+          ? 'وضع الاختبار: لن يتم خصم مبلغ حقيقي.'
+          : 'أدخل بيانات الدفع لإكمال الطلب. التأكيد النهائي بعد التحقق من بوابة الدفع.';
+        return true;
+      } catch (_) {
+        checkoutMounted = false;
+        msg.textContent = 'تعذر تحميل نموذج الدفع. أعد المحاولة أو تواصل مع الدعم.';
+        return false;
       }
     }
 
@@ -238,6 +266,13 @@ html,body,.checkout-page{background:#F7F9FC!important;color:#0B1529!important}.s
 
       if (method === 'whop') {
         btn.textContent = 'جارٍ تحضير الدفع…';
+        // Failed SDK loads must not create duplicate orders/configurations.
+        if (lastWhop?.whop?.sessionId && !checkoutMounted) {
+          const loaded = await mountWhop(lastWhop.whop.sessionId, lastWhop.whop.planId, lastWhop.whop.environment);
+          btn.disabled = loaded;
+          btn.textContent = loaded ? 'أدخل بيانات الدفع أعلاه' : 'إعادة تحميل نموذج الدفع';
+          return;
+        }
         try {
           const res = await fetch('/api/payments/create-checkout', {
             method: 'POST',
@@ -270,9 +305,9 @@ html,body,.checkout-page{background:#F7F9FC!important;color:#0B1529!important}.s
           document.getElementById('sum-total').textContent = money(data.total);
           lastWhop = data;
           if (data.whop && data.whop.sessionId) {
-            mountWhop(data.whop.sessionId, data.whop.planId, data.whop.environment || 'sandbox', data.return_url);
-            btn.textContent = 'أدخل بيانات الدفع أعلاه';
-            btn.disabled = true;
+            const loaded = await mountWhop(data.whop.sessionId, data.whop.planId, data.whop.environment || 'sandbox');
+            btn.textContent = loaded ? 'أدخل بيانات الدفع أعلاه' : 'إعادة تحميل نموذج الدفع';
+            btn.disabled = loaded;
 
           } else {
             showError((data.whop && data.whop.message) || 'تم إنشاء الطلب لكن بوابة الدفع غير جاهزة. تواصل معنا عبر واتساب.');
