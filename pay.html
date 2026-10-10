@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#060B1E">
+  <title>دفع آمن | Tiqnora AI</title>
+  <meta name="description" content="أكمل دفعتك بأمان عبر تيكنورا. Secure payment with Tiqnora AI.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Tiqnora AI">
+  <meta property="og:title" content="الدفع الآمن | Tiqnora AI">
+  <meta property="og:description" content="أكمل دفعتك من خلال صفحة تيكنورا الآمنة. Secure checkout.">
+  <meta property="og:image" content="https://www.tiqnora.com/assets/tiqnora-logo.png">
+  <meta property="og:image:alt" content="Tiqnora AI">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="/assets/tiqnora-logo.png" type="image/png">
+  <style>
+    :root{color-scheme:light;--navy:#060B1E;--blue:#0A5CFF;--cyan:#00D2FF;--ink:#13213B;--muted:#586780;--border:#E0E9F3;--surface:#fff;--bg:#F4F8FD}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:var(--bg);font-family:"Cairo","Tajawal",system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink)}
+    header{background:var(--navy);padding:18px max(20px,calc((100vw - 1050px)/2));color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.2px}
+    .brand img{max-width:155px;max-height:42px;object-fit:contain}
+    .brand-name{font-size:1.14rem}
+    .lang{border:1px solid #48648C;background:#182B4C;border-radius:12px;color:#fff;padding:10px 14px;cursor:pointer;font-weight:650}
+    main{max-width:1050px;margin:32px auto;padding:0 18px 45px}
+    .intro{text-align:center;margin-bottom:23px}.intro h1{font-size:clamp(1.7rem,4vw,2.3rem);margin:0 0 7px}.intro p{color:var(--muted);margin:0;line-height:1.8}
+    .layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(310px,.9fr);gap:22px;align-items:start}
+    .panel{background:var(--surface);border:1px solid var(--border);border-radius:22px;box-shadow:0 10px 35px #0c234714;overflow:hidden}
+    .head{padding:21px 24px;background:linear-gradient(115deg,#0A5CFF,#126DEB);color:white}
+    .head small{display:block;opacity:.85;font-weight:600}.head .price{margin-top:9px;font-size:2rem;font-weight:850;direction:ltr;unicode-bidi:isolate;text-align:start}
+    .details{padding:22px 24px}.details h2{margin:0 0 17px;font-size:1.1rem}
+    .kv{display:flex;justify-content:space-between;gap:15px;padding:13px 0;border-bottom:1px solid #EEF2F7}
+    .kv span:first-child{color:var(--muted)}.kv strong{font-weight:700;overflow-wrap:anywhere;text-align:end;max-width:65%}
+    .order{direction:ltr;unicode-bidi:isolate;font-size:.82rem}
+    .trust{font-size:.88rem;line-height:1.9;color:var(--muted);display:flex;align-items:flex-start;gap:9px;padding-top:17px}
+    .trust svg{flex:0 0 auto;margin-top:4px}
+    .pay-panel{padding:22px;min-height:320px}
+    .pay-head{display:flex;align-items:center;gap:9px;font-weight:800;font-size:1.1rem;margin:0 0 14px}
+    .pay-head svg{color:var(--blue)}
+    #checkout-host{min-height:260px;width:100%;max-width:100%;overflow:hidden}
+    #status{line-height:1.8;color:var(--muted)}#status.error{color:#B42318}#status.good{color:#027A48}
+    .hint{font-size:.82rem;color:var(--muted);line-height:1.8;margin:13px 0 0}
+    footer{text-align:center;color:#6c7a91;font-size:.8rem;margin-top:30px}
+    [hidden]{display:none!important}
+    html[dir=ltr] .head .price{text-align:left}
+    @media(max-width:760px){header{padding:14px 18px}.brand img{max-width:122px}.brand-name{font-size:1rem}main{margin:22px auto}.layout{grid-template-columns:1fr}.pay-panel{padding:18px}.head,.details{padding:19px}}
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand"><img src="/assets/tiqnora-logo.png" alt="Tiqnora AI" onerror="this.hidden=true"><span class="brand-name">Tiqnora AI</span></div>
+  <button id="language" type="button" class="lang" aria-label="Change language">English</button>
+</header>
+<main>
+  <div class="intro"><h1 id="page-title">إتمام الدفع بأمان</h1><p id="page-subtitle">تفاصيل الاتفاق والمبلغ المطلوب سداده</p></div>
+  <div class="layout">
+    <section class="panel" aria-labelledby="summary-heading">
+      <div class="head">
+        <small id="amount-label">المبلغ المطلوب</small>
+        <div class="price" id="amount">—</div>
+      </div>
+      <div class="details">
+        <h2 id="summary-heading">ملخص الدفع</h2>
+        <div class="kv"><span id="client-label">العميل</span><strong id="client">—</strong></div>
+        <div class="kv"><span id="service-label">الخدمة</span><strong id="service">—</strong></div>
+        <div class="kv"><span id="order-label">رقم الطلب</span><strong id="order" class="order">—</strong></div>
+        <div class="trust"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span id="safety">لا تشارك بيانات بطاقتك مع أي شخص. تتم معالجة بيانات الدفع بواسطة نظام دفع آمن.</span></div>
+      </div>
+    </section>
+    <section class="panel pay-panel" aria-labelledby="method-heading">
+      <h2 class="pay-head" id="method-heading">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20"/></svg>
+        <span id="method-title">الدفع الإلكتروني</span>
+      </h2>
+      <p id="status" role="status" aria-live="polite">جارٍ تحميل بيانات الدفع…</p>
+      <div id="checkout-host" hidden></div>
+      <p id="pay-hint" class="hint">سيظهر نموذج الدفع الآمن هنا. تُحدَّث حالة الطلب بعد تأكيد العملية.</p>
+    </section>
+  </div>
+  <footer>© Tiqnora AI — <span id="footer-message">جميع الحقوق محفوظة</span></footer>
+</main>
+<script>
+(() => {
+  'use strict';
+  const el = id => document.getElementById(id);
+  const dictionary = {
+    ar: {
+      title:'إتمام الدفع بأمان',subtitle:'تفاصيل الاتفاق والمبلغ المطلوب سداده',amount:'المبلغ المطلوب',summary:'ملخص الدفع',
+      client:'العميل',service:'الخدمة',order:'رقم الطلب',safety:'لا تشارك بيانات بطاقتك مع أي شخص. تتم معالجة بيانات الدفع بواسطة نظام دفع آمن.',
+      method:'الدفع الإلكتروني',loading:'جارٍ تحميل بيانات الدفع…',hint:'سيظهر نموذج الدفع الآمن هنا. تُحدَّث حالة الطلب بعد تأكيد العملية.',
+      missing:'رابط الدفع غير صالح أو انتهت صلاحيته.',error:'تعذر تحميل تفاصيل الدفع. يرجى التواصل مع تيكنورا وإعادة المحاولة.',
+      paid:'تم استلام دفعتك بنجاح. شكرًا لك!',closed:'هذا الطلب غير متاح للدفع حاليًا.',
+      sandbox:'هذه صفحة اختبار وليست مخصصة لتحصيل مدفوعات فعلية.',
+      providerError:'تعذر تحميل نموذج الدفع حاليًا. يرجى المحاولة لاحقًا.',footer:'جميع الحقوق محفوظة'
+    },
+    en: {
+      title:'Secure checkout',subtitle:'Your agreed payment amount and order details',amount:'Amount due',summary:'Payment summary',
+      client:'Customer',service:'Service',order:'Order number',safety:'Never share your card information. Your payment details are handled by a secure payment provider.',
+      method:'Online payment',loading:'Loading secure payment…',hint:'The secure payment form will appear here. Status is confirmed after payment processing.',
+      missing:'Invalid or expired payment link.',error:'Unable to load this payment. Please contact Tiqnora and try again.',
+      paid:'Payment confirmed. Thank you!',closed:'This order is not currently available for payment.',
+      sandbox:'Test mode — no real payment will be collected.',
+      providerError:'The payment form is temporarily unavailable. Please try again later.',footer:'All rights reserved'
+    }
+  };
+  let locale = new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : 'ar';
+  let invoice = null;
+  let errorKey = 'loading';
+  let embedMounted = false;
+  const token = new URLSearchParams(location.search).get('t') || '';
+
+  function translate(){
+    const t = dictionary[locale];
+    document.documentElement.lang=locale;
+    document.documentElement.dir=locale==='ar'?'rtl':'ltr';
+    el('language').textContent=locale==='ar'?'English':'العربية';
+    document.title=(locale==='ar'?'دفع آمن':'Secure payment')+' | Tiqnora AI';
+    for(const [id,key] of Object.entries({
+      'page-title':'title','page-subtitle':'subtitle','amount-label':'amount','summary-heading':'summary',
+      'client-label':'client','service-label':'service','order-label':'order','safety':'safety',
+      'method-title':'method','pay-hint':'hint','footer-message':'footer'
+    })) el(id).textContent=t[key];
+    el('status').textContent=t[errorKey]||'';
+    if(invoice)el('amount').textContent=new Intl.NumberFormat(locale==='ar'?'ar-SA':'en-US',{style:'currency',currency:'SAR'}).format(invoice.amount_sar);
+  }
+  function status(key,type){
+    errorKey=key;
+    el('status').className=type||'';
+    el('status').textContent=dictionary[locale][key]||'';
+  }
+
+  function installCheckout(){
+    if(!invoice || invoice.paid || invoice.cancelled || embedMounted)return;
+    const host=el('checkout-host');
+    const session=invoice.session_id;
+    const plan=invoice.plan_id;
+    if(!session&&!plan){status('error','error');return;}
+    const target=document.createElement('div');
+    target.className='whop-checkout-embed';
+    if(plan)target.setAttribute('data-whop-checkout-plan-id',plan);
+    if(session)target.setAttribute('data-whop-checkout-session',session);
+    target.setAttribute('data-whop-checkout-environment',invoice.environment==='production'?'production':'sandbox');
+    target.setAttribute('data-whop-checkout-theme','light');
+    target.setAttribute('data-whop-color-scheme','light');
+    target.setAttribute('data-whop-checkout-return-url','https://www.tiqnora.com/order-complete?order='+encodeURIComponent(invoice.order_number));
+    target.style.minHeight='270px';
+    target.style.width='100%';
+    host.appendChild(target);
+    host.hidden=false;
+    embedMounted=true;
+    status(invoice.environment==='production'?'':'sandbox',invoice.environment==='production'?'':'error');
+    if(invoice.environment==='production')el('status').hidden=true;
+    const js=document.createElement('script');
+    js.src='https://js.whop.com/static/checkout/loader.js';
+    js.async=true;
+    js.onload=()=>{try{if(window.Whop&&typeof window.Whop.loadCheckout==='function')window.Whop.loadCheckout();}catch{status('providerError','error');}};
+    js.onerror=()=>status('providerError','error');
+    document.head.appendChild(js);
+  }
+
+  async function load(){
+    if(!/^[a-f0-9]{48}$/.test(token)){status('missing','error');return;}
+    try{
+      const response=await fetch('/api/payments/manual-link-public?token='+encodeURIComponent(token),{cache:'no-store',referrerPolicy:'no-referrer'});
+      const data=await response.json();
+      if(!response.ok||!data.ok)throw new Error('payment_link_not_found');
+      invoice=data;
+      el('client').textContent=data.customer_name||'—';
+      el('service').textContent=data.description||'—';
+      el('order').textContent=data.order_number||'—';
+      translate();
+      if(data.paid){status('paid','good');el('pay-hint').hidden=true;return;}
+      if(data.cancelled){status('closed','error');el('pay-hint').hidden=true;return;}
+      installCheckout();
+    }catch{status('error','error');}
+  }
+  el('language').onclick=()=>{
+    locale=locale==='ar'?'en':'ar';
+    const next=new URL(location.href);
+    next.searchParams.set('lang',locale);
+    history.replaceState(null,'',next.pathname+next.search);
+    translate();
+  };
+  translate();
+  load();
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden || !invoice || invoice.paid)return;
+    fetch('/api/payments/manual-link-public?token='+encodeURIComponent(token),{cache:'no-store',referrerPolicy:'no-referrer'})
+      .then(r=>r.ok?r.json():null).then(v=>{
+        if(v&&v.paid){invoice.paid=true;el('checkout-host').hidden=true;status('paid','good');}
+      }).catch(()=>{});
+  });
+})();
+</script>
+</body>
+</html>
