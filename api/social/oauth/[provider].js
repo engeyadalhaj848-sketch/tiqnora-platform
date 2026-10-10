@@ -1111,6 +1111,8 @@ async function handleYCloudReply(req, res, { admin, body, event, organizationId,
       raw_payload: {
         adapter: 'tiqnora_outbound',
         provider: 'ycloud',
+        mode: deliveryAction ? 'approved_proposal' : 'manual_reply',
+        recipient_phone: to,
         status: apiResult.status || 'accepted',
         in_reply_to: event.id,
         action_id: deliveryAction?.id || null,
