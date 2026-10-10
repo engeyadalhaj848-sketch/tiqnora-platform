@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS public.payment_telegram_notifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL UNIQUE REFERENCES public.orders(id) ON DELETE CASCADE,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','sent')),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','sent','skipped')),
   attempts int NOT NULL DEFAULT 0,
   claimed_at timestamptz,
   sent_at timestamptz,
