@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../lib/v6/whatsapp-sales-manager.js';
+import { WHATSAPP_VOICE_ACK, WHATSAPP_PAUSE_ACK, isWhatsAppPause, isWhatsAppVoice, whatsappAdContext, isAdInformationRequest, shouldSkipPauseReplyForHistory, isAdequateWhatsAppReply } from '../lib/v6/whatsapp-context-policy.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../lib/v6/whatsapp-sales-coach.js';
 
 function turn(message, previous = {}, history = []) {
@@ -243,4 +245,94 @@ test('Quality gate rejects generic service-menu after the website has been chose
     { plan: { state: { service: 'website', service_label: 'موقع إلكتروني' } }, message: 'تصميم مواقع' });
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'ignored_known_service');
+});
+
+
+test('Click-to-WhatsApp Facebook website ad directly supplies website intent', () => {
+  const event = {
+    platform: 'whatsapp', event_type: 'message.received',
+    content: 'مرحبًا! هل يمكنني الحصول على مزيد من المعلومات حول هذا؟',
+    raw_payload: { adapter: 'ycloud', message: {
+      type: 'text', referral: {
+        source_type: 'ad', headline: 'Tiqnora AI',
+        body: '🚀 موقع إلكتروني احترافي يفتح لشركتك أبواب عملاء جدد! نصمّم لك موقعًا عصريًا وسريعًا ويعمل على الجوال وSEO.'
+      }
+    }}
+  };
+  const ad = whatsappAdContext(event);
+  assert.equal(ad.service, 'website');
+  assert.equal(isAdInformationRequest(event.content), true);
+  assert.match(ad.reply, /تصميم المواقع/);
+  assert.match(ad.reply, /نوع نشاطك/);
+  assert.doesNotMatch(ad.reply, /أي خدمة تحتاجها الآن/);
+  const plan = planWhatsAppSalesTurn({
+    message: event.content,
+    previous: { service: ad.service, service_label: ad.service_label, stage: 'qualifying' }
+  });
+  assert.equal(plan.active, true);
+  assert.equal(plan.state.service, 'website');
+});
+
+test('Unrelated referral or manual message must never fabricate a claimed ad intent', () => {
+  const event = { platform: 'whatsapp', event_type: 'message.received',
+    raw_payload: { message: { referral: { source_type: 'post', body: 'موقع إلكتروني' } } } };
+  assert.equal(whatsappAdContext(event), null);
+  assert.equal(whatsappAdContext({ ...event, raw_payload: { message: { referral: {
+    source_type: 'ad', body: 'مرحبا وتواصل معنا' } } } }), null);
+  assert.equal(whatsappAdContext({ platform: 'facebook', event_type: 'message.received',
+    raw_payload: { message: { referral: { source_type: 'ad', body: 'موقع إلكتروني' } } } }), null);
+});
+
+test('Ad matching does not repeat unsafe marketing price claims', () => {
+  const ad = whatsappAdContext({ platform: 'whatsapp', event_type: 'message.received',
+    raw_payload: { message: { referral: { source_type: 'ad',
+      body: 'موقع إلكتروني فقط 10 ريال! نضمن 100% نجاحك.' } } } });
+  assert.equal(ad.service, 'website');
+  assert.doesNotMatch(ad.reply, /10|100%|نضمن/);
+});
+
+test('Later or spelling-variant customer messages are treated as pause, not new sales leads', () => {
+  for (const message of ['بجربه بعديل', 'بعدين', 'بجربه بعدين', 'لاحقا', 'مو الحين', 'not now', 'خلها بعدين']) {
+    assert.equal(isWhatsAppPause(message), true, message);
+  }
+  for (const message of ['أبغى موقع', 'كم السعر؟', 'متى نبدأ؟']) {
+    assert.equal(isWhatsAppPause(message), false, message);
+  }
+  assert.match(WHATSAPP_PAUSE_ACK, /خذ راحتك/);
+});
+
+test('Repeated pause acknowledgment is suppressed if there was a prior acknowledgment', () => {
+  assert.equal(shouldSkipPauseReplyForHistory([{ role: 'assistant',
+    text: WHATSAPP_PAUSE_ACK }]), true);
+  assert.equal(shouldSkipPauseReplyForHistory([{ role: 'assistant',
+    text: 'سعيد بالتواصل معك' }]), false);
+  assert.equal(shouldSkipPauseReplyForHistory([
+    { role: 'assistant', text: WHATSAPP_PAUSE_ACK },
+    { role: 'assistant', text: 'تمام' }
+  ]), true);
+});
+
+test('A voice note is not a text transcript, and a safe acknowledgment is available', () => {
+  const event = { platform: 'whatsapp', event_type: 'message.received',
+    content: '[audio]', raw_payload: { adapter: 'ycloud', message: { type: 'audio' } } };
+  assert.equal(isWhatsAppVoice(event), true);
+  assert.match(WHATSAPP_VOICE_ACK, /لا أقدر أستمع/);
+  assert.match(WHATSAPP_VOICE_ACK, /اكتب لي طلبك/);
+  assert.equal(isWhatsAppVoice({ ...event, raw_payload: { adapter: 'ycloud', message: { type: 'text' } } }), false);
+});
+
+test('Reject broken fragments without sentence termination in WhatsApp replies', () => {
+  assert.equal(isAdequateWhatsAppReply('تجرّب أو تحتاج أي مساعدة إحنا'), false);
+  assert.equal(isAdequateWhatsAppReply('يمكن نساعدك ونرتب لك شرحًا مناسبًا لمشروعك. وش نشاطك؟'), true);
+});
+
+test('Production webhook wires ad context, pause coalescing and voice review', () => {
+  const source = readFileSync(new URL('../api/social/webhook.js', import.meta.url), 'utf8');
+  assert.match(source, /whatsappAdContext\(event\)/);
+  assert.match(source, /adInformationRequest/);
+  assert.match(source, /shouldCoalescePauseReply/);
+  assert.match(source, /WHATSAPP_VOICE_ACK/);
+  assert.match(source, /audio_requires_human_review/);
+  assert.match(source, /incompleteWhatsAppReply/);
+  assert.match(source, /voiceIncoming \? 'new' : 'processed'/);
 });
