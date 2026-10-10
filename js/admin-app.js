@@ -3836,7 +3836,7 @@ VIEWS['payment-links'] = async v => {
     '<div style="grid-column:1/-1"><label for="cpl-desc">وصف الخدمة أو الاتفاق *</label><textarea id="cpl-desc" name="description" rows="2" maxlength="500" required placeholder="مثال: دفعة مقدمة لتصميم موقع الشركة"></textarea></div>',
     '<div style="grid-column:1/-1"><button type="submit" id="cpl-create" class="btn-primary">إنشاء رابط الدفع</button><p id="cpl-feedback" class="card-desc" role="status"></p></div>',
     '</form></div>',
-    '<div class="card"><div class="card-head"><div><h2>روابط الدفع السابقة</h2><p class="card-desc">يتم تحديث حالة الدفع بعد إشعار Whop المؤكد؛ لا تعتبر تحويل العميل أو لقطة الشاشة إثباتًا للدفع.</p></div>',
+    '<div class="card"><div class="card-head"><div><h2>روابط الدفع السابقة</h2><p class="card-desc">يتم تحديث حالة الدفع بعد التأكيد الإلكتروني؛ لا تعتبر لقطة الشاشة إثباتًا للدفع.</p></div>',
     '<button type="button" class="btn-sm" id="cpl-refresh">تحديث الحالة</button></div><div id="cpl-list"><p class="card-desc">جارٍ تحميل الروابط…</p></div></div>'
   ].join('');
 

@@ -89,6 +89,22 @@
       ]
     },
     {
+      "source": "/pay",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/pay.html",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
       "source": "/checkout",
       "headers": [
         {
@@ -302,6 +318,10 @@
       "destination": "/api/billing/providers?route=manual_payment_links"
     },
     {
+      "source": "/api/payments/manual-link-public",
+      "destination": "/api/billing/providers?route=manual_payment_public"
+    },
+    {
       "source": "/api/payments/create-checkout",
       "destination": "/api/billing/providers?route=whop_create_checkout"
     },
@@ -320,6 +340,14 @@
     {
       "source": "/api/payments/whop/webhook",
       "destination": "/api/billing/providers?route=whop_webhook"
+    },
+    {
+      "source": "/pay",
+      "destination": "/pay.html"
+    },
+    {
+      "source": "/pay/",
+      "destination": "/pay.html"
     },
     {
       "source": "/order-complete",
