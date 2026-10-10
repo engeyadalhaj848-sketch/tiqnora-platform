@@ -2,6 +2,7 @@ import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
+import { whatsappHumanTakeoverActive } from '../../lib/v6/whatsapp-human-takeover.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
 import { WHATSAPP_VOICE_ACK, WHATSAPP_PAUSE_ACK, isWhatsAppVoice, isWhatsAppPause, whatsappAdContext, isAdInformationRequest, shouldSkipPauseReplyForHistory, isAdequateWhatsAppReply } from '../../lib/v6/whatsapp-context-policy.js';
 
@@ -1141,6 +1142,13 @@ async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
   const apiKey = process.env.YCLOUD_API_KEY;
   if (!apiKey) throw new Error('YCLOUD_API_KEY is missing');
 
+  // Second gate: the owner may have sent a manual message while the AI was
+  // generating its text. Check immediately before the external API call.
+  if (await whatsappHumanTakeoverActive({
+    rest, organizationId, connectionId: connection.id,
+    customerPhone: to, conversationId: storedEvent.conversation_id
+  })) return { sent: false, reason: 'human_takeover' };
+
   const payload = { from, to, type: 'text', text: { body: String(text || '').slice(0, 4096) } };
   // Send automatic replies as normal conversation messages. Adding a reply context here
   // makes WhatsApp quote the customer's previous message on every bot response.
@@ -1796,6 +1804,29 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   }
 
   if (rule.auto_reply && rule.reply_template) {
+    if (event.platform === 'whatsapp') {
+      // If an owner has responded in the phone app or inbox, the client
+      // belongs to the human for two hours after their most recent message.
+      // A failed guard lookup also blocks auto-send (safe failure).
+      let humanActive = true;
+      try {
+        humanActive = await whatsappHumanTakeoverActive({
+          rest, organizationId, connectionId: storedEvent.connection_id,
+          customerPhone: event.author_external_id,
+          conversationId: storedEvent.conversation_id
+        });
+      } catch (error) {
+        console.warn('WhatsApp human takeover lookup failed', {
+          event_id: storedEvent.id, message: String(error.message || error).slice(0, 180)
+        });
+      }
+      if (humanActive) {
+        await rest('social_events?id=eq.' + encodeURIComponent(storedEvent.id), {
+          method: 'PATCH', body: JSON.stringify({ processing_status: 'new' })
+        });
+        return { matched: true, intent: rule.intent || null, confidence, awaiting_human: true };
+      }
+    }
     const whatsappFollowUp = event.platform === 'whatsapp'
       && rule.intent === 'whatsapp_auto_reply'
       && await hasRecentWhatsappAutoReply(storedEvent, organizationId);
@@ -1894,6 +1925,12 @@ async function processEvent(event, storedEvent, organizationId, rules) {
           completed_at: new Date().toISOString()
         })
       });
+      if (!delivery.sent && delivery.reason === 'human_takeover') {
+        await rest('social_events?id=eq.' + encodeURIComponent(storedEvent.id), {
+          method: 'PATCH', body: JSON.stringify({ processing_status: 'new' })
+        });
+        return { matched: true, intent: rule.intent || null, confidence, awaiting_human: true };
+      }
       if (delivery.sent) {
         if (salesPlan?.active && !salesPlan.handoff) {
           await persistWhatsAppSalesPlan(
