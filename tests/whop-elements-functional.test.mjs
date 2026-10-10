@@ -77,7 +77,7 @@ test('existing live customer checkout mounts Elements using original configurati
   }]);
   assert.deepEqual(events.mount, [{ name: 'checkout', selector: '#checkout-host' }]);
   assert.equal(nodes.get('checkout-host').hidden, false);
-  assert.match(nodes.get('amount').textContent, /250/);
+  assert.equal(nodes.get('amount').textContent, new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(250));
   assert.equal(nodes.get('order').textContent, 'TQ-PAY-EXAMPLE-001');
 });
 
