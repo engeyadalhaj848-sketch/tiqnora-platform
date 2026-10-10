@@ -7,7 +7,7 @@ const premium = readFileSync(new URL('../services/services-premium.css', import.
 const webDesign = readFileSync(new URL('../services/web-design.html', import.meta.url), 'utf8');
 const sourceManifest = readFileSync(new URL('../docs/IMAGE-SOURCES.md', import.meta.url), 'utf8');
 
-test('home service cards display seven distinct subject-specific photos', () => {
+test('home service cards display six distinct subject-specific photos', () => {
   const cardImages = [...home.matchAll(/<div class="svc-vcard-visual"><img src="([^"]+)" alt="([^"]+)"/g)];
   assert.equal(cardImages.length, 6);
   const ids = cardImages.map(([,url]) => url.match(/photo-[\w-]+/)?.[0]);
@@ -36,7 +36,7 @@ test('web design sector photos match real industry digital technology and disclo
 
 test('every newly chosen photo has a documented source/license trail', () => {
   const required = [
-    'photo-1688733720228', 'photo-1776278806688', 'photo-1677691824654',
+    'photo-1758876204245', 'photo-1763926026024', 'photo-1776278806688', 'photo-1677691824654',
     'photo-1759932023688', 'photo-1680691257251', 'photo-1712159018726',
     'photo-1770013413878', 'photo-1770368787729', 'photo-1759215524649',
     'photo-1782898669223', 'photo-1778790569138', 'photo-1758691463165',
