@@ -3,6 +3,7 @@ import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEven
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
+import { WHATSAPP_VOICE_ACK, WHATSAPP_PAUSE_ACK, isWhatsAppVoice, isWhatsAppPause, whatsappAdContext, isAdInformationRequest, shouldSkipPauseReplyForHistory, isAdequateWhatsAppReply } from '../../lib/v6/whatsapp-context-policy.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -564,6 +565,7 @@ export function normalizeYCloud(payload) {
   if (!content && type === 'image') content = message.image?.caption || '[image]';
   if (!content && type === 'video') content = message.video?.caption || '[video]';
   if (!content && type === 'document') content = message.document?.filename || message.document?.caption || '[document]';
+  // Audio content is intentionally a marker, not a transcript. Never pretend to have listened.
   if (!content && type === 'audio') content = '[audio]';
   if (!content && type === 'location') content = message.location ? `[location ${message.location.latitude},${message.location.longitude}]` : '[location]';
   if (!content) content = `[${type}]`;
@@ -965,6 +967,31 @@ function whatsappContextFallback(event, rule, { followUp = false } = {}) {
   return SPECIALIST_HANDOFF_TEXT;
 }
 
+async function shouldCoalescePauseReply(event, storedEvent, organizationId) {
+  if (!isWhatsAppPause(event?.content) || !storedEvent?.conversation_id) return false;
+  // The customer may send "بجربه بعديل" and "بعدين" a few seconds apart.
+  // Let the latest inbound message win; don't send two closing messages.
+  const startedAt = Date.parse(event.occurred_at || '');
+  const wait = Number.isFinite(startedAt)
+    ? Math.max(0, Math.min(4500, 4500 - (Date.now() - startedAt)))
+    : 3000;
+  if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+  const conversationFilter = 'organization_id=eq.' + encodeURIComponent(organizationId)
+    + '&conversation_id=eq.' + encodeURIComponent(storedEvent.conversation_id);
+  const newer = await rest('social_events?' + conversationFilter
+    + '&platform=eq.whatsapp&event_type=eq.message.received'
+    + '&occurred_at=gt.' + encodeURIComponent(event.occurred_at)
+    + '&select=id&order=occurred_at.desc&limit=1');
+  if (newer?.length) return true;
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const outbound = await rest('messages?' + conversationFilter
+    + '&direction=eq.outbound&created_at=gte.' + encodeURIComponent(cutoff)
+    + '&select=body&order=created_at.desc&limit=5');
+  return shouldSkipPauseReplyForHistory((outbound || []).map(row => ({
+    role: 'assistant', text: row.body
+  })));
+}
+
 async function recentConversationHistory(storedEvent, organizationId, limit = 16) {
   if (!storedEvent?.conversation_id) return [];
   try {
@@ -1023,6 +1050,7 @@ async function generateAgentReply(event, rule, options = {}) {
     const text = String(result?.text || '').replace(/\s+/g, ' ').trim();
     const words = text.split(/\s+/).filter(Boolean);
     const tooShort = text.length < 18 || words.length < 4;
+    const incompleteWhatsAppReply = event.platform === 'whatsapp' && !isAdequateWhatsAppReply(text);
     const greetingOnly = /^(اهلا|أهلا|أهلاً|مرحبا|مرحباً|هلا|حياك)[!،,.\s]*$/i.test(text);
     const repeatedWelcome = followUp && /شكر[اأً]* لتواصلك.*كيف نقدر نخدمك/i.test(text);
     const arabicCustomer = /[\u0600-\u06FF]/.test(String(event.content || ''));
@@ -1031,7 +1059,7 @@ async function generateAgentReply(event, rule, options = {}) {
     const wrongLanguage = arabicCustomer && latinChars > Math.max(18, arabicChars * 0.7);
     const unjustifiedHandoff = /القسم المختص/.test(text) && !looksLikeBusinessWorkRequest(event.content);
 
-    if (wrongLanguage || unjustifiedHandoff) {
+    if (wrongLanguage || unjustifiedHandoff || incompleteWhatsAppReply) {
       try {
         const retryPrompt = [
           prompt,
@@ -1048,7 +1076,7 @@ async function generateAgentReply(event, rule, options = {}) {
         const retryLatin = (retryText.match(/[A-Za-z]/g) || []).length;
         const retryWrongLanguage = arabicCustomer && retryLatin > Math.max(18, retryArabic * 0.7);
         const retryBadHandoff = /القسم المختص/.test(retryText) && !looksLikeBusinessWorkRequest(event.content);
-        if (retryText.length >= 18 && !retryWrongLanguage && !retryBadHandoff) {
+        if (retryText.length >= 18 && !retryWrongLanguage && !retryBadHandoff && (event.platform !== 'whatsapp' || isAdequateWhatsAppReply(retryText))) {
           return retryText.slice(0, 700);
         }
       } catch (retryError) {
@@ -1056,14 +1084,15 @@ async function generateAgentReply(event, rule, options = {}) {
       }
     }
 
-    if (!text || tooShort || greetingOnly || repeatedWelcome || wrongLanguage || unjustifiedHandoff) {
+    if (!text || tooShort || greetingOnly || repeatedWelcome || wrongLanguage || unjustifiedHandoff || incompleteWhatsAppReply) {
       console.warn('Social AI reply unsuitable; using conversation recovery fallback', {
         provider: result?.provider || null,
         length: text.length,
         words: words.length,
         follow_up: followUp,
         wrong_language: wrongLanguage,
-        unjustified_handoff: unjustifiedHandoff
+        unjustified_handoff: unjustifiedHandoff,
+        incomplete_whatsapp_reply: incompleteWhatsAppReply
       });
       return conversationRecoveryFallback(event, history, fallback).slice(0, 700);
     }
@@ -1080,7 +1109,8 @@ async function sendYCloudAutoReply(event, storedEvent, organizationId, text) {
   }
 
   const rawMessage = event.raw_payload?.message || {};
-  if (String(rawMessage.type || 'text') !== 'text') {
+  const incomingType = String(rawMessage.type || 'text');
+  if (incomingType !== 'text' && !(incomingType === 'audio' && text === WHATSAPP_VOICE_ACK)) {
     return { sent: false, reason: 'non_text_message_requires_manual_review' };
   }
 
@@ -1778,17 +1808,44 @@ async function processEvent(event, storedEvent, organizationId, rules) {
         console.warn('Sales conversation lookup failed', { message: error.message });
         return null;
       }) : null;
+    const previousSales = salesConversation?.metadata?.sales_manager || {};
+    const adContext = whatsappAdContext(event);
+    const adInformationRequest = Boolean(adContext && isAdInformationRequest(event.content));
+    // Referral describes the service the customer clicked. Don't discard it
+    // just because WhatsApp's first text is a generic "more information" question.
+    const seededSales = adInformationRequest && !previousSales.service && !previousSales.stage
+      ? { ...previousSales, service: adContext.service, service_label: adContext.service_label, stage: 'qualifying' }
+      : previousSales;
     let salesPlan = salesConversation
       ? planWhatsAppSalesTurn({
         message: event.content,
         history,
-        previous: salesConversation.metadata?.sales_manager || {},
+        previous: seededSales,
         lead: {}
       })
       : null;
+    if (adInformationRequest && (!previousSales.service && !previousSales.stage)
+        && salesPlan?.active && !salesPlan.handoff) {
+      // The exact one-question ad reply asks for company type, not project goal.
+      salesPlan = {
+        ...salesPlan, deterministic: true, reply: adContext.reply,
+        state: { ...salesPlan.state, step: 'company', stage: 'qualifying' }
+      };
+    }
     if (salesPlan?.suppress) {
       // Human owns this conversation after a handoff. Never interrupt them with an automatic reply.
       return { matched: true, intent: rule.intent || null, confidence, awaiting_human: true };
+    }
+    // Coalesce successive "later" messages; one friendly acknowledgment is enough.
+    const paused = event.platform === 'whatsapp' && isWhatsAppPause(event.content);
+    if (paused) {
+      const suppressPause = await shouldCoalescePauseReply(event, storedEvent, organizationId);
+      if (suppressPause) {
+        await rest('social_events?id=eq.' + encodeURIComponent(storedEvent.id), {
+          method: 'PATCH', body: JSON.stringify({ processing_status: 'processed' })
+        });
+        return { matched: true, intent: rule.intent || null, confidence, deferred_followup: true };
+      }
     }
 
     const reserved = await createActionOnce({
@@ -1801,8 +1858,14 @@ async function processEvent(event, storedEvent, organizationId, rules) {
     });
     if (!reserved) return { matched: true, intent: rule.intent || null, confidence, auto_reply_duplicate: true };
 
+    const voiceIncoming = isWhatsAppVoice(event);
     let text;
-    if (salesPlan?.handoff) {
+    if (voiceIncoming) {
+      // Never pass "[audio]" to a text LLM as though it were a transcript.
+      text = WHATSAPP_VOICE_ACK;
+    } else if (paused) {
+      text = WHATSAPP_PAUSE_ACK;
+    } else if (salesPlan?.handoff) {
       try {
         const saved = await persistWhatsAppSalesPlan(
           salesPlan, salesConversation, storedEvent, organizationId, rule.id
@@ -1838,6 +1901,21 @@ async function processEvent(event, storedEvent, organizationId, rules) {
             console.warn('Sales qualification state write failed', { message: error.message });
           });
         }
+        if (voiceIncoming) {
+          await createActionOnce({
+            organizationId,
+            eventId: storedEvent.id,
+            ruleId: rule.id,
+            actionType: 'specialist_handoff',
+            status: 'pending',
+            result: {
+              platform: 'whatsapp',
+              conversation_id: storedEvent.conversation_id || null,
+              reason: 'audio_requires_human_review',
+              text: 'Voice message has no verified transcript'
+            }
+          });
+        }
         if (specialistHandoff) {
           await createActionOnce({
             organizationId,
@@ -1855,7 +1933,7 @@ async function processEvent(event, storedEvent, organizationId, rules) {
         }
         await rest(`social_events?id=eq.${encodeURIComponent(storedEvent.id)}`, {
           method: 'PATCH',
-          body: JSON.stringify({ processing_status: specialistHandoff ? 'new' : 'processed' })
+          body: JSON.stringify({ processing_status: specialistHandoff || voiceIncoming ? 'new' : 'processed' })
         });
       }
     } catch (error) {
