@@ -20,6 +20,7 @@ const cases = [
 ];
 
 test('every Registry workforce agent resolves specialist skills and conservative MCP scopes', () => {
+  assert.equal(new Set(cases.map(c => c[3])).size, 13, 'Each acceptance scenario must use a distinct industry');
   assert.deepEqual(Object.keys(AGENT_REGISTRY).sort(), cases.map(c => c[0]).sort());
   for (const [slug, specialty, tool] of cases) {
     const skills = getSkillsForAgent(slug).map(s => s.id);
@@ -27,7 +28,7 @@ test('every Registry workforce agent resolves specialist skills and conservative
     assert.ok(skills.includes(specialty), slug + ' missing specialty');
     assert.ok(tools.includes(tool), slug + ' missing tool');
     assert.ok(skills.includes('grounded_research'), slug + ' missing grounding');
-    assert.equal(tools.some(t => /\\.(send|publish|purchase|delete)$/.test(t)), false, slug + ' has unsafe side-effect scope');
+    assert.equal(tools.some(t => /\.(send|publish|purchase|delete)$/.test(t)), false, slug + ' has unsafe side-effect scope');
     const card = buildAgentCard({ slug });
     assert.deepEqual(card.skills, skills);
     assert.equal(card.external_actions_require_approval, true);
