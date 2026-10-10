@@ -185,6 +185,7 @@ const NAV = [
   { group: 'المبيعات والعملاء' },
   { id: 'sales-v6', ic: '⌁', label: 'مركز المبيعات V6' },
   { id: 'orders', ic: '▤', label: 'الطلبات' },
+  { id: 'payment-links', ic: '↗', label: 'روابط الدفع للعملاء' },
   { id: 'leads', ic: '✉', label: 'استفسارات العملاء' },
   { id: 'customers', ic: '◉', label: 'العملاء' },
   { id: 'service-requests', ic: '✉', label: 'طلبات الخدمات' },
@@ -3818,6 +3819,145 @@ VIEWS.orders = async v => {
       toast('تم تحديث الطلب'); closeModal(); VIEWS.orders(v);
     };
   });
+};
+
+
+/* ---------- Custom one-time payment links (admin only) ---------- */
+VIEWS['payment-links'] = async v => {
+  v.innerHTML = [
+    '<div class="card">',
+    '<div class="card-head"><div><h2>إنشاء رابط دفع خاص بالعميل</h2>',
+    '<p class="card-desc">أدخل المبلغ المتفق عليه والخدمة. لن يُنشأ رابط إلا من حساب المدير، وكل رابط مخصص لدفعة واحدة.</p></div></div>',
+    '<form id="custom-pay-form" class="form-grid" autocomplete="off">',
+    '<div><label for="cpl-name">اسم العميل *</label><input id="cpl-name" name="customer_name" maxlength="120" required placeholder="اسم العميل أو الشركة"></div>',
+    '<div><label for="cpl-phone">رقم واتساب العميل (مع رمز الدولة) *</label><input id="cpl-phone" name="customer_phone" type="tel" required dir="ltr" placeholder="9665xxxxxxxx"></div>',
+    '<div><label for="cpl-amount">المبلغ المتفق عليه بالريال السعودي *</label><input id="cpl-amount" name="amount_sar" type="number" min="5" max="1000000" step="0.01" required placeholder="1500.00"></div>',
+    '<div><label for="cpl-email">بريد العميل (اختياري)</label><input id="cpl-email" name="customer_email" type="email" maxlength="160" dir="ltr" placeholder="client@example.com"></div>',
+    '<div style="grid-column:1/-1"><label for="cpl-desc">وصف الخدمة أو الاتفاق *</label><textarea id="cpl-desc" name="description" rows="2" maxlength="500" required placeholder="مثال: دفعة مقدمة لتصميم موقع الشركة"></textarea></div>',
+    '<div style="grid-column:1/-1"><button type="submit" id="cpl-create" class="btn-primary">إنشاء رابط الدفع</button><p id="cpl-feedback" class="card-desc" role="status"></p></div>',
+    '</form></div>',
+    '<div class="card"><div class="card-head"><div><h2>روابط الدفع السابقة</h2><p class="card-desc">يتم تحديث حالة الدفع بعد إشعار Whop المؤكد؛ لا تعتبر تحويل العميل أو لقطة الشاشة إثباتًا للدفع.</p></div>',
+    '<button type="button" class="btn-sm" id="cpl-refresh">تحديث الحالة</button></div><div id="cpl-list"><p class="card-desc">جارٍ تحميل الروابط…</p></div></div>'
+  ].join('');
+
+  const form = v.querySelector('#custom-pay-form');
+  const feedback = v.querySelector('#cpl-feedback');
+  const createButton = v.querySelector('#cpl-create');
+  const listBox = v.querySelector('#cpl-list');
+  let links = [];
+
+  async function adminRequest(method, body) {
+    const result = await db.auth.getSession();
+    const token = result?.data?.session?.access_token;
+    if (!token) throw new Error('انتهت جلسة المدير. سجّل الدخول مجددًا.');
+    const response = await fetch('/api/payments/manual-links', {
+      method,
+      headers: {
+        Authorization: 'Bearer ' + token,
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.message || data.error || 'تعذر الاتصال ببوابة الدفع');
+    return data;
+  }
+
+  function messageFor(row) {
+    return 'مرحبًا ' + row.customer_name + '،\n\n' +
+      'شكرًا لتعاملكم مع Tiqnora AI.\n' +
+      'تفاصيل الاتفاق: ' + row.description + '\n' +
+      'المبلغ المتفق عليه: ' + Number(row.amount_sar).toFixed(2) + ' ر.س\n' +
+      (row.charge_currency && row.charge_currency.toLowerCase() !== 'sar'
+        ? 'تنبيه: بوابة الدفع ستعرض المبلغ بعملة ' + row.charge_currency.toUpperCase() + ' وفق تحويل البوابة.\n' : '') +
+      'رابط الدفع الآمن:\n' + row.purchase_url + '\n\n' +
+      'بعد إتمام الدفع سيتم التحقق منه تلقائيًا. رقم الطلب: ' + row.order_number;
+  }
+
+  function renderLinks() {
+    if (!links.length) {
+      listBox.innerHTML = '<p class="card-desc">لا توجد روابط دفع مسجلة بعد.</p>';
+      return;
+    }
+    listBox.innerHTML = tbl(
+      ['العميل / رقم الطلب', 'الخدمة', 'المبلغ', 'حالة الدفع', 'إجراءات'],
+      links.map((r, idx) => {
+        const live = r.environment === 'production';
+        const paid = r.payment_status === 'paid';
+        const canShare = live && !paid && !!r.purchase_url;
+        const statusLabel = paid ? 'مدفوع ✓' : r.payment_status === 'failed' ? 'فشل الدفع' : 'بانتظار الدفع';
+        return '<tr><td><b>' + esc(r.customer_name) + '</b><br><small dir="ltr">' + esc(r.order_number) + '</small></td>' +
+          '<td>' + esc(r.description || '—') + '</td><td>' + money(r.amount_sar) +
+          (r.charge_currency && r.charge_currency.toLowerCase() !== 'sar' ? '<br><small>' + esc(r.charge_amount) + ' ' + esc(r.charge_currency.toUpperCase()) + '</small>' : '') +
+          '</td><td><span class="pill ' + (paid ? 'ok' : 'warn') + '">' + statusLabel + '</span>' +
+          (!live ? '<br><small>اختبار — ممنوع الإرسال للعميل</small>' : '') +
+          '</td><td class="actions">' +
+          (canShare ? '<button type="button" class="btn-sm" data-cpl-copy="' + idx + '">نسخ الرابط</button>' +
+            '<button type="button" class="btn-sm btn-primary" data-cpl-wa="' + idx + '">إرسال عبر واتساب</button>' : '') +
+          (r.purchase_url ? '<button type="button" class="btn-sm" data-cpl-open="' + idx + '">عرض الرابط</button>' : '') +
+          '</td></tr>';
+      }).join('')
+    );
+    listBox.querySelectorAll('[data-cpl-copy]').forEach(el => {
+      el.onclick = async () => {
+        const row = links[Number(el.dataset.cplCopy)];
+        if (!row?.purchase_url || row.environment !== 'production' || row.payment_status === 'paid') return;
+        try { await navigator.clipboard.writeText(row.purchase_url); toast('تم نسخ رابط الدفع'); }
+        catch { toast('تعذر النسخ. افتح الرابط ثم انسخه يدويًا.'); }
+      };
+    });
+    listBox.querySelectorAll('[data-cpl-wa]').forEach(el => {
+      el.onclick = () => {
+        const row = links[Number(el.dataset.cplWa)];
+        if (!row?.purchase_url || row.environment !== 'production' || row.payment_status === 'paid') return;
+        let phone = String(row.customer_phone || '').replace(/\D/g, '');
+        if (phone.startsWith('00')) phone = phone.slice(2);
+        window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(messageFor(row)), '_blank', 'noopener,noreferrer');
+      };
+    });
+    listBox.querySelectorAll('[data-cpl-open]').forEach(el => {
+      el.onclick = () => {
+        const row = links[Number(el.dataset.cplOpen)];
+        if (row?.purchase_url) window.open(row.purchase_url, '_blank', 'noopener,noreferrer');
+      };
+    });
+  }
+
+  async function refresh() {
+    listBox.innerHTML = '<p class="card-desc">جارٍ تحديث روابط الدفع…</p>';
+    try {
+      const data = await adminRequest('GET');
+      links = Array.isArray(data.payment_links) ? data.payment_links : [];
+      renderLinks();
+    } catch (err) {
+      listBox.textContent = 'تعذر تحميل الروابط: ' + (err.message || err);
+    }
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    createButton.disabled = true;
+    feedback.textContent = 'جارٍ إنشاء رابط الدفع والتحقق من حفظه…';
+    const fields = new FormData(form);
+    const dataIn = Object.fromEntries(fields.entries());
+    try {
+      const result = await adminRequest('POST', dataIn);
+      if (result.environment !== 'production') {
+        feedback.textContent = 'تم إنشاء رابط في وضع الاختبار. لا ترسله للعميل قبل تفعيل وضع الإنتاج.';
+      } else {
+        feedback.textContent = 'تم إنشاء رابط الدفع وحفظه بنجاح — جاهز للنسخ والمشاركة.';
+      }
+      toast('تم تسجيل طلب الدفع ' + result.order_number);
+      form.reset();
+      await refresh();
+    } catch (err) {
+      feedback.textContent = 'تعذر إنشاء رابط الدفع: ' + (err.message || err);
+    } finally {
+      createButton.disabled = false;
+    }
+  });
+  v.querySelector('#cpl-refresh').onclick = refresh;
+  await refresh();
 };
 
 /* ---------- Leads ---------- */
