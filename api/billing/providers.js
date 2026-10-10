@@ -8,6 +8,7 @@
  * Public URLs are rewritten in vercel.json to this existing function
  * (project cannot deploy additional Serverless Function files).
  */
+import { randomBytes } from 'node:crypto';
 import {
   getConfig as getAeConfig,
   verifyOAuthState,
@@ -968,6 +969,48 @@ async function handleWhopCreateCheckout(req, res) {
  * Unlike storefront checkout, this path never trusts customer-entered product pricing.
  * It creates a one-use Whop checkout tied to an order for signed webhook reconciliation.
  */
+
+/**
+ * Public read for opaque, cryptographically random Tiqnora invoice links.
+ * Only returns non-sensitive display fields and embedded checkout identifiers.
+ * The provider's purchase_url and the buyer's contact information stay private.
+ */
+async function handlePublicPaymentLink(req, res, url) {
+  if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+  const token = String(url.searchParams.get('token') || '');
+  if (!/^[a-f0-9]{48}$/.test(token)) {
+    return json(res, 404, { ok: false, error: 'payment_link_not_found' });
+  }
+  const result = await sb(
+    'orders?select=order_number,customer_name,total,currency,payment_status,status,provider_checkout_id,provider_plan_id,payment_meta'
+    + '&payment_meta->>share_token=eq.' + token + '&limit=1'
+  );
+  const order = Array.isArray(result.data) ? result.data[0] : null;
+  if (result.error) return json(res, 503, { ok: false, error: 'payment_lookup_unavailable' });
+  if (!order || order.payment_meta?.source !== 'manual_payment_link') {
+    return json(res, 404, { ok: false, error: 'payment_link_not_found' });
+  }
+  const paid = order.payment_status === 'paid';
+  const cancelled = ['cancelled', 'refunded'].includes(order.status) || order.payment_status === 'refunded';
+  const output = {
+    ok: true,
+    order_number: order.order_number,
+    customer_name: order.customer_name,
+    description: order.payment_meta.description || '',
+    amount_sar: Number(order.total),
+    currency: 'SAR',
+    paid,
+    cancelled,
+    payment_status: order.payment_status,
+    environment: order.payment_meta.environment || 'sandbox',
+  };
+  if (!paid && !cancelled) {
+    output.session_id = order.provider_checkout_id || null;
+    output.plan_id = order.provider_plan_id || null;
+  }
+  return json(res, 200, output);
+}
+
 async function handleManualPaymentLinks(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return json(res, 405, { ok: false, error: 'method_not_allowed' });
@@ -980,7 +1023,20 @@ async function handleManualPaymentLinks(req, res) {
       'orders?select=id,order_number,customer_name,customer_phone,customer_email,total,currency,payment_status,status,payment_meta,notes,created_at&payment_meta->>source=eq.manual_payment_link&order=created_at.desc&limit=50'
     );
     if (result.error) return json(res, 503, { ok: false, error: 'payment_links_read_failed' });
-    const entries = (Array.isArray(result.data) ? result.data : []).map((row) => ({
+    // Give links created before the branded checkout launch a secure Tiqnora URL too.
+    const sourceRows = Array.isArray(result.data) ? result.data : [];
+    const entries = [];
+    for (const row of sourceRows) {
+      let shareToken = row.payment_meta?.share_token || null;
+      if (!shareToken && row.payment_meta?.purchase_url) {
+        shareToken = randomBytes(24).toString('hex');
+        const saved = await sb('orders?id=eq.' + encodeURIComponent(row.id), {
+          method: 'PATCH',
+          body: { payment_meta: { ...row.payment_meta, share_token: shareToken } },
+        });
+        if (saved.error) shareToken = null;
+      }
+      entries.push({
       id: row.id,
       order_number: row.order_number,
       customer_name: row.customer_name,
@@ -993,8 +1049,9 @@ async function handleManualPaymentLinks(req, res) {
       charge_amount: row.payment_meta?.whop_amount ?? null,
       charge_currency: row.payment_meta?.whop_currency ?? null,
       environment: row.payment_meta?.environment || null,
-      purchase_url: row.payment_meta?.purchase_url || null,
-    }));
+      purchase_url: shareToken ? 'https://www.tiqnora.com/pay?t=' + shareToken : null,
+    });
+    }
     return json(res, 200, { ok: true, payment_links: entries });
   }
 
@@ -1033,6 +1090,7 @@ async function handleManualPaymentLinks(req, res) {
     whop_amount: charge,
     whop_currency: chargeCurrency,
     amount_sar: money2(amountSar),
+    share_token: randomBytes(24).toString('hex'),
     auto_purchase: false,
   };
   const ins = await sb('orders', {
@@ -1121,7 +1179,7 @@ async function handleManualPaymentLinks(req, res) {
     charge_amount: checkout.amount,
     charge_currency: checkout.currency,
     environment: checkout.environment,
-    purchase_url: checkoutUrl,
+    purchase_url: 'https://www.tiqnora.com/pay?t=' + meta.share_token,
     payment_status: 'unpaid',
   });
 }
@@ -1409,6 +1467,7 @@ export default async function handler(req, res) {
     if (route === 'order_create') return handleOrderCreate(req, res);
     if (route === 'whop_create_checkout') return handleWhopCreateCheckout(req, res);
     if (route === 'manual_payment_links') return handleManualPaymentLinks(req, res);
+    if (route === 'manual_payment_public') return handlePublicPaymentLink(req, res, url);
     if (route === 'whop_order_status') return handleWhopOrderStatus(req, res, url);
     if (route === 'whop_webhook') return handleWhopWebhook(req, res, rawBody);
 
