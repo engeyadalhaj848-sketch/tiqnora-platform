@@ -18,7 +18,7 @@ test('home service cards display seven distinct subject-specific photos', () => 
 test('hero uses responsive srcset and loads eagerly, service cards lazy-load', () => {
   assert.match(home, /class="hero-photo"[^>]+fetchpriority="high"[^>]+srcset=/);
   assert.equal((home.match(/loading="lazy"/g) || []).length >= 6, true);
-  assert.match(home, /photo-1688733720228-4f7a18681c4f/);
+  assert.match(home, /photo-1758876204245-ee540a3af69f/);
 });
 
 test('service detail heroes use real digital workflow photos, not unrelated team photos', () => {
@@ -43,4 +43,15 @@ test('every newly chosen photo has a documented source/license trail', () => {
     'photo-1658297063569', 'photo-1758523671478'
   ];
   assert.ok(required.every(id => sourceManifest.includes(id)));
+});
+
+test('approved homepage hero/sector photos match their actual subject', () => {
+  assert.match(home, /photo-1758876204245-ee540a3af69f/);
+  assert.doesNotMatch(home, /photo-1688733720228-4f7a18681c4f/);
+  assert.match(home, /photo-1763926026024-2b294669e255/);
+  assert.match(home, /مواد البناء والحديد/);
+  assert.doesNotMatch(home, /العقارات والتوريد/);
+  assert.match(home, /assets\/home-storyboard\.css/);
+  assert.match(home, /assets\/tiqnora-logo\.png/);
+  assert.match(sourceManifest, /Unsplash License/);
 });
