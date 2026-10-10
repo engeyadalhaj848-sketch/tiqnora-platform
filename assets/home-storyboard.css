@@ -149,3 +149,21 @@ html{scroll-padding-top:86px}
  .tq-store-photo img{max-height:125px}
 }
 @media(prefers-reduced-motion:reduce){.tq-sector-card img,.tq-store-card,.tq-showcase-cta{transition:none!important}.tq-sector-card:hover img,.tq-store-card:hover,.tq-showcase-cta:hover{transform:none!important}}
+
+/* Final QA: the supplied 722x229 Tiqnora wordmark is a horizontal asset, not a square icon. */
+.site-header .brand img,.site-footer .brand img{display:block;width:145px;height:auto;max-height:48px;object-fit:contain;flex-shrink:0}
+.site-header .brand{min-width:145px}
+.site-header:not(.is-over-hero){background:rgba(5,12,33,.97)!important;border-color:rgba(255,255,255,.12);color:#f4f9ff}
+.site-header:not(.is-over-hero) .site-nav>a{color:#f4f9ff}
+.site-header:not(.is-over-hero) .cart-button,.site-header:not(.is-over-hero) .language-toggle{color:#f4f9ff;border-color:rgba(255,255,255,.3)}
+.site-header:not(.is-over-hero) .site-nav.open a{color:#101e39}
+.site-header:not(.is-over-hero) .menu-toggle{color:#f4f9ff}
+.site-footer .brand{display:inline-flex}
+@media(max-width:1120px){
+ .site-header .brand img{width:122px;height:auto;max-height:43px}
+ .site-header .brand{min-width:122px}
+}
+@media(max-width:390px){
+ .site-header .brand img{width:108px;max-height:37px}
+ .site-header .brand{min-width:108px}
+}
