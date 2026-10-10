@@ -962,6 +962,170 @@ async function handleWhopCreateCheckout(req, res) {
   });
 }
 
+
+/**
+ * Private admin payment links for negotiated service amounts.
+ * Unlike storefront checkout, this path never trusts customer-entered product pricing.
+ * It creates a one-use Whop checkout tied to an order for signed webhook reconciliation.
+ */
+async function handleManualPaymentLinks(req, res) {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return json(res, 405, { ok: false, error: 'method_not_allowed' });
+  }
+  const admin = await requireAdminUser(req);
+  if (!admin.ok) return json(res, admin.status, { ok: false, error: admin.error });
+
+  if (req.method === 'GET') {
+    const result = await sb(
+      'orders?select=id,order_number,customer_name,customer_phone,customer_email,total,currency,payment_status,status,payment_meta,notes,created_at&payment_meta->>source=eq.manual_payment_link&order=created_at.desc&limit=50'
+    );
+    if (result.error) return json(res, 503, { ok: false, error: 'payment_links_read_failed' });
+    const entries = (Array.isArray(result.data) ? result.data : []).map((row) => ({
+      id: row.id,
+      order_number: row.order_number,
+      customer_name: row.customer_name,
+      customer_phone: row.customer_phone,
+      description: row.payment_meta?.description || row.notes || '',
+      amount_sar: row.total,
+      payment_status: row.payment_status,
+      status: row.status,
+      created_at: row.created_at,
+      charge_amount: row.payment_meta?.whop_amount ?? null,
+      charge_currency: row.payment_meta?.whop_currency ?? null,
+      environment: row.payment_meta?.environment || null,
+      purchase_url: row.payment_meta?.purchase_url || null,
+    }));
+    return json(res, 200, { ok: true, payment_links: entries });
+  }
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const rawAmount = String(body.amount_sar ?? '').trim();
+  const amountSar = Number(rawAmount);
+  const customerName = String(body.customer_name || '').trim().slice(0, 120);
+  const phone = String(body.customer_phone || '').replace(/[\s()-]/g, '').trim();
+  const email = String(body.customer_email || '').trim().slice(0, 160);
+  const description = String(body.description || '').trim().slice(0, 500);
+
+  if (!/^\d+(?:\.\d{1,2})?$/.test(rawAmount) || !Number.isFinite(amountSar) || amountSar < 5 || amountSar > 1000000) {
+    return json(res, 400, { ok: false, error: 'invalid_amount_sar', message: 'المبلغ يجب أن يكون من 5 إلى 1,000,000 ريال، بحد أقصى خانتين عشريتين.' });
+  }
+  if (!customerName || !description || !/^\+?\d{8,15}$/.test(phone) || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return json(res, 400, { ok: false, error: 'invalid_client_details', message: 'أدخل اسم العميل ورقم جواله الدولي ووصف الخدمة، وتحقق من البريد إن أُدخل.' });
+  }
+
+  const cfg = getWhopConfig();
+  if (!cfg.configured || !cfg.productId || !cfg.webhookSecret) {
+    return json(res, 503, { ok: false, error: 'whop_not_ready', message: 'راجع إعدادات WHOP_API_KEY وWHOP_ACCOUNT_ID وWHOP_PRODUCT_ID وWHOP_WEBHOOK_SECRET في Vercel.' });
+  }
+  // Keep the agreed amount in Saudi riyals; do not silently convert the invoice to USD.
+  const chargeCurrency = 'sar';
+  const charge = money2(amountSar);
+  if (!Number.isFinite(charge) || charge < 1) {
+    return json(res, 400, { ok: false, error: 'whop_amount_below_minimum' });
+  }
+
+  const orderNumber = 'TQ-PAY-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+  const meta = {
+    source: 'manual_payment_link',
+    description,
+    created_by: admin.user.id,
+    environment: cfg.sandbox ? 'sandbox' : 'production',
+    whop_amount: charge,
+    whop_currency: chargeCurrency,
+    amount_sar: money2(amountSar),
+    auto_purchase: false,
+  };
+  const ins = await sb('orders', {
+    method: 'POST',
+    body: {
+      order_number: orderNumber,
+      customer_name: customerName,
+      customer_phone: phone,
+      customer_email: email || null,
+      subtotal: money2(amountSar),
+      total: money2(amountSar),
+      shipping_cost: 0,
+      discount_amount: 0,
+      currency: 'SAR',
+      status: 'pending',
+      payment_status: 'unpaid',
+      payment_method: 'credit_card',
+      payment_provider: 'whop',
+      items: [{ kind: 'service', title_ar: description, price: money2(amountSar), qty: 1 }],
+      notes: description,
+      payment_meta: meta,
+    },
+    prefer: 'return=representation',
+  });
+  const order = Array.isArray(ins.data) ? ins.data[0] : ins.data;
+  if (ins.error || !order?.id) {
+    console.error('[manual_payment_link] order_create_failed:', String(ins.error || 'missing_id').slice(0, 160));
+    return json(res, 503, { ok: false, error: 'order_create_failed', message: 'تعذر حفظ طلب الدفع.' });
+  }
+
+  let checkout;
+  try {
+    checkout = await createCheckoutConfiguration({
+      amount: charge,
+      currency: chargeCurrency,
+      orderId: order.id,
+      orderNumber,
+      title: 'Tiqnora ' + orderNumber.slice(-14),
+      description,
+      singleUse: true,
+    });
+  } catch (err) {
+    console.error('[manual_payment_link] whop_failure:', String(err?.message || err).slice(0, 160));
+    checkout = { ok: false, message: 'provider_unavailable' };
+  }
+  let checkoutUrl = null;
+  if (checkout?.ok && checkout.purchase_url) {
+    try {
+      const parsed = new URL(checkout.purchase_url);
+      if (parsed.protocol === 'https:' && (parsed.hostname === 'whop.com' || parsed.hostname.endsWith('.whop.com'))) {
+        checkoutUrl = parsed.toString();
+      }
+    } catch { /* reject unsafe provider URL */ }
+  }
+
+  if (!checkout?.ok || !checkoutUrl) {
+    const message = checkout?.ok ? 'لم يرجع Whop رابط دفع صالحًا.' : 'لم تنجح بوابة Whop في إنشاء رابط الدفع.';
+    console.error('[manual_payment_link] checkout_failed:', checkout?.code || checkout?.message || 'invalid_purchase_url');
+    await sb('orders?id=eq.' + encodeURIComponent(order.id), {
+      method: 'PATCH',
+      body: { payment_meta: { ...meta, link_error: checkout?.code || 'checkout_unavailable' } },
+    });
+    return json(res, 502, { ok: false, error: 'payment_link_creation_failed', message, order_number: orderNumber });
+  }
+
+  const updated = await sb('orders?id=eq.' + encodeURIComponent(order.id), {
+    method: 'PATCH',
+    body: {
+      provider_checkout_id: checkout.sessionId,
+      provider_plan_id: checkout.planId,
+      payment_meta: { ...meta, purchase_url: checkoutUrl },
+      updated_at: new Date().toISOString(),
+    },
+  });
+  if (updated.error) {
+    console.error('[manual_payment_link] checkout_persist_failed:', String(updated.error).slice(0, 160));
+    return json(res, 503, { ok: false, error: 'payment_link_save_failed', message: 'تم إنشاء رابط Whop ولكن لم يُحفظ. لا ترسل الرابط قبل التأكد من التسجيل.' });
+  }
+  return json(res, 201, {
+    ok: true,
+    order_number: orderNumber,
+    customer_name: customerName,
+    customer_phone: phone,
+    description,
+    amount_sar: money2(amountSar),
+    charge_amount: checkout.amount,
+    charge_currency: checkout.currency,
+    environment: checkout.environment,
+    purchase_url: checkoutUrl,
+    payment_status: 'unpaid',
+  });
+}
+
 async function handleWhopOrderStatus(req, res, url) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'Method not allowed' });
   const orderNumber = url.searchParams.get('order') || url.searchParams.get('order_number') || '';
@@ -1153,6 +1317,12 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
     if (expectedWhop != null && amount != null) {
       amountOk = Math.abs(expectedWhop - amount) <= 0.05 || Math.abs(Number(order.total) - amount) <= 0.05;
     }
+    if (order.payment_meta?.source === 'manual_payment_link') {
+      const expectedCurrency = String(order.payment_meta?.whop_currency || '').toLowerCase();
+      amountOk = expectedWhop != null && amount != null && Number.isFinite(amount)
+        && Math.abs(expectedWhop - amount) <= 0.05
+        && expectedCurrency === currency;
+    }
     if (!amountOk) {
       await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
         method: 'PATCH',
@@ -1238,6 +1408,7 @@ export default async function handler(req, res) {
     if (route === 'supplier_fulfillment_submit') return handleSupplierFulfillmentSubmit(req, res);
     if (route === 'order_create') return handleOrderCreate(req, res);
     if (route === 'whop_create_checkout') return handleWhopCreateCheckout(req, res);
+    if (route === 'manual_payment_links') return handleManualPaymentLinks(req, res);
     if (route === 'whop_order_status') return handleWhopOrderStatus(req, res, url);
     if (route === 'whop_webhook') return handleWhopWebhook(req, res, rawBody);
 
