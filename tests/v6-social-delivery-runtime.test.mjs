@@ -50,7 +50,7 @@ test('WhatsApp auto reply stays Arabic and avoids quoted-message UI', () => {
 test('WhatsApp support escalation stays queued for staff follow-up', () => {
   assert.equal(webhook.includes('SPECIALIST_HANDOFF_TEXT'), true);
   assert.equal(webhook.includes("actionType: 'specialist_handoff'"), true);
-  assert.equal(webhook.includes("processing_status: specialistHandoff ? 'new' : 'processed'"), true);
+  assert.equal(webhook.includes("processing_status: specialistHandoff || voiceIncoming ? 'new' : 'processed'"), true);
 });
 
 
