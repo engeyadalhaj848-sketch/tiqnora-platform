@@ -132,33 +132,53 @@
     el('status').textContent=dictionary[locale][key]||'';
   }
 
-  function installCheckout(){
+
+
+  // Official Whop Elements browser SDK; load only when a payment needs it.
+  let elementsLoader = null;
+  function ensureWhopElements() {
+    if (typeof window.WhopElements === 'function') return Promise.resolve(window.WhopElements);
+    if (!elementsLoader) {
+      elementsLoader = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.whop.com/elements/amber/elements.js';
+        script.setAttribute('data-whop-elements', '');
+        script.async = true;
+        script.onload = () => typeof window.WhopElements === 'function'
+          ? resolve(window.WhopElements)
+          : reject(new Error('Whop Elements unavailable'));
+        script.onerror = () => reject(new Error('Whop Elements failed to load'));
+        document.head.appendChild(script);
+      }).catch(error => { elementsLoader = null; throw error; });
+    }
+    return elementsLoader;
+  }
+
+  async function installCheckout(){
     if(!invoice || invoice.paid || invoice.cancelled || embedMounted)return;
     const host=el('checkout-host');
     const session=invoice.session_id;
     const plan=invoice.plan_id;
     if(!session&&!plan){status('error','error');return;}
-    const target=document.createElement('div');
-    target.className='whop-checkout-embed';
-    if(plan)target.setAttribute('data-whop-checkout-plan-id',plan);
-    if(session)target.setAttribute('data-whop-checkout-session',session);
-    target.setAttribute('data-whop-checkout-environment',invoice.environment==='production'?'production':'sandbox');
-    target.setAttribute('data-whop-checkout-theme','light');
-    target.setAttribute('data-whop-color-scheme','light');
-    target.setAttribute('data-whop-checkout-return-url','https://www.tiqnora.com/order-complete?order='+encodeURIComponent(invoice.order_number));
-    target.style.minHeight='270px';
-    target.style.width='100%';
-    host.appendChild(target);
-    host.hidden=false;
-    embedMounted=true;
-    status(invoice.environment==='production'?'':'sandbox',invoice.environment==='production'?'':'error');
-    if(invoice.environment==='production')el('status').hidden=true;
-    const js=document.createElement('script');
-    js.src='https://js.whop.com/static/checkout/loader.js';
-    js.async=true;
-    js.onload=()=>{try{if(window.Whop&&typeof window.Whop.loadCheckout==='function')window.Whop.loadCheckout();}catch{status('providerError','error');}};
-    js.onerror=()=>status('providerError','error');
-    document.head.appendChild(js);
+    // Checkout configuration already carries the negotiated amount, order metadata,
+    // and redirect. Reuse it; NEVER create a new payment or price in the browser.
+    const checkoutOptions=session ? {checkoutConfiguration:session} : {plan};
+    try {
+      const sdk=await ensureWhopElements();
+      if(!invoice || invoice.paid || invoice.cancelled || embedMounted)return;
+      host.replaceChildren();
+      const checkout=sdk({environment:invoice.environment==='sandbox'?'sandbox':'production'})
+        .checkout.create(checkoutOptions);
+      checkout.create('checkout').mount('#checkout-host');
+      host.hidden=false;
+      embedMounted=true;
+      status(invoice.environment==='production'?'':'sandbox',invoice.environment==='production'?'':'error');
+      if(invoice.environment==='production')el('status').hidden=true;
+    }catch{
+      embedMounted=false;
+      host.hidden=true;
+      status('providerError','error');
+    }
   }
 
   async function load(){
