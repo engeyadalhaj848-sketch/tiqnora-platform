@@ -1813,7 +1813,8 @@ async function processEvent(event, storedEvent, organizationId, rules) {
     const adInformationRequest = Boolean(adContext && isAdInformationRequest(event.content));
     // Referral describes the service the customer clicked. Don't discard it
     // just because WhatsApp's first text is a generic "more information" question.
-    const seededSales = adInformationRequest && !previousSales.service && !previousSales.stage
+    const canSeedAdService = !previousSales.service && !['awaiting_team', 'opted_out'].includes(previousSales.stage);
+    const seededSales = adInformationRequest && canSeedAdService
       ? { ...previousSales, service: adContext.service, service_label: adContext.service_label, stage: 'qualifying' }
       : previousSales;
     let salesPlan = salesConversation
@@ -1824,7 +1825,7 @@ async function processEvent(event, storedEvent, organizationId, rules) {
         lead: {}
       })
       : null;
-    if (adInformationRequest && (!previousSales.service && !previousSales.stage)
+    if (adInformationRequest && canSeedAdService
         && salesPlan?.active && !salesPlan.handoff) {
       // The exact one-question ad reply asks for company type, not project goal.
       salesPlan = {
