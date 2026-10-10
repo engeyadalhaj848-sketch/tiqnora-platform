@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { deliverPendingPaymentTelegramNotifications } from '../../lib/payments/telegram-receipts.js';
 import { ensureDailyWorkforceTasks, runAutonomousGrowth, runQueuedTasks } from '../../lib/autonomous-sales.js';
 import { processPublishingQueue } from '../../lib/v6/social-runtime.js';
 import { ensureDailySocialAutopilot } from '../../lib/v6/social-autopilot.js';
@@ -550,6 +551,13 @@ export default async function handler(req, res) {
   if (!isAuthorizedCron(req)) return json(res, 401, { error: 'Unauthorized' });
 
   try {
+    // Recover unsent receipts if Telegram had a temporary outage during payment.
+    // This executes only on authenticated existing cron calls, not public requests.
+    const pendingPayments = await deliverPendingPaymentTelegramNotifications({ limit: 5 })
+      .catch(error => ({ sent: 0, failed: 1, reason: String(error?.message || error).slice(0, 120) }));
+    if (pendingPayments.sent || pendingPayments.failed) {
+      console.info('[payment_telegram] cron receipt retry', JSON.stringify(pendingPayments));
+    }
     const schedule = String(req.headers['x-vercel-cron-schedule'] || '');
     let autopilot = { ok: true, enabled: false, created: false, reason: 'not_morning_schedule' };
     let outreach = { ok: true, enabled: false, sent: 0, failed: 0, skipped: {}, reason: 'not_morning_schedule' };

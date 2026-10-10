@@ -21,6 +21,7 @@ import {
   getShippingInfo as getAliExpressShippingInfo,
   placeApprovedOrder as placeAliExpressApprovedOrder,
 } from '../../lib/suppliers/aliexpress.js';
+import { deliverPendingPaymentTelegramNotifications } from '../../lib/payments/telegram-receipts.js';
 import {
   getWhopConfig,
   createCheckoutConfiguration,
@@ -1336,8 +1337,24 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
   const eventId = verified.eventId || event.id;
   const eventType = String(event.type);
   if (eventId) {
-    const existing = await sb(`payment_webhook_events?provider=eq.whop&event_id=eq.${encodeURIComponent(eventId)}&select=id&limit=1`);
-    if (Array.isArray(existing.data) && existing.data.length) return json(res, 200, { ok: true, duplicate: true });
+    const existing = await sb(`payment_webhook_events?provider=eq.whop&event_id=eq.${encodeURIComponent(eventId)}&select=id,order_id&limit=1`);
+    if (Array.isArray(existing.data) && existing.data.length) {
+      const previous = existing.data[0];
+      // If an earlier delivery failed before the order was marked paid,
+      // retry processing the signed success event. Otherwise drain the outbox.
+      const successEvent = eventType === 'payment.succeeded'
+        || (eventType === 'payment.created' && String(event.data?.status || '').toLowerCase() === 'succeeded');
+      let retryPaymentUpdate = false;
+      if (successEvent && previous.order_id) {
+        const prior = await sb(`orders?id=eq.${encodeURIComponent(previous.order_id)}&select=payment_status&limit=1`);
+        retryPaymentUpdate = Array.isArray(prior.data) && prior.data[0]?.payment_status !== 'paid';
+        if (!retryPaymentUpdate) {
+          await deliverPendingPaymentTelegramNotifications({ orderId: previous.order_id, limit: 1 })
+            .catch(error => console.error('[payment_telegram] duplicate flush failed', String(error?.message || error).slice(0, 140)));
+        }
+      }
+      if (!retryPaymentUpdate) return json(res, 200, { ok: true, duplicate: true });
+    }
   }
 
   const data = event.data || {};
@@ -1390,7 +1407,7 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
       return json(res, 200, { ok: true, review_required: true });
     }
     const paidAt = new Date().toISOString();
-    await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
+    const paidUpdate = await sb(`orders?id=eq.${encodeURIComponent(order.id)}`, {
       method: 'PATCH',
       body: {
         payment_status: 'paid', status: 'confirmed', provider_payment_id: paymentId,
@@ -1399,6 +1416,15 @@ async function handleWhopWebhook(req, res, rawBodyInput) {
       },
       prefer: 'return=minimal',
     });
+    if (paidUpdate.error) {
+      console.error('[whop_webhook] payment_update_failed', String(paidUpdate.error).slice(0, 130));
+      return json(res, 503, { ok: false, error: 'payment_confirmation_persist_failed' });
+    }
+
+    // Only verified, persisted payments trigger private Telegram receipts.
+    // If Telegram is unavailable, the DB outbox retains the pending job for retry.
+    await deliverPendingPaymentTelegramNotifications({ orderId: order.id, limit: 1 })
+      .catch(error => console.error('[payment_telegram] webhook notification deferred', String(error?.message || error).slice(0, 140)));
 
     // Queue fulfillment only after payment is verified. Supplier submission stays disabled.
     const paidOrder = {
