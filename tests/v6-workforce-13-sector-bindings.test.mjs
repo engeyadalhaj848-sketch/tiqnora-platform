@@ -57,3 +57,15 @@ test('Skills UI exposes registry aliases without removing legacy bindings', () =
   assert.ok(bindings.some(b => b.agent_slug === 'image-designer'));
   assert.ok(bindings.some(b => b.agent_slug === 'developer'));
 });
+
+
+test('cross-sector prompt uses real line breaks and blocks fabricated business/security evidence', () => {
+  const prompt = buildSkillsPrompt('manager_agent');
+  assert.ok(prompt.includes('approval-gated.'));
+  assert.ok(prompt.includes('\\nIdentify the actual industry'), 'cross-sector standards must be separated by actual newlines');
+  assert.equal(prompt.includes('\\\\nIdentify the actual industry'), false, 'literal backslash-n must not appear');
+  assert.match(prompt, /never claim CRM deals, revenue, conversion rates/);
+  assert.match(prompt, /security vulnerabilities or CVEs/);
+  assert.match(prompt, /original logo\/assets/);
+  assert.match(prompt, /#0A5CFF/);
+});
