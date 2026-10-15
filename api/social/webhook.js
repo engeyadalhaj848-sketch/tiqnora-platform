@@ -2,6 +2,7 @@ import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
+import { assessCommercialHandoff } from '../../lib/v6/whatsapp-deal-guard.js';
 import { whatsappHumanTakeoverActive } from '../../lib/v6/whatsapp-human-takeover.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
 import { WHATSAPP_VOICE_ACK, WHATSAPP_PAUSE_ACK, isWhatsAppVoice, isWhatsAppPause, whatsappAdContext, isAdInformationRequest, shouldSkipPauseReplyForHistory, isAdequateWhatsAppReply } from '../../lib/v6/whatsapp-context-policy.js';
@@ -993,7 +994,7 @@ async function shouldCoalescePauseReply(event, storedEvent, organizationId) {
   })));
 }
 
-async function recentConversationHistory(storedEvent, organizationId, limit = 16) {
+async function recentConversationHistory(storedEvent, organizationId, limit = 16, { strict = false } = {}) {
   if (!storedEvent?.conversation_id) return [];
   try {
     const rows = await rest(
@@ -1005,6 +1006,7 @@ async function recentConversationHistory(storedEvent, organizationId, limit = 16
     }));
   } catch (error) {
     console.warn('Failed to load WhatsApp conversation history', { message: error.message });
+    if (strict) throw error;
     return [];
   }
 }
@@ -1804,6 +1806,76 @@ async function processEvent(event, storedEvent, organizationId, rules) {
   }
 
   if (rule.auto_reply && rule.reply_template) {
+    let guardedHistory = null;
+    let guardedSalesConversation = null;
+    if (event.platform === 'whatsapp' && event.event_type === 'message.received') {
+      // Check commercial stage BEFORE the short-lived human takeover window.
+      // This must be fail-closed: an unavailable CRM is not permission to
+      // auto-requalify an existing client or send an unauthorized sales message.
+      try {
+        guardedHistory = await recentConversationHistory(storedEvent, organizationId, 20, { strict: true });
+        guardedSalesConversation = await loadWhatsAppSalesConversation(storedEvent, organizationId);
+        let lead = {};
+        if (guardedSalesConversation?.lead_id) {
+          const rows = await rest('leads?organization_id=eq.' + encodeURIComponent(organizationId)
+            + '&id=eq.' + encodeURIComponent(guardedSalesConversation.lead_id)
+            + '&select=id,pipeline_stage,custom_fields&limit=1');
+          lead = rows?.[0] || {};
+        }
+        const previous = guardedSalesConversation?.metadata?.sales_manager || {};
+        const guard = assessCommercialHandoff({
+          message: event.content, history: guardedHistory, salesState: previous, lead
+        });
+        if (guard.protect) {
+          if (!guard.existing && guardedSalesConversation?.id) {
+            // Preserve the existing facts, without treating chat as an accepted
+            // contract or overwriting prices approved by the business owner.
+            await rest('conversations?id=eq.' + encodeURIComponent(guardedSalesConversation.id)
+              + '&organization_id=eq.' + encodeURIComponent(organizationId), {
+              method: 'PATCH',
+              body: JSON.stringify({
+                metadata: {
+                  ...(guardedSalesConversation.metadata || {}),
+                  sales_manager: {
+                    ...previous, stage: 'awaiting_team',
+                    automation_paused: true,
+                    handoff_reason: guard.reason,
+                    handoff_at: new Date().toISOString()
+                  }
+                },
+                updated_at: new Date().toISOString()
+              })
+            });
+          }
+          if (!guard.existing) {
+            await createActionOnce({
+              organizationId, eventId: storedEvent.id, ruleId: rule.id,
+              actionType: 'commercial_handoff', status: 'pending',
+              result: {
+                conversation_id: storedEvent.conversation_id || null,
+                reason: guard.reason,
+                requires_human_review: true
+              }
+            });
+          }
+          await rest('social_events?id=eq.' + encodeURIComponent(storedEvent.id), {
+            method: 'PATCH',
+            body: JSON.stringify({ processing_status: 'new' })
+          });
+          return { matched: true, intent: rule.intent || null, confidence,
+            awaiting_human: true, reason: guard.reason };
+        }
+      } catch (error) {
+        console.warn('WhatsApp commercial-state guard failed closed', {
+          event_id: storedEvent.id, message: String(error?.message || error).slice(0, 180)
+        });
+        await rest('social_events?id=eq.' + encodeURIComponent(storedEvent.id), {
+          method: 'PATCH', body: JSON.stringify({ processing_status: 'new' })
+        }).catch(() => {});
+        return { matched: true, intent: rule.intent || null, confidence,
+          awaiting_human: true, reason: 'deal_context_unavailable' };
+      }
+    }
     if (event.platform === 'whatsapp') {
       // If an owner has responded in the phone app or inbox, the client
       // belongs to the human for two hours after their most recent message.
@@ -1831,11 +1903,11 @@ async function processEvent(event, storedEvent, organizationId, rules) {
       && rule.intent === 'whatsapp_auto_reply'
       && await hasRecentWhatsappAutoReply(storedEvent, organizationId);
     const history = event.platform === 'whatsapp'
-      ? await recentConversationHistory(storedEvent, organizationId)
+      ? (guardedHistory ?? await recentConversationHistory(storedEvent, organizationId))
       : [];
     const salesConversation = event.platform === 'whatsapp' && storedEvent.conversation_id
       && event.event_type === 'message.received' && rule.intent !== 'platform_link'
-      ? await loadWhatsAppSalesConversation(storedEvent, organizationId).catch(error => {
+      ? (guardedSalesConversation ?? await loadWhatsAppSalesConversation(storedEvent, organizationId)).catch(error => {
         console.warn('Sales conversation lookup failed', { message: error.message });
         return null;
       }) : null;
