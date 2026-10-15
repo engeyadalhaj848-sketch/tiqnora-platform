@@ -1907,10 +1907,10 @@ async function processEvent(event, storedEvent, organizationId, rules) {
       : [];
     const salesConversation = event.platform === 'whatsapp' && storedEvent.conversation_id
       && event.event_type === 'message.received' && rule.intent !== 'platform_link'
-      ? (guardedSalesConversation ?? await loadWhatsAppSalesConversation(storedEvent, organizationId)).catch(error => {
+      ? (guardedSalesConversation ?? await loadWhatsAppSalesConversation(storedEvent, organizationId).catch(error => {
         console.warn('Sales conversation lookup failed', { message: error.message });
         return null;
-      }) : null;
+      })) : null;
     const previousSales = salesConversation?.metadata?.sales_manager || {};
     const adContext = whatsappAdContext(event);
     const adInformationRequest = Boolean(adContext && isAdInformationRequest(event.content));
