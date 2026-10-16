@@ -1,4 +1,5 @@
 import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import { metaDirectMessageDecision } from '../../lib/v6/meta-direct-messages.js';
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
@@ -1280,9 +1281,11 @@ async function sendTikTokAutoReply(event, storedEvent, organizationId, text) {
 }
 
 async function sendMetaAutoReply(event, storedEvent, organizationId, text) {
-  if (!['instagram', 'facebook'].includes(event.platform) || event.event_type !== 'comment.created') {
+  const direct = event.event_type === 'message.received';
+  if (!['instagram', 'facebook'].includes(event.platform) || !['comment.created', 'message.received'].includes(event.event_type)) {
     return { sent: false, reason: 'unsupported_auto_reply_event' };
   }
+  if (direct && process.env.META_DM_AUTO_REPLY_ENABLED !== 'true') return {sent:false, reason:'meta_dm_auto_reply_disabled'};
 
   let rows = [];
   if (storedEvent.connection_id) {
@@ -1292,17 +1295,46 @@ async function sendMetaAutoReply(event, storedEvent, organizationId, text) {
     rows = await rest(`social_connections?organization_id=eq.${encodeURIComponent(organizationId)}&platform=eq.${encodeURIComponent(event.platform)}&external_account_id=eq.${encodeURIComponent(event.account_external_id)}&status=eq.active&select=*&limit=1`);
   }
   const connection = rows?.[0];
+  let directRequest;
+  if (direct) {
+    // A missing CRM thread must never turn into an unscoped history lookup.
+    if (!storedEvent.conversation_id) return {sent:false, reason:'missing_conversation'};
+    const history = await rest('social_events?organization_id=eq.' + encodeURIComponent(organizationId)
+      + '&connection_id=eq.' + encodeURIComponent(connection?.id || '')
+      + '&conversation_id=eq.' + encodeURIComponent(storedEvent.conversation_id)
+      + '&event_type=in.(message.received,message.sent)&select=event_type,content,occurred_at,received_at,raw_payload'
+      + '&order=received_at.desc&limit=100');
+    if (!Array.isArray(history)) throw new Error('Cannot verify Meta conversation history');
+    directRequest = metaDirectMessageDecision(event, connection, history);
+    if (directRequest.reason) return {sent:false, reason:directRequest.reason};
+    directRequest.payload.message.text = String(text || '').slice(0, 1000);
+  }
   const token = decryptVault(connection?.settings?.page_access_token_enc);
   if (!token) throw new Error('Page access token missing for automatic reply');
 
-  const result = event.platform === 'instagram'
+  const result = direct ? await metaGraphPost(directRequest.path, token, directRequest.payload) : event.platform === 'instagram'
     ? await metaGraphPost(`${event.external_event_id}/replies`, token, { message: text })
     : await metaGraphPost(`${event.external_event_id}/comments`, token, { message: text });
+
+  const replyId = String(result?.message_id || result?.id || '');
+  if (direct) {
+    if (!replyId) throw new Error('Meta accepted reply without message ID; do not resend');
+    await rest('social_events?on_conflict=platform,external_event_id', {
+      method:'POST', headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},
+      body:JSON.stringify({organization_id:organizationId, connection_id:connection.id,
+        platform:event.platform, event_type:'message.sent', external_event_id:replyId,
+        external_parent_id:event.external_event_id, author_external_id:connection.external_account_id,
+        author_name:'Tiqnora', content:directRequest.payload.message.text, occurred_at:new Date().toISOString(),
+        processing_status:'processed', conversation_id:storedEvent.conversation_id,
+        lead_id:storedEvent.lead_id || null, contact_id:storedEvent.contact_id || null,
+        raw_payload:{adapter:'tiqnora_outbound',provider:'meta',mode:'auto_reply',in_reply_to:storedEvent.id}})
+    });
+  }
 
   return {
     sent: true,
     connection_id: connection?.id || null,
-    external_reply_id: String(result?.id || '')
+    external_reply_id: replyId
   };
 }
 
