@@ -203,6 +203,29 @@ function normalizedPhone(value) {
   return /^[1-9]\d{6,14}$/.test(digits) ? `+${digits}` : null;
 }
 
+// Respect private WhatsApp conversations marked in CRM before any event is
+// stored, enriched, assigned to an agent, or answered automatically.
+export function excludedWhatsAppPeer(event = {}) {
+  if (event.platform !== 'whatsapp') return null;
+  const author = String(event.author_external_id || '').trim();
+  if (author.toLowerCase() === 'tiqnora') {
+    return normalizedPhone(event.raw_payload?.message?.to);
+  }
+  return normalizedPhone(author);
+}
+
+export async function isExcludedWhatsAppEvent(event, organizationId, query = rest) {
+  const peer = excludedWhatsAppPeer(event);
+  if (!peer) return false;
+  const rows = await query(
+    `conversations?organization_id=eq.${encodeURIComponent(organizationId)}`
+    + '&platform=eq.whatsapp'
+    + `&external_thread_id=eq.${encodeURIComponent(`dm:${peer}`)}`
+    + '&select=metadata&limit=1'
+  );
+  return rows?.[0]?.metadata?.private_excluded === true;
+}
+
 function toIso(value) {
   if (!value) return new Date().toISOString();
   if (typeof value === 'number') return new Date(value < 1e12 ? value * 1000 : value).toISOString();
@@ -2166,6 +2189,11 @@ export default async function handler(req, res) {
 
     for (const event of normalized) {
       if (!event.platform || !event.external_event_id) continue;
+      // Fail closed if the exclusion lookup fails: never expose a private chat.
+      if (await isExcludedWhatsAppEvent(event, organizationId)) {
+        ignored += 1;
+        continue;
+      }
       const connectionId = platform === 'ycloud' ? await findYCloudConnectionId(organizationId, event)
         : isMetaWhatsApp ? await findMetaWhatsAppConnectionId(organizationId, event)
         : await ensureConnectionId(organizationId, event);
