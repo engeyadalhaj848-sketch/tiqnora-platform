@@ -205,7 +205,7 @@ function normalizedPhone(value) {
 
 // Respect private WhatsApp conversations marked in CRM before any event is
 // stored, enriched, assigned to an agent, or answered automatically.
-function excludedWhatsAppPeer(event = {}) {
+export function excludedWhatsAppPeer(event = {}) {
   if (event.platform !== 'whatsapp') return null;
   const author = String(event.author_external_id || '').trim();
   if (author.toLowerCase() === 'tiqnora') {
@@ -214,10 +214,10 @@ function excludedWhatsAppPeer(event = {}) {
   return normalizedPhone(author);
 }
 
-async function isExcludedWhatsAppEvent(event, organizationId) {
+export async function isExcludedWhatsAppEvent(event, organizationId, query = rest) {
   const peer = excludedWhatsAppPeer(event);
   if (!peer) return false;
-  const rows = await rest(
+  const rows = await query(
     `conversations?organization_id=eq.${encodeURIComponent(organizationId)}`
     + '&platform=eq.whatsapp'
     + `&external_thread_id=eq.${encodeURIComponent(`dm:${peer}`)}`
