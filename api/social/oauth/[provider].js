@@ -1,3 +1,4 @@
+import {validWorkspaceReply,workspaceReplyContext,visibleWorkspaceReplyEvent} from '../../../lib/workspace-reply-auth.js';
 import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import {
   listAccounts as listGbpAccounts,
@@ -234,7 +235,7 @@ function decrypt(ciphertext, iv, tag) {
   return Buffer.concat([d.update(Buffer.from(ciphertext, 'base64url')), d.final()]).toString();
 }
 
-async function authenticateAdmin(authHeader) {
+export async function authenticateAdmin(authHeader, { allowWorkspaceReply = false } = {}) {
   const match = String(authHeader || '').match(/^Bearer\s+(.+)$/i);
   const token = match?.[1] || '';
   if (!token) return { ok: false, status: 401, error: 'admin_auth_required' };
@@ -257,6 +258,11 @@ async function authenticateAdmin(authHeader) {
     const rows = await supa(`profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,is_active&limit=1`);
     const profile = Array.isArray(rows) ? rows[0] : null;
     if (!profile || profile.is_active === false || !['super_admin', 'admin'].includes(String(profile.role || ''))) {
+      if (allowWorkspaceReply && profile?.is_active !== false) {
+        const workspace = await workspaceReplyContext({ base, apikey, token });
+        if (workspace) return { ok: true, admin: { ...user, role: 'workspace_agent' }, workspace, delegated: { base, apikey, token } };
+      }
+
       return { ok: false, status: 403, error: 'admin_permission_required' };
     }
     return { ok: true, admin: { ...user, role: profile.role } };
@@ -1163,7 +1169,7 @@ async function handleSocialReply(req, res) {
   }
   if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
   try {
-    const authn = await authenticateAdmin(req.headers.authorization || req.headers.Authorization);
+    const authn = await authenticateAdmin(req.headers.authorization || req.headers.Authorization, { allowWorkspaceReply: true });
     if (!authn.ok) {
       return send(res, authn.status || 401, {
         error: authn.error === 'invalid_admin_session'
@@ -1177,6 +1183,8 @@ async function handleSocialReply(req, res) {
     const admin = authn.admin;
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    if (authn.workspace && !validWorkspaceReply(body)) return send(res, 403, { error: 'Only replies to an existing incoming event are permitted.', code: 'workspace_reply_scope' });
+
     const message = String(body.message || body.text || '').trim();
     const eventId = body.event_id || null;
     const platform = String(body.platform || '').toLowerCase();
@@ -1194,6 +1202,10 @@ async function handleSocialReply(req, res) {
       if (!event) return send(res, 404, { error: 'Event not found', code: 'event_not_found' });
     }
 
+
+    if (authn.workspace && (authn.workspace.organizationId !== organizationId || !event || !await visibleWorkspaceReplyEvent({ ...authn.delegated, eventId, organizationId }))) {
+      return send(res, 403, { error: 'Conversation access denied.', code: 'workspace_reply_scope' });
+    }
     const actionId = body.action_id ? String(body.action_id) : null;
     const deliveryAction = actionId ? await loadApprovedProposalAction(actionId, organizationId, event) : null;
     if (actionId && !deliveryAction) {
@@ -1742,4 +1754,5 @@ export default async function handler(req, res) {
     return res.redirect(`/admin.html#${targetHash}&oauth=${encodeURIComponent(provider)}&status=connected`);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
+
 
