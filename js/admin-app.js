@@ -4566,15 +4566,57 @@ VIEWS['service-requests'] = async v => {
 /* ---------- Users ---------- */
 
 VIEWS.users = async v => {
-  v.innerHTML = `<div class="card"><h2>المستخدمون والصلاحيات</h2><p class="card-desc">إدارة أدوار المستخدمين — المالك يملك كل الصلاحيات.</p><div id="tbl"></div></div>`;
-  const { data: rows } = await db.from('profiles').select('*').order('created_at', { ascending: false });
-  $('#tbl').innerHTML = tbl(['المستخدم', 'البريد', 'الدور', 'الحالة', 'التسجيل'], (rows || []).map(u =>
+  const owner = me.role === 'super_admin';
+  v.innerHTML = `<div class="card"><h2>المستخدمون والصلاحيات</h2><p class="card-desc">${owner ? 'إنشاء الحسابات وإدارة كلمات المرور والصلاحيات.' : 'عرض حسابات المستخدمين.'}</p>${owner ? '<button class="btn-primary" id="create-user">إنشاء مستخدم</button>' : ''}<p id="users-error" role="alert"></p><div id="tbl">جارٍ التحميل…</div></div>`;
+  const { data: rows, error } = await db.from('profiles').select('id,email,full_name,role,is_active,created_at').order('created_at', { ascending: false });
+  if (error) { $('#tbl').textContent = 'تعذر تحميل المستخدمين.'; return; }
+  $('#tbl').innerHTML = tbl(['المستخدم', 'البريد', 'الدور', 'الحالة', 'التسجيل', 'إجراءات'], (rows || []).map(u =>
     `<tr><td>${esc(u.full_name || '—')}</td><td dir="ltr">${esc(u.email)}</td>
-     <td><select data-role="${u.id}" ${u.id === me.id ? 'disabled' : ''}>${[['customer', 'عميل'], ['admin', 'أدمن'], ['super_admin', 'مالك']].map(([k, t]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+     <td><select data-role="${esc(u.id)}" ${!owner || u.id === me.id ? 'disabled' : ''}>${[['customer', 'عميل'], ['admin', 'أدمن'], ['super_admin', 'مالك']].map(([k, t]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
      <td><span class="pill ${u.is_active ? 'ok' : 'danger'}">${u.is_active ? 'نشط' : 'موقوف'}</span></td>
-     <td style="color:var(--muted)">${new Date(u.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join(''));
-  $$('[data-role]').forEach(s => s.onchange = async () => { await db.from('profiles').update({ role: s.value }).eq('id', s.dataset.role); log('user.role_change', 'profiles', s.dataset.role, { role: s.value }); toast('تم تحديث الدور'); });
+     <td>${new Date(u.created_at).toLocaleDateString('ar-SA')}</td>
+     <td>${owner && (u.role !== 'super_admin' || u.id === me.id) ? `<button class="btn-ghost btn-sm" data-password="${esc(u.id)}">تعديل كلمة المرور</button>` : '—'}</td></tr>`).join(''));
+  $$('[data-role]').forEach(s => s.onchange = async () => {
+    s.disabled = true;
+    const { error } = await db.from('profiles').update({ role: s.value }).eq('id', s.dataset.role);
+    if (error) toast('تعذر تحديث الدور', false);
+    else { log('user.role_change', 'profiles', s.dataset.role, { role: s.value }); toast('تم تحديث الدور'); }
+    VIEWS.users(v);
+  });
+  const showForm = (target = null) => {
+    const creating = !target;
+    openModal(`<h2>${creating ? 'إنشاء مستخدم' : 'تعديل كلمة المرور'}</h2><p>${creating ? 'سيحتاج المستخدم تأكيد بريده قبل تسجيل الدخول.' : esc(target.email)}</p>
+      <form id="user-account-form">
+        ${creating ? '<label for="account-name">الاسم</label><input id="account-name" name="full_name" maxlength="120" required><label for="account-email">البريد الإلكتروني</label><input id="account-email" name="email" type="email" dir="ltr" autocomplete="off" required><label for="account-role">الدور</label><select id="account-role" name="role"><option value="customer">عميل</option><option value="admin">أدمن</option></select>' : ''}
+        <label for="account-password">كلمة المرور الجديدة</label><input id="account-password" name="password" type="password" dir="ltr" minlength="12" maxlength="128" autocomplete="new-password" required>
+        <label for="account-confirm">تأكيد كلمة المرور</label><input id="account-confirm" name="confirm" type="password" dir="ltr" minlength="12" maxlength="128" autocomplete="new-password" required>
+        <p class="hint">12 حرفًا على الأقل. لن تظهر كلمة المرور في قائمة المستخدمين.</p><p id="account-error" class="form-err" role="alert"></p>
+        <button type="submit" class="btn-primary">${creating ? 'إنشاء الحساب' : 'حفظ كلمة المرور'}</button><button type="button" id="account-cancel" class="btn-ghost">إلغاء</button>
+      </form>`);
+    $('#account-cancel').onclick = closeModal;
+    $('#user-account-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.currentTarget, fields = new FormData(form), msg = $('#account-error');
+      if (fields.get('password') !== fields.get('confirm')) { msg.textContent = 'كلمتا المرور غير متطابقتين.'; return; }
+      const button = form.querySelector('[type=submit]'); button.disabled = true; msg.textContent = '';
+      const payload = creating ? { email: fields.get('email'), full_name: fields.get('full_name'), role: fields.get('role'), password: fields.get('password') } : { id: target.id, password: fields.get('password') };
+      try {
+        const response = await commerceAi('/api/v6?route=user_management', { method: creating ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'تعذر حفظ الحساب.');
+        form.reset(); closeModal();
+        toast(creating ? 'تم إنشاء الحساب. يلزم تأكيد البريد قبل الدخول.' : 'تم تحديث كلمة المرور.');
+        await VIEWS.users(v);
+        if (creating && !result.confirmation_sent) $('#users-error').textContent = 'تم إنشاء الحساب، لكن تعذر إرسال تأكيد البريد. لا تكرر الإنشاء؛ أعد إرسال التأكيد من Supabase بعد زوال حد البريد.';
+        if (!result.audit_recorded) $('#users-error').textContent = 'نجحت العملية، لكن تعذر تسجيلها في سجل النشاط.';
+      } catch (err) { msg.textContent = err.message || 'تعذر الاتصال بالخادم.'; }
+      finally { payload.password = ''; button.disabled = false; }
+    };
+  };
+  if (owner) $('#create-user').onclick = () => showForm();
+  $$('[data-password]').forEach(b => b.onclick = () => showForm(rows.find(u => u.id === b.dataset.password)));
 };
+
 
 /* ---------- Logs ---------- */
 VIEWS.logs = async v => {

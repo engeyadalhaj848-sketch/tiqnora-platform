@@ -1,3 +1,4 @@
+import { manageUsers } from '../lib/user-management.js';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
 /**
@@ -2936,6 +2937,7 @@ export default async function handler(req, res) {
   if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
   try {
+    if (route === 'user_management') return json(res, req.method === 'POST' ? 201 : 200, await manageUsers({ method: req.method, body: req.body, auth, base: SUPABASE_URL, service: SERVICE }));
     if (route === 'draft_reply') return await handleDraftReply(req, res, auth);
     if (route === 'proposal') return await handleProposal(req, res, auth);
     if (route === 'proposal_delivery') return await handleProposalDelivery(req, res, auth);
