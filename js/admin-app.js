@@ -1010,6 +1010,18 @@ VIEWS['sales-v6'] = async v => {
               </div>
             </div>
 
+            ${row.status === "pending_approval" ? `
+              <div class="v6-history-detail-section">
+                <h4>تأكيد سعر العرض قبل اعتماده</h4>
+                <p class="card-desc">راجع المتطلبات وأدخل إجمالي السعر الذي قررته أنت. هذا الإجراء لا يرسل رسالة للعميل.</p>
+                <label>الإجمالي (${esc(pricing.currency || "SAR")})
+                  <input id="v6-history-price-total" type="number" min="0" step="0.01" value="${pricing.total ?? ""}" placeholder="السعر المعتمد">
+                </label>
+                <label><input id="v6-history-price-confirm" type="checkbox"> أؤكد أنني راجعت السعر والنطاق وأعتمد الرقم المدخل.</label>
+                <button type="button" class="btn-primary" id="v6-history-save-price">حفظ التسعير المعتمد</button>
+              </div>
+            ` : ""}
+
             <div class="v6-history-detail-section">
               <h4>الخط الزمني</h4>
               <div class="v6-history-timeline">
@@ -1022,6 +1034,34 @@ VIEWS['sales-v6'] = async v => {
           </div>
         `);
         $('#v6-history-close').onclick = closeModal;
+        const savePriceBtn = $('#v6-history-save-price');
+        if (savePriceBtn) savePriceBtn.onclick = async () => {
+          const input = $('#v6-history-price-total');
+          const raw = String(input?.value || '').trim();
+          const confirmed = $('#v6-history-price-confirm')?.checked === true;
+          const total = Number(raw);
+          if (!raw || !Number.isFinite(total) || total < 0 || !confirmed) {
+            toast('أدخل سعرًا صالحًا وحدد خانة التأكيد بعد المراجعة', false);
+            return;
+          }
+          savePriceBtn.disabled = true;
+          try {
+            await v6Api('proposal_manage', {
+              method: 'POST',
+              body: {
+                op: 'update', id: row.id,
+                edits: { pricing: { total, currency: pricing.currency || 'SAR', confirmed: true } }
+              }
+            });
+            toast('تم حفظ السعر المؤكد. يمكنك الآن اعتماد العرض من Telegram. لم يُرسل للعميل.');
+            closeModal();
+            await loadProposalHistory();
+          } catch (e) {
+            toast('تعذر اعتماد التسعير: ' + (e.message || e), false);
+          } finally {
+            savePriceBtn.disabled = false;
+          }
+        };
       };
     });
 
