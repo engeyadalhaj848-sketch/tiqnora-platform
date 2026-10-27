@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { applyProposalEdits } from '../lib/v6/proposal-service.js';
+import { validateProposalDeliveryAction } from '../lib/v6/proposal-delivery.js';
 import assert from 'node:assert/strict';
 import {
   buildQualifiedWhatsAppProposal,
@@ -180,4 +182,16 @@ test('workflow audit failure never loses an approved-only proposal action', asyn
   assert.equal(result.queued, true);
   assert.equal(result.workflow_run_id, null);
   assert.equal(store.writes.length, 1);
+});
+
+test('a typed price stays unconfirmed until the operator explicitly confirms it', () => {
+  const { proposal } = buildQualifiedWhatsAppProposal({ summary: qualified });
+  const unconfirmed = applyProposalEdits(proposal, { pricing: { total: 1200 } });
+  assert.equal(unconfirmed.pricing.status, 'partially_confirmed');
+  const confirmed = applyProposalEdits(proposal, { pricing: { total: 1200, confirmed: true } });
+  assert.equal(confirmed.pricing.status, 'confirmed_input');
+  assert.equal(confirmed.pricing.total, 1200);
+  const action = { action_type: 'proposal_review', status: 'approved', payload: { proposal: confirmed } };
+  assert.equal(validateProposalDeliveryAction(action).ready, true);
+  assert.equal(validateProposalDeliveryAction({ ...action, payload: { proposal: unconfirmed } }).ready, false);
 });
