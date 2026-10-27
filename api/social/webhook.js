@@ -2,7 +2,7 @@ import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
-import { queueQualifiedWhatsAppProposal } from '../../lib/v6/whatsapp-proposal-queue.js';
+import { queueQualifiedWhatsAppProposal, persistQualifiedProposalWorkflow } from '../../lib/v6/whatsapp-proposal-queue.js';
 import { assessCommercialHandoff } from '../../lib/v6/whatsapp-deal-guard.js';
 import { whatsappHumanTakeoverActive } from '../../lib/v6/whatsapp-human-takeover.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
@@ -1720,6 +1720,11 @@ async function persistWhatsAppSalesPlan(plan, conversation, storedEvent, organiz
           leadId,
           summary,
           lead: lead || {},
+          recordWorkflow: ({ actionId, eventId, leadId: sourceLeadId, organizationId: sourceOrg }) =>
+            persistQualifiedProposalWorkflow({
+              rest, organizationId: sourceOrg, eventId,
+              leadId: sourceLeadId, actionId
+            }),
           notify: async ({ text }) => {
             const { telegramTargetChatId, sendTelegramText } = await import('../../lib/telegram-command-center.js');
             const chatId = await telegramTargetChatId();
