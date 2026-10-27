@@ -1728,9 +1728,12 @@ async function persistWhatsAppSalesPlan(plan, conversation, storedEvent, organiz
             }),
           notify: async ({ text, action }) => {
             const { telegramTargetChatId, sendTelegramText } = await import('../../lib/telegram-command-center.js');
-            const chatId = await telegramTargetChatId();
+            const { socialApprovalTarget } = await import('../../lib/social-approval.js');
+            const owner = await socialApprovalTarget().catch(() => ({ configured: false }));
+            const chatId = owner.configured ? owner.chat_id : await telegramTargetChatId();
             if (!chatId) return false;
-            const keyboard = proposalReviewKeyboard(action.id);
+            // Never show approval buttons to a chat without a verified owner ID.
+            const keyboard = owner.configured ? proposalReviewKeyboard(action.id) : null;
             await sendTelegramText(chatId, text, keyboard ? { reply_markup: keyboard } : {});
             return true;
           }
