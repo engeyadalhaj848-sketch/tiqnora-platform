@@ -2,6 +2,8 @@ import { createHash, createHmac, createDecipheriv, timingSafeEqual } from 'node:
 import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEvent } from '../../lib/v6/social-crm-bridge.js';
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
+import { queueQualifiedWhatsAppProposal, persistQualifiedProposalWorkflow } from '../../lib/v6/whatsapp-proposal-queue.js';
+import { proposalReviewKeyboard } from '../../lib/v6/whatsapp-proposal-telegram.js';
 import { assessCommercialHandoff } from '../../lib/v6/whatsapp-deal-guard.js';
 import { whatsappHumanTakeoverActive } from '../../lib/v6/whatsapp-human-takeover.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
@@ -1706,7 +1708,49 @@ async function persistWhatsAppSalesPlan(plan, conversation, storedEvent, organiz
       method: 'PATCH',
       body: JSON.stringify(patch)
     });
-    await notifyQualifiedSalesTeam(summary, storedEvent, leadId);
+    // Opt-in only: create a reviewable CRM proposal for CONFIRMED inbound
+    // requirements, never for an unsolicited / human-requested handoff.
+    // The proposal is NOT approved, priced or sent to the customer.
+    let queuedReview = null;
+    if (qualified && process.env.AGENTIC_SALES_PROPOSAL_DRAFTS_ENABLED === 'true') {
+      try {
+        queuedReview = await queueQualifiedWhatsAppProposal({
+          rest, organizationId,
+          eventId: storedEvent.id,
+          conversationId: conversation.id,
+          leadId,
+          summary,
+          lead: lead || {},
+          recordWorkflow: ({ actionId, eventId, leadId: sourceLeadId, organizationId: sourceOrg }) =>
+            persistQualifiedProposalWorkflow({
+              rest, organizationId: sourceOrg, eventId,
+              leadId: sourceLeadId, actionId
+            }),
+          notify: async ({ text, action }) => {
+            const { telegramTargetChatId, sendTelegramText } = await import('../../lib/telegram-command-center.js');
+            const { socialApprovalTarget } = await import('../../lib/social-approval.js');
+            const owner = await socialApprovalTarget().catch(() => ({ configured: false }));
+            const chatId = owner.configured ? owner.chat_id : await telegramTargetChatId();
+            if (!chatId) return false;
+            // Never show approval buttons to a chat without a verified owner ID.
+            const keyboard = owner.configured ? proposalReviewKeyboard(action.id) : null;
+            await sendTelegramText(chatId, text, keyboard ? { reply_markup: keyboard } : {});
+            return true;
+          }
+        });
+      } catch (error) {
+        // CRM handoff is durable even if proposal generation/storage fails.
+        console.warn('Agentic WhatsApp proposal review queue failed', {
+          event_id: storedEvent.id,
+          message: String(error?.message || error).slice(0, 180)
+        });
+      }
+    }
+    // Preserve the existing owner notification as a fallback when the new
+    // review queue is disabled, incomplete or Telegram delivery fails.
+    if (!queuedReview?.notified) {
+      await notifyQualifiedSalesTeam(summary, storedEvent, leadId);
+    }
     return true;
   }
   await rest('conversations?id=eq.' + encodeURIComponent(conversation.id)
