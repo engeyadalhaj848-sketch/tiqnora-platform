@@ -3,6 +3,7 @@ import { persistSocialCrmEvent, persistDeliveryStatusEvent, isDeliveryStatusEven
 import { getTikTokBusinessAccess, tiktokBusinessGet, tiktokBusinessPost } from '../../lib/v6/tiktok-business.js';
 import { planWhatsAppSalesTurn, salesHandoffSummary } from '../../lib/v6/whatsapp-sales-manager.js';
 import { queueQualifiedWhatsAppProposal, persistQualifiedProposalWorkflow } from '../../lib/v6/whatsapp-proposal-queue.js';
+import { proposalReviewKeyboard } from '../../lib/v6/whatsapp-proposal-telegram.js';
 import { assessCommercialHandoff } from '../../lib/v6/whatsapp-deal-guard.js';
 import { whatsappHumanTakeoverActive } from '../../lib/v6/whatsapp-human-takeover.js';
 import { buildWhatsAppSalesCoachPrompt, assessWhatsAppSalesReply, whatsappSalesCoachFallback } from '../../lib/v6/whatsapp-sales-coach.js';
@@ -1725,11 +1726,12 @@ async function persistWhatsAppSalesPlan(plan, conversation, storedEvent, organiz
               rest, organizationId: sourceOrg, eventId,
               leadId: sourceLeadId, actionId
             }),
-          notify: async ({ text }) => {
+          notify: async ({ text, action }) => {
             const { telegramTargetChatId, sendTelegramText } = await import('../../lib/telegram-command-center.js');
             const chatId = await telegramTargetChatId();
             if (!chatId) return false;
-            await sendTelegramText(chatId, text);
+            const keyboard = proposalReviewKeyboard(action.id);
+            await sendTelegramText(chatId, text, keyboard ? { reply_markup: keyboard } : {});
             return true;
           }
         });
