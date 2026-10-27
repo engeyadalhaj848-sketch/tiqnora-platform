@@ -2,7 +2,7 @@ import test from 'node:test';
 import { applyProposalEdits } from '../lib/v6/proposal-service.js';
 import {
   proposalReviewKeyboard, parseProposalReviewCallback,
-  validateOwnerProposalDecision, handleWhatsAppProposalReviewCallback
+  validateOwnerProposalDecision, proposalPricingFingerprint, handleWhatsAppProposalReviewCallback
 } from '../lib/v6/whatsapp-proposal-telegram.js';
 import { validateProposalDeliveryAction } from '../lib/v6/proposal-delivery.js';
 import assert from 'node:assert/strict';
@@ -273,8 +273,16 @@ test('Only configured Telegram owner (chat AND user) can approve', async () => {
   assert.equal(fixture.updates.length, 0);
 });
 
-test('A confirmed, pending review can be approved exactly once by Telegram owner', async () => {
+test('Telegram owner sees exact confirmed pricing before second-click approval', async () => {
   const fixture = proposalCallbackFixture(proposedReview(true));
+  const first = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
+  assert.equal(first.ok, true);
+  assert.equal(first.stage, 'awaiting_price_confirmation');
+  assert.equal(fixture.updates.length, 0);
+  assert.match(fixture.ownerMessages[0], /1250/);
+  // Second click contains a fingerprint of the pricing snapshot.
+  const fingerprint = proposalPricingFingerprint(proposedReview(true));
+  fixture.query.data = 'proposal_yes:' + approvalActionId + ':' + fingerprint;
   const response = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
   assert.equal(response.ok, true);
   assert.equal(response.customer_sent, false);
@@ -283,6 +291,24 @@ test('A confirmed, pending review can be approved exactly once by Telegram owner
   assert.equal(fixture.updates[0].body.status, 'approved');
   assert.equal(fixture.updates[0].body.result.telegram_reviewed_by_owner_id, '123456');
   assert.match(fixture.updates[0].path, /status=eq.pending_approval/);
+});
+
+test('Telegram fingerprint refuses stale pricing after edit', async () => {
+  const oldAction = proposedReview(true);
+  const fixture = proposalCallbackFixture(oldAction);
+  const oldFingerprint = proposalPricingFingerprint(oldAction);
+  const edited = proposedReview(true);
+  edited.payload.proposal.pricing.total = 8500;
+  fixture.adapters.rest = async (path, options = {}) => {
+    if (path.startsWith('organizations?')) return [{ id: 'org-1' }];
+    if (path.startsWith('actions?') && !options.method) return [edited];
+    throw new Error('unexpected write');
+  };
+  fixture.query.data = 'proposal_yes:' + approvalActionId + ':' + oldFingerprint;
+  const result = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'price_changed_since_preview');
+  assert.equal(fixture.updates.length, 0);
 });
 
 test('Rejecting from owner cancels draft, never sends a message', async () => {
