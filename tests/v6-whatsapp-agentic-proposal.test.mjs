@@ -1,5 +1,9 @@
 import test from 'node:test';
 import { applyProposalEdits } from '../lib/v6/proposal-service.js';
+import {
+  proposalReviewKeyboard, parseProposalReviewCallback,
+  validateOwnerProposalDecision, handleWhatsAppProposalReviewCallback
+} from '../lib/v6/whatsapp-proposal-telegram.js';
 import { validateProposalDeliveryAction } from '../lib/v6/proposal-delivery.js';
 import assert from 'node:assert/strict';
 import {
@@ -194,4 +198,104 @@ test('a typed price stays unconfirmed until the operator explicitly confirms it'
   const action = { action_type: 'proposal_review', status: 'approved', payload: { proposal: confirmed } };
   assert.equal(validateProposalDeliveryAction(action).ready, true);
   assert.equal(validateProposalDeliveryAction({ ...action, payload: { proposal: unconfirmed } }).ready, false);
+});
+
+const approvalActionId = '00000000-0000-4000-8000-000000000123';
+
+function proposedReview(confirmed = false) {
+  const { proposal } = buildQualifiedWhatsAppProposal({ summary: qualified });
+  return {
+    id: approvalActionId,
+    organization_id: 'org-1',
+    action_type: 'proposal_review',
+    status: 'pending_approval',
+    payload: {
+      source: 'agentic_whatsapp_confirmed_handoff',
+      proposal: applyProposalEdits(proposal, { pricing: { total: 1250, confirmed } })
+    }
+  };
+}
+
+function proposalCallbackFixture(action) {
+  const updates = [];
+  const replies = [];
+  const ownerMessages = [];
+  const rest = async (path, opts = {}) => {
+    if (path.startsWith('organizations?')) return [{ id: 'org-1' }];
+    if (path.startsWith('actions?') && (!opts.method || opts.method === 'GET')) return [action];
+    if (path.startsWith('actions?') && opts.method === 'PATCH') {
+      updates.push({ path, body: JSON.parse(opts.body) });
+      return [{ ...action, ...JSON.parse(opts.body) }];
+    }
+    throw new Error('unexpected query ' + path);
+  };
+  const query = {
+    id: 'callback-1',
+    from: { id: 123456 },
+    message: { chat: { id: -123456 } },
+    data: 'proposal_ok:' + approvalActionId
+  };
+  const adapters = {
+    rest,
+    approvalTarget: async () => ({
+      configured: true, chat_id: '-123456', owner_telegram_user_id: '123456'
+    }),
+    answer: async (_q, message) => { replies.push(message); },
+    notifyOwner: async (_chat, message) => { ownerMessages.push(message); }
+  };
+  return { updates, replies, ownerMessages, query, adapters };
+}
+
+test('Telegram callback payload accepts only action UUID and precise action', () => {
+  assert.equal(proposalReviewKeyboard('invalid'), null);
+  const kb = proposalReviewKeyboard(approvalActionId);
+  assert.match(kb.inline_keyboard[0][0].callback_data, /proposal_ok:/);
+  assert.equal(parseProposalReviewCallback('proposal_ok:' + approvalActionId).decision, 'approve');
+  assert.equal(parseProposalReviewCallback('proposal_no:' + approvalActionId).decision, 'reject');
+  assert.equal(parseProposalReviewCallback('social_ok:' + approvalActionId), null);
+});
+
+test('Telegram can never approve missing human-confirmed pricing', async () => {
+  const fixture = proposalCallbackFixture(proposedReview(false));
+  const response = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
+  assert.equal(response.handled, true);
+  assert.equal(response.ok, false);
+  assert.equal(response.reason, 'pricing_or_scope_requires_review');
+  assert.equal(fixture.updates.length, 0);
+  assert.match(fixture.replies[0], /سعرًا مؤكدًا/);
+});
+
+test('Only configured Telegram owner (chat AND user) can approve', async () => {
+  const fixture = proposalCallbackFixture(proposedReview(true));
+  fixture.query.from.id = 987654;
+  const response = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
+  assert.equal(response.reason, 'not_authorized_owner');
+  assert.equal(fixture.updates.length, 0);
+});
+
+test('A confirmed, pending review can be approved exactly once by Telegram owner', async () => {
+  const fixture = proposalCallbackFixture(proposedReview(true));
+  const response = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
+  assert.equal(response.ok, true);
+  assert.equal(response.customer_sent, false);
+  assert.equal(response.decision, 'approve');
+  assert.equal(fixture.updates.length, 1);
+  assert.equal(fixture.updates[0].body.status, 'approved');
+  assert.equal(fixture.updates[0].body.result.telegram_reviewed_by_owner_id, '123456');
+  assert.match(fixture.updates[0].path, /status=eq.pending_approval/);
+});
+
+test('Rejecting from owner cancels draft, never sends a message', async () => {
+  const fixture = proposalCallbackFixture(proposedReview(false));
+  fixture.query.data = 'proposal_no:' + approvalActionId;
+  const response = await handleWhatsAppProposalReviewCallback(fixture.query, fixture.adapters);
+  assert.equal(response.ok, true);
+  assert.equal(response.customer_sent, false);
+  assert.equal(fixture.updates[0].body.status, 'cancelled');
+});
+
+test('Telegram callback cannot approve an action from another source', () => {
+  const action = proposedReview(true);
+  action.payload.source = 'v6_proposal_composer';
+  assert.equal(validateOwnerProposalDecision({ action, decision: 'approve' }).allowed, false);
 });
