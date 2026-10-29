@@ -684,6 +684,8 @@ VIEWS['sales-v6'] = async v => {
           <option value="fixture">تجريبي (fixture)</option>
           <option value="apify_maps">Apify · Google Maps</option>
           <option value="google_places">Google Places</option>
+          <option value="explee">Explee · شركات B2B (يتطلب تفعيل API)</option>
+          <option value="hybrid">مزدوج · Explee + البحث المحلي</option>
           <option value="manual">يدوي</option>
         </select>
         <input id="v6-research-limit" type="number" min="1" max="40" value="10" title="عدد النتائج" placeholder="عدد النتائج" />
