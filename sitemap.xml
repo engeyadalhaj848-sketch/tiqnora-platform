@@ -414,4 +414,6 @@
     <priority>0.90</priority>
     <lastmod>2026-09-26</lastmod>
   </url>
+  <url><loc>https://www.tiqnora.com/services-catalog</loc><changefreq>weekly</changefreq><priority>0.85</priority><lastmod>2026-10-30</lastmod></url>
+  <url><loc>https://www.tiqnora.com/company-profile</loc><changefreq>monthly</changefreq><priority>0.80</priority><lastmod>2026-10-30</lastmod></url>
 </urlset>
